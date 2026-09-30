@@ -17,7 +17,7 @@ export default function EngineConnection(){
     <div className="hero"><h1>Engine Connection</h1><p>Run market data, paper simulation, and low-latency work on your machine. Cloud stores only safe telemetry/results.</p></div>
     {msg&&<div className="card" style={{color:'#fca5a5'}}>{msg}</div>}
     <div className="card"><h2>Local Engine Bridge</h2><button onClick={()=>connect('BTCUSDT')}>Connect Local Engine</button>{' '}<button onClick={()=>connect('BTCUSDT')}>Connect BTC Live Feed</button>{' '}<button onClick={()=>connect('CUSTOM')}>Connect Custom Source</button>
-      <div style={{marginTop:16}}><b>Windows:</b><pre style={{whiteSpace:'pre-wrap'}}>{windowsCommand}</pre><button onClick={()=>copyCommand(windowsCommand)}>Copy Windows command</button><div style={{marginTop:14}}><b>Linux/macOS/Docker:</b><pre style={{whiteSpace:'pre-wrap'}}>{linuxCommand}</pre><button onClick={()=>copyCommand(linuxCommand)}>Copy Linux command</button></div>{token&&<p style={{color:'#94a3b8'}}>Token expires at epoch {token.expires_at_epoch}. Do not paste exchange API keys into QuantOS cloud.</p>}</div>
+      <div style={{marginTop:16}}><b>Windows:</b><pre style={{whiteSpace:'pre-wrap'}}>{windowsCommand}</pre><button onClick={()=>copyCommand(windowsCommand)}>Copy Windows command</button><div style={{marginTop:14}}><b>Linux/macOS/Docker:</b><pre style={{whiteSpace:'pre-wrap'}}>{linuxCommand}</pre><button onClick={()=>copyCommand(linuxCommand)}>Copy Linux command</button></div>{token&&<p style={{color:'#94a3b8'}}>Token expires at epoch {token.expires_at_epoch}. Do not paste exchange API keys into Quanteinstein cloud.</p>}</div>
     </div>
     <div className="card"><h2>Status</h2><div className="grid">
       <div><b>Connected/Disconnected</b><div className="metric">{status?.connected?'BTCUSDT connected':'Disconnected'}</div></div><div><b>Engine token status</b><div className="metric">{token?'Generated':'Not generated'}</div></div>
@@ -27,6 +27,6 @@ export default function EngineConnection(){
       <div><b>Engine version</b><div className="metric">{status?.engine_version||'-'}</div></div>
       <div><b>BTCUSDT latest</b><div className="metric">{status?.latest_price||'-'}</div></div><div><b>Paper session</b><div className="metric">{status?.connected?'local paper ready':'waiting for local engine'}</div></div><div><b>P&L / position / trades</b><div className="metric">{status?.payload?'synced':'-'}</div></div>
       <div><b>p50/p95/p99 internal latency</b><div className="metric">{latency.p50_us||0}/{latency.p95_us||0}/{latency.p99_us||0} us</div></div>
-    </div>{!status?.connected&&<p className="muted">Run the command in C:\Users\Admin\QuantOS CMD.</p>}<p style={{color:'#fbbf24'}}>Paper trading only. Real-money trading is disabled.</p></div>
+    </div>{!status?.connected&&<p className="muted">Run the command in C:\quanteinstein.</p>}<p style={{color:'#fbbf24'}}>Paper trading only. Real-money trading is disabled.</p></div>
   </>;
 }

@@ -147,12 +147,12 @@ export default function StrategyBuilder() {
   const payload = useMemo(
     () => ({
       user_strategy_id: cfg.strategyCode.trim() || "PRISM_BREAKOUT_RETEST",
-      name: "QuantOS Breakout Retest",
+      name: "Quanteinstein Breakout Retest",
       symbols: cfg.symbols.map((s) => s.toUpperCase()),
       timeframe: cfg.timeframe,
       bar_seconds: timeframeToSeconds(cfg.timeframe),
       strategy: {
-        name: "QuantOS Breakout Retest",
+        name: "Quanteinstein Breakout Retest",
         breakout_lookback: cfg.lookback,
         retest_tolerance_pct: Number(cfg.retest),
         min_setup_score: cfg.score,

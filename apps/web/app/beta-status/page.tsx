@@ -39,7 +39,7 @@ const items = [
     title: 'Real-money Trading',
     status: 'Disabled',
     tone: 'white',
-    detail: 'QuantOS remains paper trading and backtesting only. Broker execution is intentionally unavailable.',
+    detail: 'Quanteinstein remains paper trading and backtesting only. Broker execution is intentionally unavailable.',
   },
 ];
 
@@ -53,7 +53,7 @@ export default function BetaStatusPage() {
     <>
       <div className="hero">
         <h1>Beta Status</h1>
-        <p className="muted">Current local beta readiness signals for the QuantOS paper/backtest platform.</p>
+        <p className="muted">Current local beta readiness signals for the Quanteinstein paper/backtest platform.</p>
       </div>
       <section className="card">
         <div className="row">

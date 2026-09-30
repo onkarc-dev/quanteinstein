@@ -253,7 +253,7 @@ export default function Dashboard() {
     <div style={style.page}>
       {/* Header */}
       <div style={style.hero}>
-        <h1 style={style.h1}>QuantOS – Personal Quant Research Paper Trading Platform</h1>
+        <h1 style={style.h1}>Quanteinstein – Personal Quant Research Paper Trading Platform</h1>
         <p style={style.sub}>Research-grade quant strategy builder · Backtesting · Live paper trading only</p>
       </div>
 
@@ -393,7 +393,7 @@ export default function Dashboard() {
       </div>
 
       <div style={style.disclaimer}>
-        QuantOS is research/analytics only. Paper trading and backtests are hypothetical.
+        Quanteinstein is research/analytics only. Paper trading and backtests are hypothetical.
         Not financial advice. No real-money execution. No broker integration.
       </div>
     </div>

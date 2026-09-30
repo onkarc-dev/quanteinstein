@@ -28,7 +28,7 @@ const tooltip:any={background:'#0f172a',border:'1px solid #334155',color:'#e2e8f
 
 export default function Analytics(){
   const [jobs,setJobs]=useState<Job[]>([]),[data,setData]=useState<any>(null),[curve,setCurve]=useState<any[]>([]),[msg,setMsg]=useState('');
-  useEffect(()=>{api('/jobs/').then((r:any)=>setJobs(Array.isArray(r)?r:(r.jobs||[]))).catch(e=>setMsg('Cannot reach QuantOS API. Start the backend and refresh. '+e.message))},[]);
+  useEffect(()=>{api('/jobs/').then((r:any)=>setJobs(Array.isArray(r)?r:(r.jobs||[]))).catch(e=>setMsg('Cannot reach Quanteinstein API. Start the backend and refresh. '+e.message))},[]);
   async function load(id:string){
     if(!id) return; setMsg('Loading analytics...');
     try{ const [r,c]=await Promise.all([api(`/analytics/${id}/r-multiples`), api(`/analytics/${id}/equity-curve`)]); setData(r); setCurve(Array.isArray(c)?c:[]); setMsg(''); }
@@ -50,7 +50,7 @@ export default function Analytics(){
   ].filter(x=>x.value>0);
   const hasTrades=values.length>0;
   return <>
-    <div className="hero"><h1>R-Multiple Analytics</h1><p className="muted">Professional visual report for completed QuantOS backtests and paper sessions.</p></div>
+    <div className="hero"><h1>R-Multiple Analytics</h1><p className="muted">Professional visual report for completed Quanteinstein backtests and paper sessions.</p></div>
     {msg && <div className="card" style={{borderColor:'#7f1d1d', color:msg.startsWith('Cannot')?'#f87171':'#cbd5e1'}}>{msg}</div>}
     <div className="card"><label>Select Job<select onChange={e=>load(e.target.value)} defaultValue=""><option value="">Choose completed job...</option>{jobs.filter(j=>j.status==='completed').map(j=><option key={j.id} value={j.id}>{displayStrategy(j)} - {j.mode} - {parseSymbols(j)} - {j.timeframe||''}</option>)}</select></label></div>
     {data&&<>
@@ -61,7 +61,7 @@ export default function Analytics(){
         <div className="card"><h3>Total Trades</h3><div className="metric">{values.length}</div></div>
       </div>
       {selected&&<p className="muted">Selected: {displayStrategy(selected)} - {parseSymbols(selected)} - {selected.timeframe||'timeframe unknown'}</p>}
-      {!hasTrades&&<div className="card"><h2>No trade analytics yet</h2><p className="muted">This completed job has no trade R-multiple data, so QuantOS cannot draw equity, drawdown, distribution, or win/loss charts honestly.</p></div>}
+      {!hasTrades&&<div className="card"><h2>No trade analytics yet</h2><p className="muted">This completed job has no trade R-multiple data, so Quanteinstein cannot draw equity, drawdown, distribution, or win/loss charts honestly.</p></div>}
       {hasTrades&&<>
         <div className="grid">
           <div className="card"><h2>Equity Curve in R</h2><div style={chartBox}><ResponsiveContainer><AreaChart data={equity}><CartesianGrid stroke="#1e293b"/><XAxis dataKey="trade" stroke="#94a3b8"/><YAxis stroke="#94a3b8"/><Tooltip contentStyle={tooltip}/><Area type="monotone" dataKey="equity_R" stroke="#38bdf8" fill="#0ea5e955"/></AreaChart></ResponsiveContainer></div></div>

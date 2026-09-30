@@ -57,7 +57,7 @@ export default function QuantCoach() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api('/jobs/').then((r:any) => { setJobs(Array.isArray(r) ? r : (r.jobs || [])); setMsg(''); }).catch(e => setMsg('Cannot reach QuantOS API. Start the backend and refresh. Details: ' + e.message));
+    api('/jobs/').then((r:any) => { setJobs(Array.isArray(r) ? r : (r.jobs || [])); setMsg(''); }).catch(e => setMsg('Cannot reach Quanteinstein API. Start the backend and refresh. Details: ' + e.message));
   }, []);
 
   async function load(id: string) {
@@ -87,7 +87,7 @@ export default function QuantCoach() {
   const finalRecommendation = recommendation(pr, healthScore);
 
   return <div style={{ padding: 24 }}>
-    <div className="hero"><h1>Quant Coach Report</h1><p className="muted">Professional performance, risk, trading behavior, and robustness diagnostics for completed QuantOS jobs.</p></div>
+    <div className="hero"><h1>Quant Coach Report</h1><p className="muted">Professional performance, risk, trading behavior, and robustness diagnostics for completed Quanteinstein jobs.</p></div>
     {msg && <div className="card" style={{ borderColor: '#7f1d1d', color: '#f87171' }}>{msg}</div>}
     <div className="card">
       <h2>Select Completed Job</h2>

@@ -167,7 +167,8 @@ export default function LoginForm() {
   return (
     <>
       <div className="hero">
-        <h1>Login / Register</h1>
+        <h1>Quanteinstein</h1>
+        <p className="muted">Trade Daily, Trade Safely</p>
         <p className="muted">Existing users log in with email and password. First-time users register with email OTP.</p>
       </div>
 

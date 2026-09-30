@@ -5,8 +5,8 @@ import AuthProvider from '../components/AuthProvider';
 import ProfileMenu from '../components/ProfileMenu';
 
 export const metadata: Metadata = {
-  title: 'QuantOS — Paper Trading Platform',
-  description: 'Personal Quant Research Paper Trading Platform. Not financial advice.',
+  title: 'Quanteinstein — Trade Daily, Trade Safely',
+  description: 'Quanteinstein paper trading platform. Trade Daily, Trade Safely. Not financial advice.',
 };
 
 const NAV = [
@@ -46,7 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             marginRight: 32,
             letterSpacing: -0.5,
           }}>
-            Quant<span style={{ color: '#8b5cf6' }}>OS</span>
+            Quanteinstein
           </Link>
           <div style={{ display: 'flex', gap: 4, flex: 1, overflowX: 'auto' as const }}>
             {NAV.map(({ href, label }) => (

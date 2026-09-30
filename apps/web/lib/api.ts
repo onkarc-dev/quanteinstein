@@ -17,7 +17,7 @@ const TOKEN_KEY = 'prismflow_token';
 const USER_KEY = 'prismflow_user';
 const REFRESH_KEY = 'quantos_refresh_token';
 
-const GENERIC_SERVICE_ERROR = 'QuantOS service is temporarily unavailable. Please try again shortly.';
+const GENERIC_SERVICE_ERROR = 'Quanteinstein service is temporarily unavailable. Please try again shortly.';
 const GENERIC_REQUEST_ERROR = 'Something went wrong. Please try again.';
 
 export type AuthUser = {
