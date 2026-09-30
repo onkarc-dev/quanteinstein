@@ -6,6 +6,8 @@
     "test": "tsc --noEmit && node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.2",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
