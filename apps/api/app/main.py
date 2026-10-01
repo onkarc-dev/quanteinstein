@@ -25,14 +25,11 @@ _request_count = 0
 _error_count = 0
 _rate_limit_hits: dict[str, list[float]] = {}
 
-if not settings.is_postgres():
-    init_db()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
-    # Initialize database schema
+    # Initialize database schema once on startup
     init_db()
     # Wire up best available job queue
     jq_module.queue = build_queue()
@@ -71,9 +68,17 @@ async def add_process_time_header(request: Request, call_next):
         proto = request.headers.get("x-forwarded-proto", request.url.scheme)
         if proto != "https" and request.url.hostname not in {"127.0.0.1", "localhost"}:
             raise HTTPException(status_code=403, detail="HTTPS is required")
-    client_host = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded and settings.is_prod:
+        client_host = forwarded.split(",")[0].strip()
+    else:
+        client_host = request.client.host if request.client else "unknown"
     now_ts = time.time()
     if settings.rate_limit_per_minute > 0 and not request.url.path.startswith("/health"):
+        if len(_rate_limit_hits) > 10000:
+            stale_keys = [k for k, v in _rate_limit_hits.items() if not v or (now_ts - v[-1] > 60)]
+            for k in stale_keys:
+                _rate_limit_hits.pop(k, None)
         recent = [t for t in _rate_limit_hits.get(client_host, []) if now_ts - t < 60]
         if len(recent) >= settings.rate_limit_per_minute:
             raise HTTPException(status_code=429, detail="Rate limit exceeded")

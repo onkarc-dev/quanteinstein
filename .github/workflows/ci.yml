@@ -2,7 +2,7 @@ name: QuantOS CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, improvements/** ]
   pull_request:
     branches: [ main ]
 
@@ -58,7 +58,7 @@ jobs:
         run: cat /tmp/quantos-api.log || true
 
   frontend:
-    name: Frontend build
+    name: Frontend build and test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -82,8 +82,11 @@ jobs:
           NEXT_PUBLIC_API_BASE: http://localhost:8000
         run: npm run build
 
+      - name: Run frontend tests
+        run: npm test
+
   cpp:
-    name: C++ build
+    name: C++ build and test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -102,6 +105,12 @@ jobs:
 
       - name: Build live paper engine
         run: cmake --build build --target prism_live_paper_trading -- -j$(nproc)
+
+      - name: Build C++ unit tests
+        run: cmake --build build --target l2_order_book_tests l3_order_book_tests matching_engine_tests paper_broker_tests exchange_simulator_tests event_store_tests -- -j$(nproc)
+
+      - name: Run C++ unit tests
+        run: ctest --test-dir build --output-on-failure
 
   docker:
     name: Docker build sanity

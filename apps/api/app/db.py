@@ -37,16 +37,10 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def hash_password(password: str) -> str:
-    """Hash a password using stdlib PBKDF2-SHA256.
-
-    The salt is derived from the stable application secret and password so legacy
-    unit tests and idempotent OTP-registration retries remain deterministic,
-    while still using a slow PBKDF2 digest and preserving verification support for
-    legacy single-pass SHA-256 hashes.
-    """
-    pepper = settings.secret_key.encode("utf-8")
-    salt = hmac.new(pepper, password.encode("utf-8"), hashlib.sha256).digest()[:16]
+def hash_password(password: str, salt: bytes | None = None) -> str:
+    """Hash a password using stdlib PBKDF2-SHA256 with a cryptographically secure random salt."""
+    if salt is None:
+        salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
     return "$".join(
         [
@@ -71,7 +65,21 @@ def verify_password(password: str, stored_hash: str) -> bool:
             return hmac.compare_digest(actual, expected)
         except Exception:
             return False
-    # Backward compatibility for pre-hardening SHA-256 hashes.
+    # Backward compatibility for legacy deterministic or pre-hardening SHA-256 hashes.
+    try:
+        pepper = settings.secret_key.encode("utf-8")
+        legacy_salt = hmac.new(pepper, password.encode("utf-8"), hashlib.sha256).digest()[:16]
+        legacy_digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), legacy_salt, PBKDF2_ITERATIONS)
+        legacy_pbkdf2 = "$".join([
+            PBKDF2_PREFIX,
+            str(PBKDF2_ITERATIONS),
+            base64.b64encode(legacy_salt).decode("ascii"),
+            base64.b64encode(legacy_digest).decode("ascii"),
+        ])
+        if hmac.compare_digest(legacy_pbkdf2, stored_hash):
+            return True
+    except Exception:
+        pass
     legacy = hashlib.sha256(password.encode("utf-8")).hexdigest()
     return hmac.compare_digest(legacy, stored_hash)
 
