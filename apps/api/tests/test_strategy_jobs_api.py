@@ -20,7 +20,10 @@ from app.main import app
 class StrategyJobsApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
-        _tmp_dir.cleanup()
+        try:
+            _tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def setUp(self):
         self.client = TestClient(app)
