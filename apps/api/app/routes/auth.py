@@ -23,6 +23,8 @@ security_logger = logging.getLogger("quantos.security")
 _LOGIN_ATTEMPTS: Dict[str, list[float]] = {}
 _LOGIN_LIMIT = 5
 _LOGIN_WINDOW_SECONDS = 15 * 60
+_OTP_ATTEMPTS: Dict[str, int] = {}
+_MAX_OTP_ATTEMPTS = 5
 _REDIS_CLIENT: Any = None
 _REDIS_UNAVAILABLE = False
 
@@ -63,8 +65,10 @@ def _p() -> str:
 def _client_ip(request: Request | None) -> str:
     if request is None:
         return ""
-    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    return forwarded or (request.client.host if request.client else "unknown")
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded and settings.is_prod:
+        return forwarded.split(",", 1)[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _hash_email(email: str) -> str:
@@ -281,6 +285,7 @@ def request_registration_otp(payload: RegisterRequest, request: Request):
             raise HTTPException(status_code=409, detail="This email id is already registered. Go for login.")
         p = _p()
         otp = _generate_otp()
+        _OTP_ATTEMPTS.pop(email, None)
         if settings.is_postgres():
             conn.execute(
                 """
@@ -323,11 +328,22 @@ def verify_registration(payload: VerifyRegisterRequest, request: Request):
         if _is_expired(rec.get("expires_at", "")):
             conn.execute(f"DELETE FROM registration_otps WHERE email={p}", (email,))
             conn.commit()
+            _OTP_ATTEMPTS.pop(email, None)
             _audit("registration_verify", email=email, request=request, outcome="otp_expired")
             raise HTTPException(status_code=400, detail="OTP expired. Please generate a new OTP.")
         if str(rec.get("otp_code")) != otp:
+            attempts = _OTP_ATTEMPTS.get(email, 0) + 1
+            _OTP_ATTEMPTS[email] = attempts
+            if attempts >= _MAX_OTP_ATTEMPTS:
+                conn.execute(f"DELETE FROM registration_otps WHERE email={p}", (email,))
+                conn.commit()
+                _OTP_ATTEMPTS.pop(email, None)
+                _audit("registration_verify", email=email, request=request, outcome="otp_max_attempts_exceeded")
+                raise HTTPException(status_code=400, detail="Too many failed attempts. This OTP has been invalidated. Please generate a new OTP.")
             _audit("registration_verify", email=email, request=request, outcome="invalid_otp")
-            raise HTTPException(status_code=400, detail="Invalid OTP")
+            remaining = _MAX_OTP_ATTEMPTS - attempts
+            raise HTTPException(status_code=400, detail=f"Invalid OTP. {remaining} attempt(s) remaining.")
+        _OTP_ATTEMPTS.pop(email, None)
         user_id = __import__('uuid').uuid4().hex
         try:
             conn.execute(f"INSERT INTO users(id,email,name,password_hash,onboarding_completed,created_at) VALUES({p},{p},{p},{p},{p},{p})", (user_id, email, rec.get("name", ""), rec["password_hash"], 0, now()))
@@ -406,6 +422,7 @@ def request_password_reset(payload: PasswordResetRequest, request: Request):
             return {"message": "If that email exists, a reset OTP has been sent.", "email_sent": False}
         otp = _generate_otp()
         p = _p()
+        _OTP_ATTEMPTS.pop(email, None)
         if settings.is_postgres():
             conn.execute("INSERT INTO password_reset_otps(email,otp_code,expires_at,created_at) VALUES(%s,%s,%s,%s) ON CONFLICT(email) DO UPDATE SET otp_code=EXCLUDED.otp_code,expires_at=EXCLUDED.expires_at,created_at=EXCLUDED.created_at", (email, otp, _otp_expiry(), now()))
         else:
@@ -432,9 +449,25 @@ def verify_password_reset(payload: PasswordResetVerify, request: Request):
             _audit("password_reset_verify", email=email, request=request, outcome="otp_not_found")
             raise HTTPException(status_code=400, detail="OTP not found. Please request a new reset OTP.")
         rec = row_to_dict(row)
-        if _is_expired(rec.get("expires_at", "")) or str(rec.get("otp_code")) != payload.otp.strip():
-            _audit("password_reset_verify", email=email, request=request, outcome="invalid_or_expired_otp")
-            raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+        if _is_expired(rec.get("expires_at", "")):
+            conn.execute(f"DELETE FROM password_reset_otps WHERE email={p}", (email,))
+            conn.commit()
+            _OTP_ATTEMPTS.pop(email, None)
+            _audit("password_reset_verify", email=email, request=request, outcome="otp_expired")
+            raise HTTPException(status_code=400, detail="OTP expired. Please request a new reset OTP.")
+        if str(rec.get("otp_code")) != payload.otp.strip():
+            attempts = _OTP_ATTEMPTS.get(email, 0) + 1
+            _OTP_ATTEMPTS[email] = attempts
+            if attempts >= _MAX_OTP_ATTEMPTS:
+                conn.execute(f"DELETE FROM password_reset_otps WHERE email={p}", (email,))
+                conn.commit()
+                _OTP_ATTEMPTS.pop(email, None)
+                _audit("password_reset_verify", email=email, request=request, outcome="max_attempts_exceeded")
+                raise HTTPException(status_code=400, detail="Too many failed attempts. This OTP has been invalidated. Please request a new reset OTP.")
+            _audit("password_reset_verify", email=email, request=request, outcome="invalid_otp")
+            remaining = _MAX_OTP_ATTEMPTS - attempts
+            raise HTTPException(status_code=400, detail=f"Invalid OTP. {remaining} attempt(s) remaining.")
+        _OTP_ATTEMPTS.pop(email, None)
         conn.execute(f"UPDATE users SET password_hash={p} WHERE email={p}", (_ph(payload.new_password), email))
         conn.execute(f"DELETE FROM password_reset_otps WHERE email={p}", (email,))
         conn.commit()

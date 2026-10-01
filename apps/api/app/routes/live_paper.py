@@ -34,6 +34,24 @@ def _invalidate_status_cache(user_id: str) -> None:
     _STATUS_CACHE.pop(user_id, None)
 
 
+def _safe_data_path(input_data: str) -> Path:
+    p = Path(input_data)
+    if not p.is_absolute():
+        resolved = (settings.project_root / p).resolve()
+    else:
+        resolved = p.resolve()
+    allowed_dirs = [
+        (settings.project_root / "data").resolve(),
+        settings.outputs_dir.resolve(),
+    ]
+    if not any(resolved == d or d in resolved.parents for d in allowed_dirs):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: file path must be within authorized data or outputs directories.",
+        )
+    return resolved
+
+
 @router.post('/start')
 def start_live_paper(payload: dict = Body(default={}), user=Depends(current_user)):
     payload = payload or {}
@@ -91,10 +109,8 @@ def wallet_live_paper(user=Depends(current_user)):
 
 
 @router.get('/replay')
-def replay(input_data: str = 'data/sample_market_data.csv', max_rows: int = 250):
-    p = Path(input_data)
-    if not p.is_absolute():
-        p = settings.project_root / p
+def replay(input_data: str = 'data/sample_market_data.csv', max_rows: int = 250, user=Depends(current_user)):
+    p = _safe_data_path(input_data)
     validation = validate_market_csv(p)
     return {
         'mode': 'csv-replay-validation-only',
@@ -106,8 +122,6 @@ def replay(input_data: str = 'data/sample_market_data.csv', max_rows: int = 250)
 
 
 @router.get('/validate-data')
-def validate_data(input_data: str = 'data/sample_market_data.csv'):
-    p = Path(input_data)
-    if not p.is_absolute():
-        p = settings.project_root / p
+def validate_data(input_data: str = 'data/sample_market_data.csv', user=Depends(current_user)):
+    p = _safe_data_path(input_data)
     return validate_market_csv(p)

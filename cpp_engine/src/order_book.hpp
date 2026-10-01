@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -75,10 +76,7 @@ struct L3Update {
 
 class L2OrderBook {
 public:
-    explicit L2OrderBook(std::size_t reserved_levels = 4096) {
-        bids_.reserve(reserved_levels);
-        asks_.reserve(reserved_levels);
-    }
+    explicit L2OrderBook(std::size_t /* reserved_levels */ = 4096) {}
 
     L2OrderBook(const L2OrderBook&) = delete;
     L2OrderBook& operator=(const L2OrderBook&) = delete;
@@ -137,12 +135,12 @@ public:
         s.best_ask = best_ask();
         s.spread = (s.best_bid > 0.0 && s.best_ask > 0.0) ? s.best_ask - s.best_bid : 0.0;
         s.mid_price = (s.best_bid > 0.0 && s.best_ask > 0.0) ? (s.best_bid + s.best_ask) * 0.5 : 0.0;
-        s.bid_depth = side_depth(bids_, true, depth_levels);
-        s.ask_depth = side_depth(asks_, false, depth_levels);
+        
+        compute_side_metrics(bids_, depth_levels, s.bid_depth, s.vwap_bid);
+        compute_side_metrics(asks_, depth_levels, s.ask_depth, s.vwap_ask);
+        
         const double total_depth = s.bid_depth + s.ask_depth;
         s.depth_imbalance = total_depth > 0.0 ? (s.bid_depth - s.ask_depth) / total_depth : 0.0;
-        s.vwap_bid = side_vwap(bids_, true, depth_levels);
-        s.vwap_ask = side_vwap(asks_, false, depth_levels);
         s.sequence = last_sequence_;
         s.updates = updates_;
         s.invalid_updates = invalid_updates_;
@@ -151,27 +149,40 @@ public:
         return s;
     }
 
-    double best_bid() const { return best_price(bids_, true); }
-    double best_ask() const { return best_price(asks_, false); }
+    inline double best_bid() const noexcept {
+        return bids_.empty() ? 0.0 : unpx(bids_.begin()->first);
+    }
+
+    inline double best_ask() const noexcept {
+        return asks_.empty() ? 0.0 : unpx(asks_.begin()->first);
+    }
+
     uint64_t sequence() const noexcept { return last_sequence_; }
     uint64_t updates() const noexcept { return updates_; }
     uint64_t invalid_updates() const noexcept { return invalid_updates_; }
     std::size_t bid_levels() const noexcept { return bids_.size(); }
     std::size_t ask_levels() const noexcept { return asks_.size(); }
 
+    inline bool is_crossed() const noexcept {
+        if (bids_.empty() || asks_.empty()) return false;
+        return bids_.begin()->first >= asks_.begin()->first;
+    }
+
 private:
-    using Levels = std::unordered_map<int64_t, double>;
+    using BidLevels = std::map<int64_t, double, std::greater<int64_t>>;
+    using AskLevels = std::map<int64_t, double, std::less<int64_t>>;
     static constexpr double kScale = 100000000.0;
 
-    static int64_t px(double price) noexcept {
+    static inline int64_t px(double price) noexcept {
         return static_cast<int64_t>(price * kScale + (price >= 0.0 ? 0.5 : -0.5));
     }
 
-    static double unpx(int64_t price) noexcept {
+    static inline double unpx(int64_t price) noexcept {
         return static_cast<double>(price) / kScale;
     }
 
-    static void upsert_level(Levels& levels, const PriceLevelUpdate& update) {
+    template <typename MapType>
+    static inline void upsert_level(MapType& levels, const PriceLevelUpdate& update) {
         const int64_t key = px(update.price);
         if (key <= 0) return;
         if (update.quantity <= 0.0) {
@@ -181,51 +192,21 @@ private:
         }
     }
 
-    static double best_price(const Levels& levels, bool bid) {
-        if (levels.empty()) return 0.0;
-        auto it = bid
-            ? std::max_element(levels.begin(), levels.end(), [](const auto& a, const auto& b) { return a.first < b.first; })
-            : std::min_element(levels.begin(), levels.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        return it == levels.end() ? 0.0 : unpx(it->first);
-    }
-
-    static std::vector<std::pair<int64_t, double>> sorted_side(const Levels& levels, bool bid, std::size_t n) {
-        std::vector<std::pair<int64_t, double>> out;
-        out.reserve(std::min(n, levels.size()));
-        for (const auto& kv : levels) out.push_back(kv);
-        if (bid) {
-            std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-        } else {
-            std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        }
-        if (out.size() > n) out.resize(n);
-        return out;
-    }
-
-    static double side_depth(const Levels& levels, bool bid, std::size_t n) {
-        double qty = 0.0;
-        for (const auto& kv : sorted_side(levels, bid, n)) qty += kv.second;
-        return qty;
-    }
-
-    static double side_vwap(const Levels& levels, bool bid, std::size_t n) {
+    template <typename MapType>
+    static inline void compute_side_metrics(const MapType& levels, std::size_t n, double& depth, double& vwap) noexcept {
+        depth = 0.0;
         double notional = 0.0;
-        double qty = 0.0;
-        for (const auto& kv : sorted_side(levels, bid, n)) {
-            notional += unpx(kv.first) * kv.second;
-            qty += kv.second;
+        std::size_t count = 0;
+        for (auto it = levels.begin(); it != levels.end() && count < n; ++it, ++count) {
+            const double qty = it->second;
+            depth += qty;
+            notional += unpx(it->first) * qty;
         }
-        return qty > 0.0 ? notional / qty : 0.0;
+        vwap = depth > 0.0 ? notional / depth : 0.0;
     }
 
-    bool is_crossed() const {
-        const double bid = best_bid();
-        const double ask = best_ask();
-        return bid > 0.0 && ask > 0.0 && bid >= ask;
-    }
-
-    Levels bids_;
-    Levels asks_;
+    BidLevels bids_;
+    AskLevels asks_;
     uint64_t last_sequence_ = 0;
     uint64_t updates_ = 0;
     uint64_t invalid_updates_ = 0;
@@ -261,7 +242,7 @@ public:
         order.timestamp_ns = update.timestamp_ns;
         order.side = update.side;
         order.exchange_sequence = update.exchange_sequence;
-        order.queue_position = next_queue_position(update.side, update.price);
+        order.queue_position = ++queue_counters_[queue_key(update.side, update.price)];
         orders_[order.order_id] = order;
         ++updates_;
         return true;
@@ -278,7 +259,9 @@ public:
         order.timestamp_ns = update.timestamp_ns;
         order.side = update.side;
         order.exchange_sequence = update.exchange_sequence;
-        if (price_or_side_changed) order.queue_position = next_queue_position(update.side, update.price);
+        if (price_or_side_changed) {
+            order.queue_position = ++queue_counters_[queue_key(update.side, update.price)];
+        }
         ++updates_;
         return true;
     }
@@ -303,7 +286,7 @@ public:
     }
 
     BookSnapshot aggregate(std::size_t depth_levels = 10) const {
-        L2OrderBook tmp(std::max<std::size_t>(orders_.size(), 16));
+        L2OrderBook tmp;
         L2Update snapshot;
         for (const auto& kv : orders_) {
             const L3Order& o = kv.second;
@@ -318,7 +301,9 @@ public:
                 snapshot = L2Update{};
             }
         }
-        tmp.apply_incremental(snapshot, false);
+        if (snapshot.bid_count > 0 || snapshot.ask_count > 0) {
+            tmp.apply_incremental(snapshot, false);
+        }
         return tmp.snapshot(depth_levels);
     }
 
@@ -331,6 +316,11 @@ public:
     uint64_t updates() const noexcept { return updates_; }
 
 private:
+    static inline uint64_t queue_key(BookSide side, double price) noexcept {
+        const uint64_t p = static_cast<uint64_t>(price * 100000000.0);
+        return (static_cast<uint64_t>(side) << 63) | (p & 0x7FFFFFFFFFFFFFFFULL);
+    }
+
     static void append_level(std::array<PriceLevelUpdate, L2Update::kMaxLevelsPerMessage>& levels,
                              std::size_t& count,
                              const PriceLevelUpdate& value) {
@@ -343,16 +333,8 @@ private:
         if (count < levels.size()) levels[count++] = value;
     }
 
-    uint32_t next_queue_position(BookSide side, double price) const {
-        uint32_t pos = 0;
-        for (const auto& kv : orders_) {
-            const L3Order& o = kv.second;
-            if (o.side == side && o.price == price) ++pos;
-        }
-        return pos;
-    }
-
     std::unordered_map<uint64_t, L3Order> orders_;
+    std::unordered_map<uint64_t, uint32_t> queue_counters_;
     uint64_t updates_ = 0;
 };
 

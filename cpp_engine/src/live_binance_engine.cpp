@@ -137,6 +137,7 @@ int main(int argc, char** argv) {
     TradeManager trade_manager("trade_log.csv");
     std::atomic<uint64_t> processed{0}, parsed{0}, parse_dropped{0}, book_updates{0}, book_parse_dropped{0};
     LatencyStats engine_latency_stats, ingest_latency_stats;
+    static constexpr double kPriceScale = 100000000.0; // 8 decimal places (Satoshi precision)
     std::atomic<uint64_t> last_price_scaled{0}, prism_signals{0};
     std::atomic<double> best_bid{0.0}, best_ask{0.0}, mid_price{0.0}, spread{0.0}, imbalance{0.0};
     BinanceClient client(symbol, true);
@@ -194,7 +195,7 @@ int main(int argc, char** argv) {
                 }
                 previous_signal_state = current_signal_state;
                 processed.fetch_add(1, std::memory_order_relaxed);
-                last_price_scaled.store(static_cast<uint64_t>(p.price * 100.0), std::memory_order_relaxed);
+                last_price_scaled.store(static_cast<uint64_t>(p.price * kPriceScale), std::memory_order_relaxed);
                 const uint64_t end_ns = now_ns();
                 engine_latency_stats.observe(end_ns - start);
                 if (p.ingest_ts_ns > 0 && end_ns > p.ingest_ts_ns) ingest_latency_stats.observe(end_ns - p.ingest_ts_ns);
@@ -213,7 +214,7 @@ int main(int argc, char** argv) {
         const uint64_t now_processed = processed.load(std::memory_order_relaxed);
         const uint64_t per_sec = (now_processed - last_processed) / 2;
         last_processed = now_processed;
-        const double last_price = static_cast<double>(last_price_scaled.load(std::memory_order_relaxed)) / 100.0;
+        const double last_price = static_cast<double>(last_price_scaled.load(std::memory_order_relaxed)) / kPriceScale;
         std::cout << "live_rate_msg_s=" << per_sec
                   << " processed=" << now_processed
                   << " ws_received=" << client.received()
@@ -247,11 +248,12 @@ int main(int argc, char** argv) {
     if (engine_thread.joinable()) engine_thread.join();
 
     const BookSnapshot final_book = l2_book.snapshot(10);
-    trade_manager.write_summary_json("performance_summary.json");
     write_system_score_json("system_score.json", client, trade_manager,
-                            processed.load(std::memory_order_relaxed), parsed.load(std::memory_order_relaxed),
-                            parse_dropped.load(std::memory_order_relaxed), engine_latency_stats, ingest_latency_stats,
-                            final_book);
-    std::cout << "Stopped. Generated files: trade_log.csv, performance_summary.json, system_score.json\n";
+                            processed.load(std::memory_order_relaxed),
+                            parsed.load(std::memory_order_relaxed),
+                            parse_dropped.load(std::memory_order_relaxed),
+                            engine_latency_stats, ingest_latency_stats, final_book);
+
+    trade_manager.write_summary_json("backtest_summary.json");
     return 0;
 }

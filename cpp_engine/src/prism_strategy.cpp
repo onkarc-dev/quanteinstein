@@ -48,8 +48,10 @@ void PrismStrategy::detect_breakout(const Bar& bar) {
         breakout_level_ = previous_high;
         breakout_bar_index_ = bars_processed_;
         state_ = State::BREAKOUT;
-        std::cout << "[BREAKOUT_FOUND] close=" << bar.close << " level=" << breakout_level_
-                  << " bar_index=" << breakout_bar_index_ << "\n";
+        if (DEBUG_RETEST_LOGS) {
+            std::cout << "[BREAKOUT_FOUND] close=" << bar.close << " level=" << breakout_level_
+                      << " bar_index=" << breakout_bar_index_ << "\n";
+        }
     }
 }
 
@@ -58,7 +60,9 @@ void PrismStrategy::detect_retest(const Bar& bar) {
     const uint64_t bars_since_breakout = bars_processed_ - breakout_bar_index_;
     if (bars_since_breakout > static_cast<uint64_t>(std::max(1, config_.max_retest_bars))) {
         state_ = State::IDLE; breakout_level_ = 0.0; breakout_bar_index_ = 0;
-        std::cout << "[RETEST_EXPIRED] bars_since_breakout=" << bars_since_breakout << "\n";
+        if (DEBUG_RETEST_LOGS) {
+            std::cout << "[RETEST_EXPIRED] bars_since_breakout=" << bars_since_breakout << "\n";
+        }
         return;
     }
     if (bars_processed_ - last_signal_bar_ < static_cast<uint64_t>(std::max(0, config_.signal_cooldown_bars))) {
@@ -101,13 +105,9 @@ void PrismStrategy::detect_retest(const Bar& bar) {
     breakout_bar_index_ = 0;
 }
 
-
 void PrismStrategy::update_trend_filter(const Bar& bar) {
     if (!config_.trend_filter.use_trend_filter) return;
     ++bars_since_htf_close_;
-    // Live strategy does not know the source bar timeframe, so default to one update
-    // per received bar when no aggregation can be inferred. The backtest engine uses
-    // exact bar_seconds from Strategy Builder for the research-grade filter.
     const uint64_t factor = 1;
     if (bars_since_htf_close_ < factor) return;
     bars_since_htf_close_ = 0;
@@ -140,8 +140,22 @@ double PrismStrategy::calculate_score(const Bar& bar) {
         if (close_position >= 0.75) score += 1.0;
     }
     if (bar.close >= bar.open) score += 2.0;
-    score += 1.5; // volume placeholder kept deterministic for existing PRISM output style
-    score += 2.0; // regime/interaction placeholder
+
+    const double avg_vol = average_volume(20);
+    if (avg_vol > 0.0 && bar.volume > 0.0) {
+        const double vol_ratio = bar.volume / avg_vol;
+        if (vol_ratio >= 1.25) score += 1.5;
+        else if (vol_ratio >= 1.0) score += 1.0;
+        else score += 0.5;
+    } else {
+        score += 1.0;
+    }
+
+    if (trend_filter_allows_long()) {
+        score += 2.0;
+    } else {
+        score += 0.5;
+    }
     return std::min(score, 10.0);
 }
 

@@ -77,9 +77,11 @@ class TestDB(unittest.TestCase):
     def test_hash_password_consistency(self):
         h1 = db.hash_password("test123")
         h2 = db.hash_password("test123")
-        self.assertEqual(h1, h2)
-        h3 = db.hash_password("different")
-        self.assertNotEqual(h1, h3)
+        self.assertTrue(db.verify_password("test123", h1))
+        self.assertTrue(db.verify_password("test123", h2))
+        self.assertFalse(db.verify_password("wrong", h1))
+        # Unique salts ensure distinct hash representations
+        self.assertNotEqual(h1, h2)
 
     def test_now_returns_iso_string(self):
         n = db.now()
