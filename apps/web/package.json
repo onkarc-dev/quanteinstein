@@ -3,14 +3,18 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsc --noEmit && node --experimental-strip-types --test tests/*.test.ts"
+    "test": "tsc --noEmit && node --experimental-strip-types --test tests/*.test.ts",
+    "postinstall": "prisma skills sync || exit 0",
+    "contract:emit": "prisma contract emit"
   },
   "dependencies": {
+    "@prisma/orm-postgres": "^8.0.0-rc.14",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "dotenv": "^18.0.5",
     "lightweight-charts": "^5.2.0",
     "next": "latest",
     "react": "latest",
@@ -19,6 +23,9 @@
     "recharts": "latest"
   },
   "devDependencies": {
+    "@prisma/cli-engine": "^0.6.2",
+    "prisma": "^8.0.0-rc.19",
     "typescript": "latest"
-  }
+  },
+  "type": "module"
 }
