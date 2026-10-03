@@ -15,17 +15,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function checkAuth() {
-      const token = getToken();
       const isPublic = PUBLIC_PATHS.has(pathname);
-
-      if (!token) {
-        if (!isPublic) {
-          router.replace('/login');
-          return;
-        }
-        if (!cancelled) setReady(true);
-        return;
-      }
 
       try {
         const user = await restoreSession();

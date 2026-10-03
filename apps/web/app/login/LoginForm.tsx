@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ApiError, api, formatApiError, saveAuth } from '../../lib/api';
+import { supabase } from '../../lib/supabaseClient';
 
 export default function LoginForm() {
   const searchParams = useSearchParams();
@@ -29,6 +30,56 @@ export default function LoginForm() {
     }
     setBusy(true);
     setMsg('Logging in…');
+
+    // 1. Supabase Auth (24/7 direct authentication)
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+
+        if (!error && data.session && data.user) {
+          saveAuth({
+            token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+            user: {
+              id: data.user.id,
+              email: data.user.email || email.trim(),
+              name: (data.user.user_metadata?.name as string) || (data.user.user_metadata?.full_name as string) || email.trim().split('@')[0],
+              onboarding_completed: true,
+            },
+          });
+          setMsg('Login successful. Redirecting…');
+          window.location.href = '/dashboard';
+          return;
+        }
+
+        if (error) {
+          // If Supabase has user/password error, attempt fallback to legacy API in case account was created on old engine
+          try {
+            const legacyData = await api('/auth/login', {
+              method: 'POST',
+              body: JSON.stringify({ email: email.trim(), password }),
+            });
+            saveAuth(legacyData);
+            setMsg('Login successful. Redirecting…');
+            window.location.href = '/dashboard';
+            return;
+          } catch {
+            setMsg('Login failed: ' + error.message);
+            setBusy(false);
+            return;
+          }
+        }
+      } catch (err: any) {
+        setMsg('Login failed: ' + (err?.message || 'Authentication error'));
+        setBusy(false);
+        return;
+      }
+    }
+
+    // 2. Legacy API fallback
     try {
       const data = await api('/auth/login', {
         method: 'POST',
@@ -58,6 +109,59 @@ export default function LoginForm() {
     }
     setBusy(true);
     setMsg(otpRequested ? 'Resending OTP…' : 'Generating OTP…');
+
+    // 1. Supabase Auth signup
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              name: name.trim(),
+              full_name: name.trim(),
+            },
+          },
+        });
+
+        if (error) {
+          if (error.message.toLowerCase().includes('already registered')) {
+            window.alert('This email id is already registered. Please log in instead.');
+          }
+          setMsg('Registration failed: ' + error.message);
+          setBusy(false);
+          return;
+        }
+
+        // Direct session return if email confirmation is disabled/auto-confirmed
+        if (data.session && data.user) {
+          saveAuth({
+            token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+            user: {
+              id: data.user.id,
+              email: data.user.email || email.trim(),
+              name: name.trim(),
+              onboarding_completed: true,
+            },
+          });
+          setMsg('Registration complete. Redirecting to dashboard…');
+          window.location.href = '/dashboard';
+          return;
+        }
+
+        setOtpRequested(true);
+        setMsg('Verification code sent to ' + email.trim() + '. Enter the 6-digit code below and click Verify OTP & Register.');
+        setBusy(false);
+        return;
+      } catch (err: any) {
+        setMsg('Registration error: ' + (err?.message || 'Failed to sign up'));
+        setBusy(false);
+        return;
+      }
+    }
+
+    // 2. Legacy API fallback
     try {
       const data = await api('/auth/register/request-otp', {
         method: 'POST',
@@ -87,7 +191,29 @@ export default function LoginForm() {
       return;
     }
     setBusy(true);
-    setMsg(resetRequested ? 'Resending password reset OTP…' : 'Sending password reset OTP…');
+    setMsg(resetRequested ? 'Resending password reset code…' : 'Sending password reset code…');
+
+    // 1. Supabase Auth password reset
+    if (supabase) {
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+        if (error) {
+          setMsg('Password reset failed: ' + error.message);
+          setBusy(false);
+          return;
+        }
+        setResetRequested(true);
+        setMsg('Password reset code sent to your email. Enter the code and your new password below.');
+        setBusy(false);
+        return;
+      } catch (err: any) {
+        setMsg('Password reset error: ' + (err?.message || 'Failed to request reset'));
+        setBusy(false);
+        return;
+      }
+    }
+
+    // 2. Legacy API fallback
     try {
       const data = await api('/auth/password-reset/request-otp', {
         method: 'POST',
@@ -118,6 +244,43 @@ export default function LoginForm() {
     }
     setBusy(true);
     setMsg('Updating password…');
+
+    // 1. Supabase Auth verify OTP + update user password
+    if (supabase) {
+      try {
+        const { error: otpError } = await supabase.auth.verifyOtp({
+          email: email.trim(),
+          token: resetOtp.trim(),
+          type: 'recovery',
+        });
+        if (otpError) {
+          setMsg('Invalid reset code: ' + otpError.message);
+          setBusy(false);
+          return;
+        }
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+        if (updateError) {
+          setMsg('Failed to update password: ' + updateError.message);
+          setBusy(false);
+          return;
+        }
+        setPassword(newPassword);
+        setResetRequested(false);
+        setNewPassword('');
+        setResetOtp('');
+        setMsg('Password updated successfully! You can now log in with your new password.');
+        setBusy(false);
+        return;
+      } catch (err: any) {
+        setMsg('Password reset error: ' + (err?.message || 'Failed to update password'));
+        setBusy(false);
+        return;
+      }
+    }
+
+    // 2. Legacy API fallback
     try {
       const data = await api('/auth/password-reset/verify', {
         method: 'POST',
@@ -146,6 +309,83 @@ export default function LoginForm() {
     }
     setBusy(true);
     setMsg('Verifying OTP…');
+
+    // 1. Supabase Auth verify OTP
+    if (supabase) {
+      try {
+        let { data, error } = await supabase.auth.verifyOtp({
+          email: email.trim(),
+          token: otp.trim(),
+          type: 'signup',
+        });
+
+        if (error) {
+          const secondAttempt = await supabase.auth.verifyOtp({
+            email: email.trim(),
+            token: otp.trim(),
+            type: 'email',
+          });
+          if (!secondAttempt.error) {
+            data = secondAttempt.data;
+            error = null;
+          }
+        }
+
+        if (error) {
+          setMsg('OTP verification failed: ' + error.message);
+          setBusy(false);
+          return;
+        }
+
+        if (data?.session && data?.user) {
+          saveAuth({
+            token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+            user: {
+              id: data.user.id,
+              email: data.user.email || email.trim(),
+              name: (data.user.user_metadata?.name as string) || name.trim() || email.trim().split('@')[0],
+              onboarding_completed: true,
+            },
+          });
+          setMsg('Registration complete. Redirecting…');
+          window.location.href = '/dashboard';
+          return;
+        }
+
+        if (password) {
+          const signInRes = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
+          if (signInRes.data.session && signInRes.data.user) {
+            saveAuth({
+              token: signInRes.data.session.access_token,
+              refresh_token: signInRes.data.session.refresh_token,
+              user: {
+                id: signInRes.data.user.id,
+                email: signInRes.data.user.email || email.trim(),
+                name: (signInRes.data.user.user_metadata?.name as string) || name.trim() || email.trim().split('@')[0],
+                onboarding_completed: true,
+              },
+            });
+            setMsg('Registration complete. Redirecting…');
+            window.location.href = '/dashboard';
+            return;
+          }
+        }
+
+        setMsg('Email verified successfully! You can now log in above.');
+        setBusy(false);
+        return;
+      } catch (err: any) {
+        setMsg('OTP verification error: ' + (err?.message || 'Failed to verify OTP'));
+        setBusy(false);
+        return;
+      }
+    }
+
+    // 2. Legacy API fallback
     try {
       const data = await api('/auth/register/verify', {
         method: 'POST',

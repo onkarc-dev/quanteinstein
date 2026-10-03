@@ -188,8 +188,8 @@ export default function Dashboard() {
         const me = await fetchMe();
         setUser(me);
         const [jobsRes, strategiesRes, liveRes] = await Promise.all([
-          api('/jobs/'),
-          api('/strategies'),
+          api('/jobs/').catch(() => []),
+          api('/strategies').catch(() => []),
           api('/live-paper/status').catch(() => null),
         ]);
         const jobList = Array.isArray(jobsRes) ? jobsRes : (jobsRes as { jobs?: Job[] }).jobs || [];
@@ -206,7 +206,7 @@ export default function Dashboard() {
     loadDashboard();
     const t = window.setInterval(() => {
       api('/live-paper/status').then((res) => setLive(res as LiveStatus)).catch(() => {});
-    }, 3000);
+    }, 5000);
     return () => window.clearInterval(t);
   }, []);
 

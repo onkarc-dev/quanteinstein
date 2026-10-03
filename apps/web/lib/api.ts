@@ -1,3 +1,5 @@
+import { supabase } from './supabaseClient';
+
 const configuredApiBase =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
@@ -70,9 +72,14 @@ export function clearAuth() {
   localStorage.removeItem('prismflow_last_job');
 }
 
-export function logout() {
+export async function logout() {
   const token = getToken();
   clearAuth();
+  if (supabase) {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+  }
   if (token) {
     fetch(`${API_BASE}/auth/logout`, {
       method: 'POST',
@@ -174,13 +181,62 @@ function handleUnauthorized() {
 }
 
 export async function fetchMe(): Promise<AuthUser> {
-  const user = await api('/auth/me') as AuthUser;
-  saveAuth({ user });
-  return user;
+  if (supabase) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const authUser: AuthUser = {
+          id: user.id,
+          email: user.email || '',
+          name: (user.user_metadata?.name as string) || (user.user_metadata?.full_name as string) || (user.email ? user.email.split('@')[0] : 'Trader'),
+          onboarding_completed: true,
+        };
+        saveAuth({ user: authUser });
+        return authUser;
+      }
+    } catch (err) {
+      console.warn('[QuantOS][fetchMe] Supabase getUser error:', err);
+    }
+  }
+
+  const cached = getUser();
+  try {
+    const user = await api('/auth/me') as AuthUser;
+    saveAuth({ user });
+    return user;
+  } catch (err) {
+    if (cached) return cached;
+    throw err;
+  }
 }
 
 export async function restoreSession(): Promise<AuthUser | null> {
+  if (supabase) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const authUser: AuthUser = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: (session.user.user_metadata?.name as string) || (session.user.user_metadata?.full_name as string) || (session.user.email ? session.user.email.split('@')[0] : 'Trader'),
+          onboarding_completed: true,
+        };
+        saveAuth({ token: session.access_token, refresh_token: session.refresh_token, user: authUser });
+        return authUser;
+      }
+    } catch (err) {
+      console.warn('[QuantOS][restoreSession] Supabase getSession error:', err);
+    }
+  }
+
+  const cached = getUser();
+  if (cached) {
+    fetchMe().catch(() => {});
+    return cached;
+  }
+
   if (!getToken()) return null;
+
   try {
     return await fetchMe();
   } catch (err) {
@@ -196,7 +252,7 @@ export async function restoreSession(): Promise<AuthUser | null> {
       clearAuth();
       return null;
     }
-    throw err;
+    return null;
   }
 }
 
