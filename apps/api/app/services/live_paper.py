@@ -285,6 +285,14 @@ def validate_live_start_request(user_id: str, strategy_id: str = "", symbols: Op
         payload = {"symbols": [DEFAULT_SYMBOL], "bar_seconds": 10}
     active_symbols = _clean_symbols(symbols or payload.get("symbols") or [DEFAULT_SYMBOL])
     bar_seconds = _bar_seconds_from_payload(payload)
+    if bar_seconds == 1 and len(active_symbols) > 1:
+        return {
+            "ok": False,
+            "status_code": 422,
+            "message": "1s multi-symbol live paper can exhaust Windows memory/pagefile. Start with BTCUSDT only.",
+            "bar_seconds": bar_seconds,
+            "symbols": active_symbols,
+        }
     return {"ok": True, "bar_seconds": bar_seconds, "symbols": active_symbols}
 
 
@@ -805,7 +813,7 @@ class LivePaperManager:
             session = LivePaperSession(user_id=user_id, session_id=str(session_no), session_number=session_no, status="running", started_at=now(), starting_balance=bal)
             self._sessions[user_id] = session
             session.binary_diagnostics = binary_diag
-            session.selected_binary_path = str(binary) if binary else "managed_live_engine"
+            session.selected_binary_path = str(binary) if binary else ""
             session.feed_status = "connected"
             session.last_heartbeat_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             live_config = _write_live_strategy_config(user_id, session.session_id, strategy_id, symbols_override=guard.get("symbols") or symbols)
@@ -816,24 +824,87 @@ class LivePaperManager:
             session.selected_strategy_name = live_config.get("name", "")
             _insert_or_replace_wallet(user_id, session.session_id, starting_balance=bal)
 
-            target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
-            for sym in target_symbols:
-                cfg_path = (live_config.get("config_paths") or {}).get(sym, session.config_path)
-                session.symbol_states[sym] = {
-                    "symbol": sym,
-                    "processed": 0,
-                    "last_price": 0.0,
-                    "bars": 0,
-                    "signals": 0,
-                    "total_trades": 0,
-                    "p95_engine_us": 12.0,
-                    "paper_status": "ACTIVE_WEBSOCKET",
-                }
-                t = threading.Thread(target=self._python_live_worker, args=(session, sym, cfg_path), daemon=True, name=sym)
-                session.threads.append(t)
-                t.start()
+            if not binary or not binary.exists():
+                if os.getenv("QUANTOS_MANAGED_LIVE") == "1":
+                    session.status = "running"
+                    session.feed_status = "connected"
+                    session.selected_binary_path = "managed_python_live_engine"
+                    target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
+                    for sym in target_symbols:
+                        cfg_path = (live_config.get("config_paths") or {}).get(sym, session.config_path)
+                        session.symbol_states[sym] = {
+                            "symbol": sym,
+                            "processed": 0,
+                            "last_price": 0.0,
+                            "bars": 0,
+                            "signals": 0,
+                            "total_trades": 0,
+                            "p95_engine_us": 12.0,
+                            "paper_status": "ACTIVE_WEBSOCKET",
+                        }
+                        t = threading.Thread(target=self._python_live_worker, args=(session, sym, cfg_path), daemon=True, name=sym)
+                        session.threads.append(t)
+                        t.start()
+                    return self.status(user_id)
+                else:
+                    session.status = "disabled"
+                    session.feed_status = "binary_missing"
+                    session.error = (
+                        "Live paper binary not found. Synthetic fallback is disabled.\n"
+                        f"Resolved repo root: {binary_diag['repo_root']}\n"
+                        "Checked paths:\n- " + "\n- ".join(binary_diag["checked_paths"]) + "\n"
+                        f"Build command: {binary_diag['build_command']}"
+                    )
+                    _copy_final_reports(session.user_id, session.session_id)
+                    return self.status(user_id)
 
-            return self.status(user_id)
+            try:
+                session_dir = _live_session_dir(user_id, session.session_id)
+                for sym, cfg_path in (live_config.get("config_paths") or {}).items():
+                    output_dir = session_dir / "symbols" / str(sym).upper()
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    cmd = [
+                        str(binary),
+                        "--managed-run",
+                        "--config",
+                        str(cfg_path),
+                        "--output-dir",
+                        str(output_dir),
+                        "--snapshot-ms",
+                        "1000",
+                    ]
+                    proc = subprocess.Popen(
+                        cmd,
+                        cwd=str(settings.project_root),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                    )
+                    session.processes[sym] = proc
+                    if session.process is None:
+                        session.process = proc
+                    session.symbol_states[sym] = {
+                        "symbol": sym,
+                        "processed": 0,
+                        "last_price": 0.0,
+                        "bars": 0,
+                        "signals": 0,
+                        "total_trades": 0,
+                        "p95_engine_us": 12.0,
+                        "paper_status": "WAITING",
+                    }
+                    t = threading.Thread(target=self._reader, args=(session, sym, proc), daemon=True, name=sym)
+                    session.threads.append(t)
+                    t.start()
+                session.status = "running"
+                session.feed_status = "waiting_for_heartbeat"
+                return self.status(user_id)
+            except Exception as exc:
+                session.status = "failed"
+                session.error = str(exc)
+                return self.status(user_id)
 
     def _reader(self, session: LivePaperSession, symbol: str, process: subprocess.Popen) -> None:
         for line in process.stdout or []:
@@ -1175,6 +1246,9 @@ class LivePaperManager:
             for proc in session.processes.values():
                 if proc.poll() is None:
                     proc.kill()
+            for t in session.threads:
+                if t.is_alive() and t != threading.current_thread():
+                    t.join(timeout=0.5)
             session.status = "stopped"
             session.feed_status = "stopped"
             session.stopped_at = now()
@@ -1211,7 +1285,7 @@ class LivePaperManager:
             metrics = session.metrics or _aggregate_session_metrics(session)
             process_running = (
                 any(p.poll() is None for p in session.processes.values()) or
-                any(t.is_alive() for t in session.threads)
+                (session.status == "running" and any(t.is_alive() for t in session.threads))
             )
             diag = session.binary_diagnostics or self._binary_diagnostics()
             feed_status = _canonical_feed_status(session, process_running)
