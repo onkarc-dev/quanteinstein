@@ -113,10 +113,15 @@ export default function LoginForm() {
     // 1. Supabase Auth signup
     if (supabase) {
       try {
+        const redirectUrl = typeof window !== 'undefined'
+          ? `${window.location.origin}/dashboard`
+          : 'https://www.quanteinstein.com/dashboard';
+
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: {
+            emailRedirectTo: redirectUrl,
             data: {
               name: name.trim(),
               full_name: name.trim(),
@@ -151,7 +156,7 @@ export default function LoginForm() {
         }
 
         setOtpRequested(true);
-        setMsg('Verification code sent to ' + email.trim() + '. Enter the 6-digit code below and click Verify OTP & Register.');
+        setMsg('Confirmation email sent to ' + email.trim() + '! Click the confirmation link in the email or enter the verification code below.');
         setBusy(false);
         return;
       } catch (err: any) {
@@ -196,7 +201,13 @@ export default function LoginForm() {
     // 1. Supabase Auth password reset
     if (supabase) {
       try {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+        const redirectUrl = typeof window !== 'undefined'
+          ? `${window.location.origin}/login`
+          : 'https://www.quanteinstein.com/login';
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: redirectUrl,
+        });
         if (error) {
           setMsg('Password reset failed: ' + error.message);
           setBusy(false);
