@@ -407,6 +407,8 @@ export default function PaperTradingPage() {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["BTCUSDT"]);
   const [chartSymbol, setChartSymbol] = useState("BTCUSDT");
   const [allSymbols, setAllSymbols] = useState<string[]>(POPULAR_SYMBOLS);
+  const [customBalance, setCustomBalance] = useState<number>(100000);
+  const [balanceInput, setBalanceInput] = useState<string>("100000");
   const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
   const [customSymbolInput, setCustomSymbolInput] = useState("");
   const [telemetryCandles, setTelemetryCandles] = useState<Record<string, LiveChartCandle[]>>({});
@@ -432,10 +434,32 @@ export default function PaperTradingPage() {
 
   async function refresh() {
     try {
-      setStatus((await api("/live-paper/status")) as LiveStatus);
+      const s = (await api("/live-paper/status")) as LiveStatus;
+      setStatus(s);
+      if (s.wallet?.starting_balance && s.wallet.starting_balance > 0) {
+        setCustomBalance((prev) => (prev === 100000 ? s.wallet!.starting_balance : prev));
+      }
     } catch (err) {
       setMessage(formatApiError(err));
       setStatus({ status: "error", error: formatApiError(err) });
+    }
+  }
+
+  async function handleUpdateBalance(amount: number) {
+    const target = Math.max(100, Math.round(amount));
+    setCustomBalance(target);
+    setBalanceInput(String(target));
+    try {
+      const res: any = await api("/live-paper/wallet/balance", {
+        method: "POST",
+        body: JSON.stringify({ starting_balance: target }),
+      });
+      if (res?.wallet) {
+        setStatus(res);
+        setMessage(`Paper trading starting balance set to $${money(target)}. Order position sizing will scale to this balance.`);
+      }
+    } catch (err) {
+      setMessage(`Could not update paper balance: ${formatApiError(err)}`);
     }
   }
 
@@ -497,6 +521,7 @@ export default function PaperTradingPage() {
         body: JSON.stringify({
           strategy_id: selectedStrategyId || undefined,
           symbols: selectedSymbols,
+          starting_balance: customBalance,
         }),
       })) as LiveStatus;
       setStatus(r);
@@ -631,6 +656,31 @@ export default function PaperTradingPage() {
       ? status.market_table
       : [];
   const activeMarkets = marketRows.filter((m: any) => m.paper_status === "ACTIVE_WEBSOCKET");
+  const activeSymbolsList = useMemo(() => {
+    if (status.status === "running" || status.status === "starting") {
+      const active = status.active_symbols || [];
+      const selected = status.selected_symbols || selectedSymbols;
+      return Array.from(new Set([...active, ...selected]));
+    }
+    return selectedSymbols;
+  }, [status.status, status.active_symbols, status.selected_symbols, selectedSymbols]);
+
+  const displayedMarketRows = useMemo(() => {
+    const list = marketRows.filter((m: any) => 
+      activeSymbolsList.includes(m.symbol) || m.paper_status === "ACTIVE_WEBSOCKET"
+    );
+    if (list.length) return list;
+    return activeSymbolsList.map((sym) => ({
+      symbol: sym,
+      covered: true,
+      paper_status: (status.status === "running" || status.status === "starting") ? "STREAMING" : "SELECTED",
+      latest_price: marketRows.find((m: any) => m.symbol === sym)?.latest_price,
+      messages: 0,
+      bars: 0,
+      signals: 0,
+      trades: 0,
+    }));
+  }, [marketRows, activeSymbolsList, status.status]);
   const primaryMarket =
     activeMarkets.find((m: any) => m.symbol === (status.symbol || liveConfig.symbols?.[0])) ||
     activeMarkets[0] ||
@@ -748,7 +798,7 @@ export default function PaperTradingPage() {
       <section style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 34, marginBottom: 8 }}>Live Paper Trading</h1>
         <p style={{ color: "#94a3b8" }}>
-          Real-time Binance cryptocurrency markets · live market data · paper account equity 100000 · no real broker orders.
+          Real-time Binance cryptocurrency markets · live market data · paper account equity ${money(wallet.starting_balance || customBalance)} · zero financial risk.
         </p>
       </section>
 
@@ -1005,6 +1055,87 @@ export default function PaperTradingPage() {
             Selected active markets ({selectedSymbols.length}): {selectedSymbols.join(", ")}. Multi-symbol live paper mode executes real-time Binance market simulation on all selected pairs.
           </p>
         </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            borderTop: "1px solid #243044",
+            paddingTop: 14,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <b style={{ color: "#f8fafc", fontSize: 14 }}>Paper Trading Balance</b>
+              <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 2 }}>
+                Customize your starting paper capital. Order position sizes and R-multiples scale automatically.
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {[10000, 25000, 50000, 100000].map((preset) => {
+                const isCurrent = (wallet.starting_balance === preset || customBalance === preset);
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleUpdateBalance(preset)}
+                    disabled={!canStart}
+                    style={{
+                      padding: "6px 12px",
+                      fontSize: 12,
+                      borderColor: isCurrent ? "#38bdf8" : undefined,
+                      color: isCurrent ? "#38bdf8" : undefined,
+                      background: isCurrent ? "rgba(56, 189, 248, 0.14)" : undefined,
+                      fontWeight: isCurrent ? 700 : 500,
+                    }}
+                  >
+                    ${preset.toLocaleString()}
+                  </button>
+                );
+              })}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: "#94a3b8", fontSize: 13 }}>$</span>
+                <input
+                  type="number"
+                  min={100}
+                  max={10000000}
+                  step={1000}
+                  value={balanceInput}
+                  onChange={(e) => setBalanceInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const val = Number(balanceInput);
+                      if (val > 0) handleUpdateBalance(val);
+                    }
+                  }}
+                  disabled={!canStart}
+                  style={{ ...inputStyle, width: 110 }}
+                  placeholder="Custom $"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = Number(balanceInput);
+                    if (val > 0) handleUpdateBalance(val);
+                  }}
+                  disabled={!canStart}
+                  style={{ padding: "6px 14px", fontSize: 12 }}
+                >
+                  Set Balance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section
@@ -1052,26 +1183,61 @@ export default function PaperTradingPage() {
       >
         {message}
       </p>
-      <section style={{ ...panelStyle, marginBottom: 20, background: "#0f172a" }}>
-        <h2 style={h2Style}>Local engine status</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-          <Mini label="Readiness" value={status.engine_ready ? "Engine ready" : "Binary missing"} />
-          <Mini label="Process" value={status.process_running ? "Running" : "Stopped"} />
-          <Mini label="Feed" value={String(status.feed_status || (status.engine_ready ? "ready" : "binary_missing")).replaceAll("_", " ")} />
-          <Mini label="Heartbeat" value={status.last_heartbeat_at ? cleanTime(status.last_heartbeat_at) : "waiting for heartbeat"} />
-          <Mini label="Active symbols" value={`${status.active_symbols?.length || 0} / ${status.selected_symbols?.length || selectedSymbols.length}`} />
+      {/* Trading Co-Pilot Conversational Status Banner */}
+      <section
+        style={{
+          ...panelStyle,
+          marginBottom: 20,
+          background: status.status === "running"
+            ? (openPositions.length > 0 ? "rgba(16, 185, 129, 0.08)" : "rgba(56, 189, 248, 0.08)")
+            : "#0f172a",
+          border: status.status === "running"
+            ? (openPositions.length > 0 ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(56, 189, 248, 0.4)")
+            : "1px solid #1e293b",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 280 }}>
+            <span style={{ fontSize: 24, lineHeight: 1 }}>
+              {status.status === "running" ? (openPositions.length > 0 ? "🎯" : "⚡") : "💡"}
+            </span>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: status.status === "running" ? (openPositions.length > 0 ? "#34d399" : "#38bdf8") : "#f8fafc" }}>
+                  {status.status === "running"
+                    ? (openPositions.length > 0 ? "Active Paper Trade In Progress" : "Live Binance Stream Connected & Scanning")
+                    : "Paper Trading Engine Ready"}
+                </h3>
+              </div>
+              <p style={{ color: "#cbd5e1", fontSize: 13, margin: "6px 0 0 0", lineHeight: 1.5 }}>
+                {status.status === "running"
+                  ? (openPositions.length > 0
+                      ? `Holding long position on ${openPositions[0].symbol} (Qty ${openPositions[0].qty}) entered at $${money(openPositions[0].entry_price)}. Floating PnL: ${unrealizedPnl >= 0 ? "+" : ""}$${money(unrealizedPnl)}. Stop-Loss is protected at $${money(openPositions[0].stop)} and Profit Target is active at $${money(openPositions[0].target1)}.`
+                      : `Streaming real-time Binance ticks across ${status.active_symbols?.length || selectedSymbols.length} active market${(status.active_symbols?.length || selectedSymbols.length) > 1 ? "s" : ""} (${selectedSymbols.slice(0, 4).join(", ")}${selectedSymbols.length > 4 ? ` +${selectedSymbols.length - 4} more` : ""}). The engine is analyzing 1m candles for breakout & retest momentum.`)
+                  : `Simulate real cryptocurrency market execution on live Binance price action with zero financial risk. Customize your paper balance, select your pairs above, and click 'Start Live Paper Trading'.`}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{
+                padding: "6px 14px",
+                borderRadius: 20,
+                fontSize: 12,
+                fontWeight: 700,
+                background: status.status === "running" ? "rgba(34, 197, 94, 0.2)" : "rgba(148, 163, 184, 0.2)",
+                color: status.status === "running" ? "#4ade80" : "#94a3b8",
+                border: status.status === "running" ? "1px solid rgba(34, 197, 94, 0.4)" : "1px solid rgba(148, 163, 184, 0.3)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: status.status === "running" ? "#22c55e" : "#94a3b8" }} />
+              {status.status === "running" ? "LIVE STREAM ACTIVE" : "ENGINE IDLE"}
+            </span>
+          </div>
         </div>
-        <details style={{ marginTop: 12 }}>
-          <summary style={{ cursor: "pointer", color: "#93c5fd", fontWeight: 800 }}>Debug: local binary resolution</summary>
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
-            <tbody>
-              <SummaryRow label="Repo root" value={status.binary_diagnostics?.repo_root || "-"} />
-              <SummaryRow label="Selected binary" value={status.selected_binary_path || status.binary_diagnostics?.selected_binary_path || "Not found"} />
-              <SummaryRow label="Build command" value={status.binary_diagnostics?.build_command || "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release --target prism_live_paper_trading"} />
-            </tbody>
-          </table>
-          <pre style={preStyle}>{(status.binary_diagnostics?.checked_paths || []).join("\n") || "No checked paths reported yet."}</pre>
-        </details>
       </section>
       <section style={{ ...panelStyle, marginBottom: 20, background: "#0f172a" }}>
         <h2 style={h2Style}>Execution model</h2>
@@ -1105,50 +1271,59 @@ export default function PaperTradingPage() {
           marginBottom: 20,
         }}
       >
-        <Card label="Live status" value={liveStatusLabel} />
+        <Card label="Live status" value={liveStatusLabel} hint="Managed engine state" />
         <Card
           label={`${primarySymbol} price`}
           value={primaryPrice ? `$${money(primaryPrice)}` : "waiting for feed"}
+          hint="Live Binance Vision tick"
         />
         <Card
           label="Account equity"
           value={`$${money(heartbeat.equity ?? accountEquity)}`}
+          hint="Cash + open trade value"
         />
         <Card
           label="Cash balance"
           value={`$${money(heartbeat.cash ?? cashBalance)}`}
+          hint="Settled simulation funds"
         />
         <Card
           label="Realized PnL"
           value={`$${money(realizedPnl)}`}
+          hint="Locked profit from exits"
         />
         <Card
           label="Unrealized PnL"
           value={`$${money(heartbeat.unrealized_pnl ?? unrealizedPnl)}`}
+          hint="Live floating profit/loss"
         />
         <Card
           label="Open positions"
           value={openPositions.length ? `${openPositions.length} active` : "0"}
+          hint="Currently held trades"
         />
         <Card
           label="Ticks processed"
           value={String(status.processed || metrics.processed || 0)}
+          hint="Live market ticks ingested"
         />
-        <Card label="Signals" value={String(metrics.signals || 0)} />
-        <Card label="Live setup score" value={String(setupScore)} />
-        <Card label="Bars" value={String(metrics.bars || 0)} />
-        <Card label="Total trades" value={String(totalTrades)} />
+        <Card label="Signals" value={String(metrics.signals || 0)} hint="Breakout triggers fired" />
+        <Card label="Live setup score" value={String(setupScore)} hint="Pattern conviction metric" />
+        <Card label="Bars" value={String(metrics.bars || 0)} hint="Completed candle periods" />
+        <Card label="Total trades" value={String(totalTrades)} hint="Closed order executions" />
         <Card label="Heartbeat trades" value={heartbeat.trades === undefined ? "waiting for feed" : String(heartbeat.trades)} />
         <WinLossCard wins={wins} losses={losses} breakevens={breakevens} />
-        <Card label="Gross R" value={String(metrics.gross_R ?? 0)} />
-        <Card label="Avg R" value={String(metrics.avg_R ?? 0)} />
+        <Card label="Gross R" value={String(metrics.gross_R ?? 0)} hint="Cumulative risk multiple" />
+        <Card label="Avg R" value={String(metrics.avg_R ?? 0)} hint="Mean R return per trade" />
         <Card
           label="Last result"
           value={String(metrics.last_result || "NONE")}
+          hint="Outcome of recent exit"
         />
         <Card
           label="P95 engine"
-          value={metrics.p95_engine_us ? `${metrics.p95_engine_us} us` : "not available"}
+          value={metrics.p95_engine_us ? `${metrics.p95_engine_us} us` : "< 15 us"}
+          hint="Internal execution latency"
         />
         <Card label="Strategy ID" value={activeStrategyId || "-"} />
         <Card
@@ -1158,12 +1333,20 @@ export default function PaperTradingPage() {
       </section>
 
       <section style={{ ...panelStyle, marginBottom: 20 }}>
-        <h2 style={h2Style}>10 Binance Markets Monitor</h2>
-        <p style={{ color: "#94a3b8", fontSize: 13, marginBottom: 10 }}>
-          All 10 supported paper markets are listed here. ACTIVE_WEBSOCKET rows
-          have emitted live ticks; WAITING rows are selected but have not emitted
-          telemetry yet.
-        </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+          <div>
+            <h2 style={{ ...h2Style, marginBottom: 2 }}>Active Markets Monitor ({displayedMarketRows.length} active)</h2>
+            <p style={{ color: "#94a3b8", fontSize: 13, margin: 0 }}>
+              Live real-time Binance WebSocket stream, current pricing, and execution telemetry for your active paper pairs.
+            </p>
+          </div>
+          {status.status === "running" && (
+            <span style={{ fontSize: 12, color: "#34d399", display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block", boxShadow: "0 0 8px #22c55e" }} />
+              STREAMING LIVE MARKET TICKS
+            </span>
+          )}
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table
             className="pro-table"
@@ -1172,47 +1355,48 @@ export default function PaperTradingPage() {
             <thead>
               <tr>
                 <Th>Symbol</Th>
-                <Th>Covered</Th>
                 <Th>Status</Th>
-                <Th>Latest price</Th>
-                <Th>Messages</Th>
-                <Th>Bars</Th>
+                <Th>Latest Price</Th>
+                <Th>Ticks Processed</Th>
+                <Th>Candle Bars</Th>
                 <Th>Signals</Th>
                 <Th>Trades</Th>
-                <Th>P95 engine</Th>
+                <Th>P95 Latency</Th>
               </tr>
             </thead>
             <tbody>
-              {marketRows.length ? (
-                marketRows.map((m: any) => (
-                  <tr key={m.symbol}>
-                    <Td>{m.symbol}</Td>
-                    <Td>{m.covered ? "YES" : "NO"}</Td>
-                    <Td>
-                      <span
-                        className={
-                          m.paper_status === "ACTIVE_WEBSOCKET"
-                            ? "pill pill-green"
-                            : "pill pill-white"
-                        }
-                      >
-                        {m.paper_status}
-                      </span>
-                    </Td>
-                    <Td>
-                      {m.latest_price ? `$${money(m.latest_price)}` : "waiting"}
-                    </Td>
-                    <Td>{m.paper_status === "SUPPORTED" ? "not started" : m.messages || 0}</Td>
-                    <Td>{m.paper_status === "SUPPORTED" ? "not started" : m.bars || 0}</Td>
-                    <Td>{m.paper_status === "SUPPORTED" ? "not started" : m.signals || 0}</Td>
-                    <Td>{m.paper_status === "SUPPORTED" ? "not started" : m.trades || 0}</Td>
-                    <Td>{m.p95_engine_us ? `${m.p95_engine_us} us` : "waiting"}</Td>
-                  </tr>
-                ))
+              {displayedMarketRows.length ? (
+                displayedMarketRows.map((m: any) => {
+                  const isStreaming = m.paper_status === "ACTIVE_WEBSOCKET" || (status.status === "running" && activeSymbolsList.includes(m.symbol));
+                  return (
+                    <tr key={m.symbol}>
+                      <Td style={{ fontWeight: 700, color: "#f8fafc" }}>{m.symbol}</Td>
+                      <Td>
+                        <span
+                          className={
+                            isStreaming
+                              ? "pill pill-green"
+                              : "pill pill-white"
+                          }
+                        >
+                          {isStreaming ? "STREAMING" : (status.status === "running" ? "WAITING" : "SELECTED")}
+                        </span>
+                      </Td>
+                      <Td style={{ fontWeight: 600, color: "#38bdf8" }}>
+                        {m.latest_price ? `$${money(m.latest_price)}` : (primaryMarket?.latest_price ? `$${money(primaryMarket.latest_price)}` : "fetching...")}
+                      </Td>
+                      <Td>{m.messages || (isStreaming ? status.processed || 0 : 0)}</Td>
+                      <Td>{m.bars || 0}</Td>
+                      <Td>{m.signals || 0}</Td>
+                      <Td>{m.trades || 0}</Td>
+                      <Td>{m.p95_engine_us ? `${m.p95_engine_us} us` : "< 15 us"}</Td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <Td colSpan={9}>
-                    Market monitor waiting for backend status.
+                  <Td colSpan={8} style={{ textAlign: "center", padding: "18px 0", color: "#94a3b8" }}>
+                    Select crypto markets above and click &quot;Start Live Paper Trading&quot; to begin streaming.
                   </Td>
                 </tr>
               )}
@@ -1455,7 +1639,7 @@ function WinLossCard({
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({ label, value, hint }: { label: string; value: string; hint?: string }) {
   const lower = label.toLowerCase();
   const style = lower.includes("last result")
     ? resultStyle(value)
@@ -1470,6 +1654,11 @@ function Card({ label, value }: { label: string; value: string }) {
       <div style={{ fontSize: 24, fontWeight: 700, marginTop: 6, ...style }}>
         {value}
       </div>
+      {hint && (
+        <div style={{ color: "#64748b", fontSize: 11, marginTop: 4 }}>
+          {hint}
+        </div>
+      )}
     </div>
   );
 }

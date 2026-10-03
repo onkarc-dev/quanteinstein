@@ -58,13 +58,14 @@ def start_live_paper(payload: dict = Body(default={}), user=Depends(current_user
     user_id = str(user['id'])
     strategy_id = str(payload.get('strategy_id') or '')
     symbols = payload.get('symbols') or []
+    starting_balance = payload.get('starting_balance') or payload.get('initial_balance')
     if isinstance(symbols, str):
         symbols = [symbols]
     guard = validate_live_start_request(user_id, strategy_id=strategy_id, symbols=symbols)
     if not guard.get("ok"):
         raise HTTPException(status_code=int(guard.get("status_code") or 422), detail=guard["message"])
     _invalidate_status_cache(user_id)
-    result = manager.start(user_id, strategy_id=strategy_id, symbols=symbols)
+    result = manager.start(user_id, strategy_id=strategy_id, symbols=symbols, starting_balance=starting_balance)
     _STATUS_CACHE[user_id] = (time.time(), result)
     return result
 
@@ -106,6 +107,23 @@ def wallet_live_paper(user=Depends(current_user)):
         'unrealized_pnl': 0.0,
         'locked_until': '',
     }
+
+
+@router.post('/wallet/balance')
+def set_wallet_balance(payload: dict = Body(default={}), user=Depends(current_user)):
+    payload = payload or {}
+    user_id = str(user['id'])
+    raw_balance = payload.get('starting_balance') or payload.get('balance')
+    try:
+        b = float(raw_balance)
+        if b <= 0:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid starting balance. Please provide a positive number.")
+    _invalidate_status_cache(user_id)
+    result = manager.set_starting_balance(user_id, b)
+    _STATUS_CACHE[user_id] = (time.time(), result)
+    return result
 
 
 @router.get('/symbols')

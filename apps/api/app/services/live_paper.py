@@ -136,11 +136,12 @@ def _market_table(session: Optional["LivePaperSession"] = None) -> List[Dict[str
     if session and session.live_config:
         selected_symbols = {str(x).upper() for x in (session.live_config.get("symbols") or [DEFAULT_SYMBOL])}
 
-    # Include active session symbols, user selected symbols, and top market symbols
+    # Show only active session symbols and user selected symbols (no bloated list of unselected coins)
     active_keys = list(session.symbol_states.keys()) if session else []
-    display_symbols = list(dict.fromkeys(
-        list(selected_symbols) + active_keys + POPULAR_SYMBOLS
-    ))
+    if session and (selected_symbols or active_keys):
+        display_symbols = list(dict.fromkeys(list(selected_symbols) + active_keys))
+    else:
+        display_symbols = [DEFAULT_SYMBOL]
 
     rows = []
     for sym in display_symbols:
@@ -311,7 +312,22 @@ def _read_json_file(path: Path) -> Dict[str, Any]:
         return {}
 
 
-def _insert_or_replace_wallet(user_id: str, session_id: str, locked_until: str = "") -> None:
+def _get_starting_balance(user_id: str) -> float:
+    try:
+        with get_conn() as conn:
+            q = "SELECT starting_balance FROM live_wallets WHERE user_id=%s" if settings.is_postgres() else "SELECT starting_balance FROM live_wallets WHERE user_id=?"
+            row = conn.execute(q, (user_id,)).fetchone()
+        if row:
+            sb = _float(row_to_dict(row).get("starting_balance"))
+            if sb > 0:
+                return sb
+    except Exception:
+        pass
+    return STARTING_BALANCE
+
+
+def _insert_or_replace_wallet(user_id: str, session_id: str, starting_balance: float = STARTING_BALANCE, locked_until: str = "") -> None:
+    bal = starting_balance if starting_balance > 0 else STARTING_BALANCE
     with get_conn() as conn:
         if settings.is_postgres():
             conn.execute(
@@ -327,7 +343,7 @@ def _insert_or_replace_wallet(user_id: str, session_id: str, locked_until: str =
                     locked_until=EXCLUDED.locked_until,
                     updated_at=EXCLUDED.updated_at
                 """,
-                (user_id, session_id, STARTING_BALANCE, STARTING_BALANCE, 0.0, 0.0, locked_until, now()),
+                (user_id, session_id, bal, bal, 0.0, 0.0, locked_until, now()),
             )
         else:
             conn.execute(
@@ -343,24 +359,25 @@ def _insert_or_replace_wallet(user_id: str, session_id: str, locked_until: str =
                     locked_until=excluded.locked_until,
                     updated_at=excluded.updated_at
                 """,
-                (user_id, session_id, STARTING_BALANCE, STARTING_BALANCE, 0.0, 0.0, locked_until, now()),
+                (user_id, session_id, bal, bal, 0.0, 0.0, locked_until, now()),
             )
         conn.commit()
 
 
-def _update_wallet(user_id: str, session_id: str, realized: float, unrealized: float) -> Dict[str, Any]:
+def _update_wallet(user_id: str, session_id: str, realized: float, unrealized: float, starting_balance: Optional[float] = None) -> Dict[str, Any]:
     # Accounting model:
     #   cash_balance    = starting balance + closed/realized PnL
     #   account_equity  = cash_balance + open/unrealized PnL
     # The database column `current_balance` is kept for backwards compatibility,
     # but it represents account equity, not withdrawable cash.
-    cash_balance = STARTING_BALANCE + realized
+    bal = starting_balance if (starting_balance is not None and starting_balance > 0) else _get_starting_balance(user_id)
+    cash_balance = bal + realized
     current = cash_balance + unrealized
     locked_until = ""
     if current <= 0:
         locked_until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 24 * 3600))
     with get_conn() as conn:
-        args = (session_id, STARTING_BALANCE, current, realized, unrealized, locked_until, now(), user_id)
+        args = (session_id, bal, current, realized, unrealized, locked_until, now(), user_id)
         if settings.is_postgres():
             conn.execute(
                 """
@@ -383,7 +400,7 @@ def _update_wallet(user_id: str, session_id: str, realized: float, unrealized: f
     return {
         "user_id": user_id,
         "session_id": session_id,
-        "starting_balance": STARTING_BALANCE,
+        "starting_balance": bal,
         "current_balance": round(current, 6),
         "account_equity": round(current, 6),
         "cash_balance": round(cash_balance, 6),
@@ -706,6 +723,7 @@ def _copy_final_reports(user_id: str, session_id: str) -> Dict[str, str]:
 class LivePaperSession:
     user_id: str
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    starting_balance: float = STARTING_BALANCE
     process: Optional[subprocess.Popen] = None
     processes: Dict[str, subprocess.Popen] = field(default_factory=dict)
     threads: List[threading.Thread] = field(default_factory=list)
@@ -764,7 +782,7 @@ class LivePaperManager:
             return locked_until
         return ""
 
-    def start(self, user_id: str, strategy_id: str = "", symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+    def start(self, user_id: str, strategy_id: str = "", symbols: Optional[List[str]] = None, starting_balance: Optional[float] = None) -> Dict[str, Any]:
         locked_until = self._is_locked(user_id)
         if locked_until:
             return {"status": "locked", "locked_until": locked_until, "message": "Wallet balance reached zero. Live paper locked for 24 hours."}
@@ -778,10 +796,13 @@ class LivePaperManager:
                 any(t.is_alive() for t in active.threads)
             ):
                 return self.status(user_id)
+            bal = _float(starting_balance) if (starting_balance is not None and _float(starting_balance) > 0) else _get_starting_balance(user_id)
+            if bal <= 0:
+                bal = STARTING_BALANCE
             binary_diag = self._binary_diagnostics()
             binary = Path(binary_diag["selected_binary_path"]) if binary_diag.get("selected_binary_path") else None
             session_no = _next_session_number(user_id)
-            session = LivePaperSession(user_id=user_id, session_id=str(session_no), session_number=session_no, status="running", started_at=now())
+            session = LivePaperSession(user_id=user_id, session_id=str(session_no), session_number=session_no, status="running", started_at=now(), starting_balance=bal)
             self._sessions[user_id] = session
             session.binary_diagnostics = binary_diag
             session.selected_binary_path = str(binary) if binary else "managed_live_engine"
@@ -793,7 +814,7 @@ class LivePaperManager:
             session.selected_strategy_id = live_config.get("strategy_id", "")
             session.selected_strategy_db_id = live_config.get("strategy_db_id", "")
             session.selected_strategy_name = live_config.get("name", "")
-            _insert_or_replace_wallet(user_id, session.session_id)
+            _insert_or_replace_wallet(user_id, session.session_id, starting_balance=bal)
 
             target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
             for sym in target_symbols:
@@ -1071,7 +1092,7 @@ class LivePaperManager:
                         risk_unit = max(0.01, abs(open_entry - open_stop))
                         open_t1 = round(open_entry + t1_r * risk_unit, 4)
                         open_t2 = round(open_entry + t2_r * risk_unit, 4)
-                        open_qty = round((STARTING_BALANCE * (risk_pct / 100.0)) / risk_unit, 4)
+                        open_qty = round((session.starting_balance * (risk_pct / 100.0)) / risk_unit, 4)
 
                         st["open_trade"] = 1
                         st["open_side"] = "BUY"
@@ -1119,13 +1140,24 @@ class LivePaperManager:
                     "latest_price": price,
                     "feed_status": "connected",
                     "mode": "paper",
-                    "equity": STARTING_BALANCE + session.realized_pnl + session.unrealized_pnl,
+                    "equity": session.starting_balance + session.realized_pnl + session.unrealized_pnl,
                     "realized_pnl": session.realized_pnl,
                     "unrealized_pnl": session.unrealized_pnl,
                 }
-                _update_wallet(session.user_id, session.session_id, session.realized_pnl, session.unrealized_pnl)
+                _update_wallet(session.user_id, session.session_id, session.realized_pnl, session.unrealized_pnl, starting_balance=session.starting_balance)
 
             time.sleep(1.0)
+
+    def set_starting_balance(self, user_id: str, balance: float) -> Dict[str, Any]:
+        bal = _float(balance)
+        if bal <= 0:
+            bal = STARTING_BALANCE
+        with self._lock:
+            session = self._sessions.get(user_id)
+            if session:
+                session.starting_balance = bal
+            _insert_or_replace_wallet(user_id, session.session_id if session else "", starting_balance=bal)
+            return self.status(user_id)
 
     def stop(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -1154,6 +1186,7 @@ class LivePaperManager:
             session = self._sessions.get(user_id)
             if not session:
                 diag = self._binary_diagnostics()
+                sb = _get_starting_balance(user_id)
                 return {
                     "status": "idle",
                     "engine_ready": True,
@@ -1163,8 +1196,18 @@ class LivePaperManager:
                     "process_running": False,
                     "market_table": _market_table(None),
                     "markets": _market_table(None),
+                    "wallet": {
+                        "user_id": user_id,
+                        "starting_balance": sb,
+                        "current_balance": sb,
+                        "account_equity": sb,
+                        "cash_balance": sb,
+                        "realized_pnl": 0.0,
+                        "unrealized_pnl": 0.0,
+                        "locked_until": "",
+                    },
                 }
-            wallet = _update_wallet(user_id, session.session_id, session.realized_pnl, session.unrealized_pnl)
+            wallet = _update_wallet(user_id, session.session_id, session.realized_pnl, session.unrealized_pnl, starting_balance=session.starting_balance)
             metrics = session.metrics or _aggregate_session_metrics(session)
             process_running = (
                 any(p.poll() is None for p in session.processes.values()) or
