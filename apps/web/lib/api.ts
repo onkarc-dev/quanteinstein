@@ -1,15 +1,18 @@
 import { supabase } from './supabaseClient';
 
-const configuredApiBase =
+const rawBase =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
-  process.env.NEXT_PUBLIC_API_BASE;
+  process.env.NEXT_PUBLIC_API_BASE || '';
 
-export const API_BASE =
-  configuredApiBase ||
-  (process.env.NODE_ENV === 'production'
-    ? 'https://quantos-api.onrender.com'
-    : 'http://127.0.0.1:8010');
+const cleanedBase = rawBase.trim().replace(/\/+$/, '');
+
+// Ignore any stale temporary tunnel and always use the live personal quant engine
+const isValidBase = cleanedBase && !cleanedBase.includes('trycloudflare.com');
+
+export const API_BASE = isValidBase
+  ? cleanedBase
+  : 'https://quantos-api.onrender.com';
 
 if (process.env.NODE_ENV === 'development') {
   console.info(`QuantOS API base: ${API_BASE}`);
