@@ -267,7 +267,7 @@ export async function restoreSession(): Promise<AuthUser | null> {
   }
 }
 
-export async function api(path: string, options: RequestInit = {}) {
+export async function api(path: string, options: RequestInit = {}, retries = 2): Promise<any> {
   const token = getToken();
   const incomingHeaders = (options.headers as Record<string, string>) || {};
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...incomingHeaders };
@@ -277,8 +277,20 @@ export async function api(path: string, options: RequestInit = {}) {
   try {
     res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   } catch (err) {
+    if (retries > 0) {
+      console.info(`[QuantOS][api] Engine cold-starting. Retrying ${path} in 4s (${retries} attempts left)...`);
+      await new Promise(r => setTimeout(r, 4000));
+      return api(path, options, retries - 1);
+    }
     console.error('[QuantOS][api] Network request failed', { path, apiBase: API_BASE, error: err });
     throw new ApiError(GENERIC_SERVICE_ERROR, 0);
+  }
+
+  // If status is 502 or 503 (Render container spinning up from cold sleep), retry automatically
+  if ((res.status === 502 || res.status === 503) && retries > 0) {
+    console.info(`[QuantOS][api] Engine warming up (${res.status}). Retrying ${path} in 4s (${retries} attempts left)...`);
+    await new Promise(r => setTimeout(r, 4000));
+    return api(path, options, retries - 1);
   }
 
   const text = await res.text();
