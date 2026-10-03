@@ -73,16 +73,31 @@ def _safe_timeframe(tf: str) -> str:
     return t
 
 
+BINANCE_BASES = [
+    "https://data-api.binance.vision",
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+    "https://api.binance.us",
+]
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
+
 def _urlopen_json(url: str) -> Any:
     last_err: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "PRISMFlow/1.0"})
+            req = urllib.request.Request(url, headers=BROWSER_HEADERS)
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             last_err = e
-            time.sleep(min(2.0 * attempt, 8.0))
+            time.sleep(min(1.0 * attempt, 4.0))
     raise RuntimeError(f"Binance request failed after {MAX_RETRIES} retries: {last_err}")
 
 
@@ -98,8 +113,25 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> Lis
             "endTime": end_ms,
             "limit": 1000,
         })
-        url = f"https://api.binance.com/api/v3/klines?{params}"
-        data = _urlopen_json(url)
+        data = None
+        last_err = None
+        for base in BINANCE_BASES:
+            url = f"{base}/api/v3/klines?{params}"
+            for attempt in range(1, 3):
+                try:
+                    req = urllib.request.Request(url, headers=BROWSER_HEADERS)
+                    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.3)
+            if data is not None and isinstance(data, list):
+                break
+
+        if data is None:
+            raise RuntimeError(f"Binance market data fetch failed across all endpoints: {last_err}")
+
         if not data:
             break
         rows.extend(data)
@@ -108,7 +140,7 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> Lis
         if next_cursor <= cursor:
             break
         cursor = next_cursor
-        time.sleep(0.05)
+        time.sleep(0.02)
     return rows
 
 

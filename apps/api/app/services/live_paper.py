@@ -50,16 +50,22 @@ def _fetch_market_prices() -> Dict[str, float]:
     now_ts = time.time()
     if now_ts - float(_ticker_cache.get("ts", 0.0)) < 10:
         return dict(_ticker_cache.get("prices", {}))
-    try:
-        req = urllib.request.Request("https://api.binance.com/api/v3/ticker/price", headers={"User-Agent": "PRISMFlow/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        prices = {str(x.get("symbol", "")).upper(): _float(x.get("price")) for x in data if str(x.get("symbol", "")).upper() in SUPPORTED_SYMBOLS}
-        if prices:
-            _ticker_cache["ts"] = now_ts
-            _ticker_cache["prices"] = prices
-    except Exception:
-        pass
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+    for base in ("https://data-api.binance.vision", "https://api.binance.com", "https://api.binance.us"):
+        try:
+            req = urllib.request.Request(f"{base}/api/v3/ticker/price", headers=headers)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            prices = {str(x.get("symbol", "")).upper(): _float(x.get("price")) for x in data if str(x.get("symbol", "")).upper() in SUPPORTED_SYMBOLS}
+            if prices:
+                _ticker_cache["ts"] = now_ts
+                _ticker_cache["prices"] = prices
+                return prices
+        except Exception:
+            continue
     return dict(_ticker_cache.get("prices", {}))
 
 def _market_table(session: Optional["LivePaperSession"] = None) -> List[Dict[str, Any]]:
