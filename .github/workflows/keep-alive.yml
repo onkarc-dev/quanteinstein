@@ -1,0 +1,29 @@
+name: QuantOS 24/7 Keep-Alive
+
+on:
+  schedule:
+    # Runs every 10 minutes to prevent Render free-tier container from idling/sleeping (15-min idle timeout)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping QuantOS Backend Engine
+        run: |
+          echo "Pinging QuantOS Backend on Render..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 "https://quantos-api.onrender.com/health")
+          echo "QuantOS Engine Response Status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "Engine is active and healthy."
+          else
+            echo "Engine returned status $HTTP_STATUS, retrying wake-up..."
+            sleep 5
+            curl -sS --max-time 60 "https://quantos-api.onrender.com/health" || true
+          fi
+
+      - name: Ping Quanteinstein Frontend
+        run: |
+          echo "Pinging Quanteinstein Frontend..."
+          curl -s -o /dev/null -w "Quanteinstein Frontend Status: %{http_code}\n" --max-time 30 "https://www.quanteinstein.com"

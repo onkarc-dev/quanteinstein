@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, getUser } from "../../lib/api";
 
 type Cfg = {
@@ -128,6 +128,11 @@ export default function StrategyBuilder() {
   const [startDate, setStartDate] = useState(startIso());
   const [endDate, setEndDate] = useState(yesterdayIso());
   const heavyLowTimeframe = cfg.symbols.length > 3 && timeframeToSeconds(cfg.timeframe) <= 5;
+
+  useEffect(() => {
+    api('/health').catch(() => {});
+  }, []);
+
   function upd(k: keyof Cfg, v: any) {
     setCfg({ ...cfg, [k]: v });
   }
