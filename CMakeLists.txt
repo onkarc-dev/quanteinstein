@@ -59,57 +59,56 @@ if(WIN32)
         set(LWS_LINK_LIBS "${LWS_LIB_DIR}/websockets.lib" ws2_32 crypt32 userenv iphlpapi secur32)
     endif()
 else()
-    find_path(LWS_INCLUDE_DIR
-        NAMES libwebsockets.h
-        PATHS
-            /usr/include
-            /usr/local/include
-            /usr/include/libwebsockets
-            /usr/local/include/libwebsockets
-    )
-
-    find_library(LWS_LIBRARY
-        NAMES websockets libwebsockets
-        PATHS
-            /usr/lib
-            /usr/local/lib
-            /usr/lib/x86_64-linux-gnu
-            /usr/local/lib/x86_64-linux-gnu
-    )
-
+    find_package(Threads REQUIRED)
+    find_package(OpenSSL QUIET)
     find_package(PkgConfig QUIET)
-    if((NOT LWS_INCLUDE_DIR OR NOT LWS_LIBRARY) AND PkgConfig_FOUND)
+
+    if(PkgConfig_FOUND)
         pkg_check_modules(LIBWEBSOCKETS QUIET libwebsockets)
-        if(LIBWEBSOCKETS_FOUND)
-            if(NOT LWS_INCLUDE_DIR AND LIBWEBSOCKETS_INCLUDE_DIRS)
-                list(GET LIBWEBSOCKETS_INCLUDE_DIRS 0 LWS_INCLUDE_DIR)
-            endif()
-            if(NOT LWS_LIBRARY AND LIBWEBSOCKETS_LINK_LIBRARIES)
-                list(GET LIBWEBSOCKETS_LINK_LIBRARIES 0 LWS_LIBRARY)
-            endif()
-            if(NOT LWS_LIBRARY AND LIBWEBSOCKETS_LIBRARIES)
-                list(GET LIBWEBSOCKETS_LIBRARIES 0 LWS_LIBRARY)
-            endif()
-            message(STATUS "libwebsockets found via pkg-config: include=${LWS_INCLUDE_DIR}, lib=${LWS_LIBRARY}")
+    endif()
+
+    if(LIBWEBSOCKETS_FOUND)
+        set(LIVE_ENGINE_AVAILABLE TRUE)
+        set(LWS_INCLUDE_DIR ${LIBWEBSOCKETS_INCLUDE_DIRS})
+        set(LWS_LINK_LIBS ${LIBWEBSOCKETS_LIBRARIES})
+        message(STATUS "libwebsockets found via pkg-config: include=${LWS_INCLUDE_DIR}, libs=${LWS_LINK_LIBS}")
+    else()
+        find_path(LWS_INCLUDE_DIR
+            NAMES libwebsockets.h
+            PATHS
+                /usr/include
+                /usr/local/include
+                /usr/include/libwebsockets
+                /usr/local/include/libwebsockets
+        )
+
+        find_library(LWS_LIBRARY
+            NAMES websockets libwebsockets
+            PATHS
+                /usr/lib
+                /usr/local/lib
+                /usr/lib/x86_64-linux-gnu
+                /usr/local/lib/x86_64-linux-gnu
+        )
+
+        if(LWS_INCLUDE_DIR AND LWS_LIBRARY)
+            set(LIVE_ENGINE_AVAILABLE TRUE)
+            set(LWS_LINK_LIBS ${LWS_LIBRARY})
+            message(STATUS "libwebsockets found via find_library: include=${LWS_INCLUDE_DIR}, lib=${LWS_LIBRARY}")
         endif()
     endif()
 
-    find_package(OpenSSL QUIET)
-
-    if(LWS_INCLUDE_DIR AND LWS_LIBRARY)
-        set(LIVE_ENGINE_AVAILABLE TRUE)
-        set(LWS_LINK_LIBS ${LWS_LIBRARY})
-
-        if(OpenSSL_FOUND)
+    if(LIVE_ENGINE_AVAILABLE)
+        if(TARGET OpenSSL::SSL AND TARGET OpenSSL::Crypto)
             list(APPEND LWS_LINK_LIBS OpenSSL::SSL OpenSSL::Crypto)
+        elseif(OPENSSL_LIBRARIES)
+            list(APPEND LWS_LINK_LIBS ${OPENSSL_LIBRARIES})
+        else()
+            list(APPEND LWS_LINK_LIBS ssl crypto)
         endif()
-
-        list(APPEND LWS_LINK_LIBS z pthread)
-        message(STATUS "libwebsockets found: include=${LWS_INCLUDE_DIR}, lib=${LWS_LIBRARY}")
+        list(APPEND LWS_LINK_LIBS Threads::Threads z dl)
     else()
         message(WARNING "libwebsockets not found by CMake search or pkg-config.")
-        message(WARNING "LWS_INCLUDE_DIR=${LWS_INCLUDE_DIR}")
-        message(WARNING "LWS_LIBRARY=${LWS_LIBRARY}")
     endif()
 endif()
 

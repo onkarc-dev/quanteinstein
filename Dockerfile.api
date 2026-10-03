@@ -25,12 +25,9 @@ COPY proto/ ./proto/
 
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --target prism_backtest -- -j$(nproc) \
-    && if cmake --build build --target prism_live_paper_trading -- -j$(nproc); then \
-        echo "Built optional prism_live_paper_trading"; \
-    else \
-        echo "Optional prism_live_paper_trading target unavailable; live paper will fail fast unless the binary is mounted/provided"; \
-    fi \
-    && test -x /build/build/prism_backtest
+    && cmake --build build --target prism_live_paper_trading -- -j$(nproc) \
+    && test -x /build/build/prism_backtest \
+    && test -x /build/build/prism_live_paper_trading
 
 FROM ubuntu:22.04
 
@@ -45,7 +42,7 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     libssl3 \
     zlib1g \
-    libwebsockets16 \
+    libwebsockets-dev \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -67,16 +64,11 @@ COPY scripts/ ./scripts/
 RUN mkdir -p /app/build/Release /app/outputs
 
 COPY --from=cpp_builder /build/build/prism_backtest /app/build/Release/prism_backtest
-COPY --from=cpp_builder /build/build/prism_live_paper_trading* /app/build/Release/
+COPY --from=cpp_builder /build/build/prism_live_paper_trading /app/build/Release/prism_live_paper_trading
 
-RUN chmod +x /app/build/Release/prism_backtest \
+RUN chmod +x /app/build/Release/prism_backtest /app/build/Release/prism_live_paper_trading \
     && test -x /app/build/Release/prism_backtest \
-    && if [ -x /app/build/Release/prism_live_paper_trading ]; then \
-        chmod +x /app/build/Release/prism_live_paper_trading; \
-        echo "Optional live paper binary installed"; \
-    else \
-        echo "Optional live paper binary not installed; live paper API will fail fast if requested"; \
-    fi
+    && test -x /app/build/Release/prism_live_paper_trading
 
 ENV OUTPUTS_ROOT=/app/outputs
 ENV ENGINE_BINARY_PATH=/app/build/Release/prism_backtest

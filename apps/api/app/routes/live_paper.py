@@ -108,6 +108,16 @@ def wallet_live_paper(user=Depends(current_user)):
     }
 
 
+@router.get('/candles')
+def get_live_candles(symbol: str = "BTCUSDT", interval: str = "1m", limit: int = 100):
+    from app.services.live_paper import fetch_recent_candles, SUPPORTED_SYMBOLS
+    sym = symbol.strip().upper()
+    if sym not in SUPPORTED_SYMBOLS:
+        sym = "BTCUSDT"
+    candles = fetch_recent_candles(sym, interval=interval, limit=limit)
+    return {"symbol": sym, "interval": interval, "candles": candles}
+
+
 @router.get('/replay')
 def replay(input_data: str = 'data/sample_market_data.csv', max_rows: int = 250, user=Depends(current_user)):
     p = _safe_data_path(input_data)

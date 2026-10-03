@@ -72,8 +72,10 @@ bool BinanceClient::connect() {
 
     struct lws_client_connect_info ccinfo;
     std::memset(&ccinfo, 0, sizeof(ccinfo));
-    ccinfo.context = context_;
-    ccinfo.address = "stream.binance.com";
+    static int s_host_index = 0;
+    static const char* s_hosts[] = {"data-stream.binance.vision", "stream.binance.com"};
+    const char* chosen_host = s_hosts[(s_host_index++) % 2];
+    ccinfo.address = chosen_host;
     ccinfo.port = 9443;
     ccinfo.path = path_.c_str();
     ccinfo.host = ccinfo.address;

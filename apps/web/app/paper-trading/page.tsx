@@ -402,6 +402,7 @@ export default function PaperTradingPage() {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["BTCUSDT"]);
   const [chartSymbol, setChartSymbol] = useState("BTCUSDT");
   const [telemetryCandles, setTelemetryCandles] = useState<Record<string, LiveChartCandle[]>>({});
+  const [initialCandles, setInitialCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [message, setMessage] = useState(
     "Real-time Binance BTCUSDT live paper mode. No real-money execution.",
   );
@@ -622,12 +623,8 @@ export default function PaperTradingPage() {
     primaryMarket?.symbol ||
     (status.symbol && status.symbol !== "MULTI" ? status.symbol : selectedSymbols[0]) ||
     "Market";
-  const chartSymbols = Array.from(new Set([
-    ...(status.active_symbols || []),
-    ...(status.selected_symbols || liveConfig.symbols || selectedSymbols || []),
-    primarySymbol,
-  ].filter(Boolean).map((x: any) => String(x).toUpperCase())));
-  const selectedChartSymbol = chartSymbols.includes(chartSymbol) ? chartSymbol : String(primarySymbol || "BTCUSDT").toUpperCase();
+  const chartSymbols = SUPPORTED_SYMBOLS;
+  const selectedChartSymbol = SUPPORTED_SYMBOLS.includes(chartSymbol) ? chartSymbol : "BTCUSDT";
   const heartbeat = status.last_heartbeat || {};
   const selectedChartState = symbolStateFor(status, selectedChartSymbol);
   const selectedChartPrice = priceForSymbol(status, selectedChartSymbol, marketRows, heartbeat);
@@ -642,7 +639,9 @@ export default function PaperTradingPage() {
   ).slice(-1000);
   const chartCandles = uniqueBackendChartCandles.length
     ? uniqueBackendChartCandles
-    : telemetryCandles[selectedChartSymbol] || [];
+    : telemetryCandles[selectedChartSymbol]?.length
+      ? telemetryCandles[selectedChartSymbol]
+      : initialCandles[selectedChartSymbol] || [];
   const primaryPrice = heartbeat.latest_price ?? primaryMarket?.latest_price ?? status.last_price;
   const chartLastUpdate =
     status.last_heartbeat_at ||
@@ -682,6 +681,29 @@ export default function PaperTradingPage() {
     0;
 
   useEffect(() => {
+    let cancelled = false;
+    async function fetchCandles() {
+      try {
+        const res: any = await api(`/live-paper/candles?symbol=${selectedChartSymbol}&limit=100`);
+        if (!cancelled && Array.isArray(res?.candles) && res.candles.length) {
+          setInitialCandles((prev) => ({
+            ...prev,
+            [selectedChartSymbol]: res.candles,
+          }));
+        }
+      } catch (err) {
+        // Fallback silently if offline or endpoint not ready
+      }
+    }
+    if (!status.candles?.[selectedChartSymbol]?.length && !initialCandles[selectedChartSymbol]?.length) {
+      fetchCandles();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedChartSymbol, status.candles, initialCandles]);
+
+  useEffect(() => {
     if (uniqueBackendChartCandles.length) return;
     const price = Number(selectedChartPrice);
     if (!Number.isFinite(price) || price <= 0) return;
@@ -717,20 +739,83 @@ export default function PaperTradingPage() {
       </section>
 
       <section style={{ ...panelStyle, marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-          <h2 style={{ ...h2Style, marginBottom: 0 }}>{selectedChartSymbol} Local Feed Chart</h2>
-          <select
-            value={selectedChartSymbol}
-            onChange={(e) => setChartSymbol(e.target.value)}
-            style={inputStyle}
-          >
-            {chartSymbols.map((sym) => <option key={sym} value={sym}>{sym}</option>)}
-          </select>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <div>
+            <h2 style={{ ...h2Style, marginBottom: 2 }}>{selectedChartSymbol} Live Market Chart</h2>
+            <div style={{ color: "#94a3b8", fontSize: 13 }}>
+              Select any of the 10 Binance paper markets to view its real candlestick chart and live paper trades.
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#94a3b8", fontSize: 12 }}>Market Selector:</span>
+            <select
+              value={selectedChartSymbol}
+              onChange={(e) => setChartSymbol(e.target.value)}
+              style={inputStyle}
+            >
+              {SUPPORTED_SYMBOLS.map((sym) => {
+                const p = marketRows.find((m: any) => m.symbol === sym)?.latest_price;
+                return (
+                  <option key={sym} value={sym}>
+                    {sym} {p ? `($${money(p)})` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
+
+        {/* 10 Supported Market Quick-Tabs */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(115px, 1fr))",
+            gap: 8,
+            marginBottom: 14,
+          }}
+        >
+          {SUPPORTED_SYMBOLS.map((sym) => {
+            const isSelected = sym === selectedChartSymbol;
+            const symMarket = marketRows.find((m: any) => m.symbol === sym);
+            const symPrice = symMarket?.latest_price || (symbolStateFor(status, sym) as any)?.last_price;
+            const isTradeActive = (status.active_symbols?.includes(sym) || selectedSymbols.includes(sym)) && (status.status === "running" || status.status === "starting");
+            return (
+              <button
+                key={sym}
+                type="button"
+                onClick={() => setChartSymbol(sym)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: isSelected ? "2px solid #38bdf8" : "1px solid #334155",
+                  background: isSelected ? "rgba(56, 189, 248, 0.16)" : "#0b1220",
+                  color: isSelected ? "#38bdf8" : "#cbd5e1",
+                  cursor: "pointer",
+                  textAlign: "center",
+                  transition: "all 0.15s ease",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontWeight: isSelected ? 800 : 600, fontSize: 13 }}>
+                  {isTradeActive && (
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", display: "inline-block", boxShadow: "0 0 6px #22c55e" }} />
+                  )}
+                  {sym}
+                </div>
+                <div style={{ fontSize: 11, color: isSelected ? "#e0f2fe" : "#94a3b8" }}>
+                  {Number(symPrice) > 0 ? (symPrice < 1 ? `$${Number(symPrice).toFixed(4)}` : `$${money(symPrice)}`) : "-"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
         {chartCandles.length ? (
           <TradingChart
             candles={chartCandles}
-            markers={tradeRows.slice(-8).map((t:any) => ({
+            markers={tradeRows.filter((t: any) => !t.symbol || String(t.symbol).toUpperCase() === selectedChartSymbol).slice(-8).map((t:any) => ({
               time: chartCandles[chartCandles.length - 1]?.time,
               position: t.result === 'LOSS' ? 'aboveBar' : 'belowBar',
               text: t.status === "OPEN" ? "OPEN" : t.result || 'TRADE',
@@ -744,20 +829,21 @@ export default function PaperTradingPage() {
           />
         ) : (
           <div style={{ height: 320, border: "1px dashed #334155", borderRadius: 8, display: "grid", placeItems: "center", color: "#94a3b8", background: "#0f172a" }}>
-            Waiting for live ticks...
+            Loading {selectedChartSymbol} chart candles...
           </div>
         )}
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "#94a3b8", fontSize: 12, marginTop: 10 }}>
+          <span>Market: <strong style={{ color: "#38bdf8" }}>{selectedChartSymbol}</strong></span>
           <span>Chart candles: {chartCandles.length}</span>
           <span>
             Last OHLC: {chartLastCandle
               ? `${Number(chartLastCandle.open).toFixed(2)} / ${Number(chartLastCandle.high).toFixed(2)} / ${Number(chartLastCandle.low).toFixed(2)} / ${Number(chartLastCandle.close).toFixed(2)}`
               : "not available"}
           </span>
-          <span>Last price: {Number(selectedChartPrice) > 0 ? `$${money(selectedChartPrice)}` : "not available"}</span>
+          <span>Last price: {Number(selectedChartPrice) > 0 ? (selectedChartPrice < 1 ? `$${Number(selectedChartPrice).toFixed(4)}` : `$${money(selectedChartPrice)}`) : "not available"}</span>
           <span>Last update: {chartUpdateTime(chartLastUpdate)}</span>
         </div>
-        <p style={{ color: '#fbbf24', marginBottom: 0 }}>Paper trading only. No real broker orders. No financial advice.</p>
+        <p style={{ color: '#fbbf24', marginBottom: 0, marginTop: 8 }}>Paper trading only. No real broker orders. No financial advice.</p>
       </section>
 
       <section style={{ ...panelStyle, marginBottom: 16 }}>
