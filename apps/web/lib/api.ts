@@ -40,7 +40,24 @@ export class ApiError extends Error {
 
 export function getToken(): string {
   if (typeof window === 'undefined') return '';
-  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem('token') || '';
+  const local = localStorage.getItem(TOKEN_KEY) || localStorage.getItem('token');
+  if (local) return local;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          const parsed = JSON.parse(item);
+          if (parsed?.access_token) {
+            localStorage.setItem(TOKEN_KEY, parsed.access_token);
+            return parsed.access_token;
+          }
+        }
+      }
+    }
+  } catch {}
+  return '';
 }
 
 export function getUser(): AuthUser | null {
@@ -170,10 +187,21 @@ export function formatApiError(err: unknown): string {
 
 let redirectingToLogin = false;
 
-function handleUnauthorized() {
+async function handleUnauthorized() {
   if (typeof window === 'undefined' || redirectingToLogin) return;
   const path = window.location.pathname;
   if (path === '/login' || path === '/') return;
+
+  if (supabase) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        saveAuth({ token: session.access_token });
+        return;
+      }
+    } catch {}
+  }
+
   redirectingToLogin = true;
   clearAuth();
   const expired = path !== '/login' ? '?expired=1' : '';

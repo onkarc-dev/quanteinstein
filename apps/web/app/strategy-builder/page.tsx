@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { api, getUser } from "../../lib/api";
+import { api, getUser, getToken } from "../../lib/api";
 
 type Cfg = {
   strategyCode: string;
@@ -212,22 +212,31 @@ export default function StrategyBuilder() {
     }
   }
   async function poll(jobId: string) {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 45; i++) {
       const j: any = await api(`/jobs/${jobId}`);
       setPollJob(j);
+      setJob(j);
       const total = payload.symbols.length;
       if (total > 1) {
         setRunProgress(
-          `Running selected basket (${total} symbols). Backend progress is job-level, so per-symbol completions will appear when the report finishes. Poll ${i + 1} / 20.`,
+          `Running selected basket (${total} symbols). Backend progress is job-level, so per-symbol completions will appear when the report finishes. Poll ${i + 1} / 45.`,
         );
+      } else {
+        setRunProgress(`Processing candles and generating backtest report (poll ${i + 1} / 45)...`);
       }
       if (j.status === "completed" || j.status === "failed") return j;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1500));
     }
     return null;
   }
   async function run() {
     if (running) return;
+    const token = getToken();
+    if (!token) {
+      setMsg("Please sign in first to run backtests.");
+      setRunProgress("Authentication required.");
+      return;
+    }
     const selectedSymbols = payload.symbols;
     try {
       setRunning(true);
@@ -241,12 +250,26 @@ export default function StrategyBuilder() {
       setPollJob(null);
       let sid = strategyId;
       if (!sid) {
-        const s: any = await api("/strategies", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        sid = s.strategy_id || s.id;
-        setStrategyId(sid);
+        try {
+          const s: any = await api("/strategies", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          sid = s.strategy_id || s.id;
+          setStrategyId(sid);
+        } catch (stratErr: any) {
+          try {
+            const strats: any = await api("/strategies");
+            const found = Array.isArray(strats) && strats.find((st: any) =>
+              st.user_strategy_id === payload.user_strategy_id || st.name === payload.name
+            );
+            if (found) {
+              sid = found.id || found.strategy_id;
+              setStrategyId(sid);
+            }
+          } catch {}
+          if (!sid) throw stratErr;
+        }
       }
       const r: any = await api("/jobs/submit-backtest", {
         method: "POST",
@@ -274,17 +297,24 @@ export default function StrategyBuilder() {
         setMsg("Backtest queued. Polling job status...");
         const finalJob = await poll(r.job_id);
         if (finalJob) {
+          setJob(finalJob);
+          setPollJob(finalJob);
           setMsg(`Backtest ${finalJob.status}. Job: ${r.job_id}`);
           if (selectedSymbols.length > 1 && finalJob.status === "completed") {
             setRunProgress(`Completed ${selectedSymbols.length} / ${selectedSymbols.length} selected symbols.`);
+          } else if (finalJob.status === "completed") {
+            setRunProgress("Backtest completed successfully.");
+          } else if (finalJob.status === "failed") {
+            setMsg("Backtest failed: " + (finalJob.error || finalJob.error_message || "Unknown error"));
           }
         } else {
-          setRunProgress("Still waiting on the backend. Refresh Backtests for final status if this request times out.");
+          setRunProgress("Still processing on the backend. Refresh Backtests page for final results.");
         }
-      } else if (r.status === "failed")
+      } else if (r.status === "failed") {
         setMsg(
           "Backtest failed: " + (r.error || r.error_message || "Unknown error"),
         );
+      }
     } catch (e: any) {
       setMsg("Backtest failed: " + e.message);
       setRunProgress("Backtest request failed before completion.");

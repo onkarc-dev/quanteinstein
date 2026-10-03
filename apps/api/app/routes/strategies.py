@@ -26,14 +26,20 @@ def create_strategy(strategy: StrategyCreate, user=Depends(current_user)):
     data["user_strategy_id"] = _clean_user_strategy_id(data.get("user_strategy_id"), f"STRAT-{sid[:8]}")
     p = _p()
     with get_conn() as conn:
-        existing = conn.execute(f"SELECT config_json FROM strategies WHERE user_id={p}", (user["id"],)).fetchall()
+        existing = conn.execute(f"SELECT id, config_json FROM strategies WHERE user_id={p}", (user["id"],)).fetchall()
         for row in existing:
             try:
-                cfg = json.loads(row["config_json"] if hasattr(row, "keys") else row[0])
+                cfg = json.loads(row["config_json"] if hasattr(row, "keys") else row[1])
             except Exception:
                 cfg = {}
             if _clean_user_strategy_id(cfg.get("user_strategy_id") or cfg.get("strategy_id"), "") == data["user_strategy_id"]:
-                raise HTTPException(status_code=409, detail="This Strategy ID is already used. Use a different unique Strategy ID.")
+                existing_id = row["id"] if hasattr(row, "keys") else row[0]
+                conn.execute(
+                    f"UPDATE strategies SET name={p}, symbols_json={p}, timeframe={p}, config_json={p}, updated_at={p} WHERE id={p} AND user_id={p}",
+                    (strategy.name, json.dumps(strategy.symbols), strategy.timeframe, json.dumps(data), now(), existing_id, user["id"])
+                )
+                conn.commit()
+                return {"id": existing_id, "strategy_id": existing_id, "user_strategy_id": data.get("user_strategy_id"), "user_id": user["id"], **data}
         conn.execute(
             f"INSERT INTO strategies(id,user_id,name,symbols_json,timeframe,config_json,created_at,updated_at) VALUES({p},{p},{p},{p},{p},{p},{p},{p})",
             (sid, user["id"], strategy.name, json.dumps(strategy.symbols), strategy.timeframe, json.dumps(data), now(), now())

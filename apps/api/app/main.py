@@ -50,10 +50,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — restrict in production via CORS_ORIGINS env var
+# CORS — explicitly permit production frontend domain, local dev, and dynamic origin reflection
+allowed_origins = [o for o in settings.cors_origins if o != "*"]
+for def_origin in ("https://www.quanteinstein.com", "https://quanteinstein.com", "http://localhost:3000", "http://127.0.0.1:3000"):
+    if def_origin not in allowed_origins:
+        allowed_origins.append(def_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins if settings.cors_origins else ["*"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

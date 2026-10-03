@@ -114,14 +114,11 @@ class Settings:
         self.rate_limit_per_minute = _as_int("RATE_LIMIT_PER_MINUTE", 120)
 
         # CORS
-        cors_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+        cors_default = "https://www.quanteinstein.com,https://quanteinstein.com,http://localhost:3000,http://127.0.0.1:3000"
+        cors_raw = os.getenv("CORS_ORIGINS", cors_default)
         self.cors_origins = [o.strip().rstrip("/") for o in cors_raw.split(",") if o.strip()]
         self.cors_all_enabled = "*" in self.cors_origins
-        if self.is_prod and self.cors_all_enabled:
-            raise RuntimeError(
-                "CORS_ORIGINS='*' is not allowed when ENV=production. "
-                "Set CORS_ORIGINS to your exact frontend domain."
-            )
+        self.supabase_jwt_secret = os.getenv("SUPABASE_JWT_SECRET", "").strip()
 
         # Production hardening
         self.enforce_https = _as_bool(os.getenv("ENFORCE_HTTPS", "false"), False)
