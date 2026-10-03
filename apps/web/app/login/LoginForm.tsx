@@ -420,7 +420,7 @@ export default function LoginForm() {
       <div className="hero">
         <h1>Quanteinstein</h1>
         <p className="muted">Trade Daily, Trade Safely</p>
-        <p className="muted">Existing users log in with email and password. First-time users register with email OTP.</p>
+        <p className="muted">Existing users log in with email and password. First-time users register below.</p>
       </div>
 
       <div className="card" style={{ maxWidth: 720 }}>
@@ -503,10 +503,10 @@ export default function LoginForm() {
           </label>
           <br /><br />
 
-          <p className="muted">Use the same email and password fields above, then generate OTP.</p>
+          <p className="muted">Enter your name, email, and password above, then click Register Account.</p>
 
           <button className="secondary" onClick={requestOtp} disabled={busy}>
-            {otpRequested ? 'Resend OTP' : 'Generate OTP'}
+            {otpRequested ? 'Resend Verification' : 'Register Account'}
           </button>{' '}
 
           {otpRequested && (
