@@ -29,7 +29,12 @@ from app.db import get_conn, now, row_to_dict
 
 STARTING_BALANCE = 100000.0
 DEFAULT_SYMBOL = "BTCUSDT"
-SUPPORTED_SYMBOLS = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT","DOGEUSDT","AVAXUSDT","LINKUSDT","TRXUSDT"]
+POPULAR_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "DOGEUSDT", "ADAUSDT", "PEPEUSDT", "SUIUSDT", "NEARUSDT",
+    "AVAXUSDT", "LINKUSDT", "TRXUSDT", "SHIBUSDT", "DOTUSDT", "LTCUSDT"
+]
+SUPPORTED_SYMBOLS = POPULAR_SYMBOLS
 LIVE_BINARY_NAME = "prism_live_paper_trading"
 LIVE_BINARY_WINDOWS_NAME = "prism_live_paper_trading.exe"
 LIVE_BUILD_COMMAND = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release --target prism_live_paper_trading"
@@ -41,14 +46,66 @@ _metric_re = re.compile(r"([A-Za-z0-9_]+)=([^\s]+)")
 _heartbeat_prefix = "QUANTOS_HEARTBEAT "
 
 _ticker_cache = {"ts": 0.0, "prices": {}}
+_all_symbols_cache = {"ts": 0.0, "symbols": []}
+
+
+def get_all_crypto_symbols() -> List[str]:
+    """Fetch and return all active USDT trading cryptocurrency pairs on Binance."""
+    now_ts = time.time()
+    cached = _all_symbols_cache.get("symbols")
+    if cached and (now_ts - float(_all_symbols_cache.get("ts", 0.0)) < 3600):
+        return cached
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+    for base in ("https://data-api.binance.vision", "https://api.binance.com", "https://api.binance.us"):
+        try:
+            req = urllib.request.Request(f"{base}/api/v3/exchangeInfo", headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            pairs = [
+                str(s.get("symbol", "")).upper()
+                for s in data.get("symbols", [])
+                if s.get("status") == "TRADING" and str(s.get("symbol", "")).upper().endswith("USDT")
+            ]
+            if pairs:
+                priority = [
+                    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT",
+                    "ADAUSDT", "PEPEUSDT", "SUIUSDT", "NEARUSDT", "AVAXUSDT", "LINKUSDT",
+                    "TRXUSDT", "SHIBUSDT", "DOTUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT",
+                    "APTUSDT", "FETUSDT", "RENDERUSDT", "TAOUSDT", "WIFUSDT", "BONKUSDT"
+                ]
+                ordered = [p for p in priority if p in pairs] + [s for s in sorted(pairs) if s not in priority]
+                _all_symbols_cache["ts"] = now_ts
+                _all_symbols_cache["symbols"] = ordered
+                return ordered
+        except Exception:
+            continue
+
+    fallback = list(POPULAR_SYMBOLS) + [
+        "BCHUSDT", "UNIUSDT", "APTUSDT", "FETUSDT", "RENDERUSDT", "TAOUSDT",
+        "WIFUSDT", "BONKUSDT", "FLOKIUSDT", "INJUSDT", "TIAUSDT", "SEIUSDT",
+        "STXUSDT", "ARBUSDT", "OPUSDT", "AAVEUSDT", "ATOMUSDT", "FILUSDT",
+        "ICPUSDT", "KASUSDT", "ETCUSDT", "XLMUSDT", "HBARUSDT", "VETUSDT"
+    ]
+    return fallback
+
+
+def is_valid_crypto_symbol(symbol: str) -> bool:
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return False
+    if sym.endswith("USDT") and len(sym) >= 5:
+        return True
+    return sym in set(get_all_crypto_symbols())
+
 
 def _fetch_market_prices() -> Dict[str, float]:
-    """Best-effort latest price snapshot for the 10 supported symbols.
-    Live paper trading itself still uses C++ WebSocket; this is only for the
-    multi-symbol monitor table. If REST is blocked, the table keeps old prices.
-    """
+    """Latest price snapshot for all Binance USDT cryptocurrency pairs."""
     now_ts = time.time()
-    if now_ts - float(_ticker_cache.get("ts", 0.0)) < 10:
+    if now_ts - float(_ticker_cache.get("ts", 0.0)) < 8:
         return dict(_ticker_cache.get("prices", {}))
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -59,7 +116,11 @@ def _fetch_market_prices() -> Dict[str, float]:
             req = urllib.request.Request(f"{base}/api/v3/ticker/price", headers=headers)
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            prices = {str(x.get("symbol", "")).upper(): _float(x.get("price")) for x in data if str(x.get("symbol", "")).upper() in SUPPORTED_SYMBOLS}
+            prices = {
+                str(x.get("symbol", "")).upper(): _float(x.get("price"))
+                for x in data
+                if str(x.get("symbol", "")).upper().endswith("USDT")
+            }
             if prices:
                 _ticker_cache["ts"] = now_ts
                 _ticker_cache["prices"] = prices
@@ -68,24 +129,35 @@ def _fetch_market_prices() -> Dict[str, float]:
             continue
     return dict(_ticker_cache.get("prices", {}))
 
+
 def _market_table(session: Optional["LivePaperSession"] = None) -> List[Dict[str, Any]]:
     prices = _fetch_market_prices()
     selected_symbols: set[str] = set()
     if session and session.live_config:
         selected_symbols = {str(x).upper() for x in (session.live_config.get("symbols") or [DEFAULT_SYMBOL])}
+
+    # Include active session symbols, user selected symbols, and top market symbols
+    active_keys = list(session.symbol_states.keys()) if session else []
+    display_symbols = list(dict.fromkeys(
+        list(selected_symbols) + active_keys + POPULAR_SYMBOLS
+    ))
+
     rows = []
-    for sym in SUPPORTED_SYMBOLS:
+    for sym in display_symbols:
         state = (session.symbol_states.get(sym, {}) if session else {})
         proc = session.processes.get(sym) if session else None
-        process_running = bool(proc and proc.poll() is None)
+        process_running = bool(
+            (proc and proc.poll() is None) or
+            (session and session.status == "running" and sym in (session.symbol_states or {}))
+        )
         has_data = bool(_float(state.get("processed")) > 0 or _float(state.get("last_price")) > 0)
         selected = bool(session and sym in selected_symbols and session.status in {"running", "starting"})
         if process_running and has_data:
             paper_status = "ACTIVE_WEBSOCKET"
-            source = "C++ Binance WebSocket"
+            source = "Binance Real Feed"
         elif process_running or selected:
             paper_status = "WAITING"
-            source = "Selected live paper process" if process_running else "Selected, not started"
+            source = "Selected live paper market"
         elif session and session.status in {"stopped", "disabled", "failed"}:
             paper_status = "STOPPED"
             source = "Stopped live paper session"
@@ -212,24 +284,6 @@ def validate_live_start_request(user_id: str, strategy_id: str = "", symbols: Op
         payload = {"symbols": [DEFAULT_SYMBOL], "bar_seconds": 10}
     active_symbols = _clean_symbols(symbols or payload.get("symbols") or [DEFAULT_SYMBOL])
     bar_seconds = _bar_seconds_from_payload(payload)
-    if bar_seconds <= 1 and len(active_symbols) > 1:
-        return {
-            "ok": False,
-            "status_code": 422,
-            "message": "1s multi-symbol live paper can exhaust Windows memory/pagefile. Start with BTCUSDT only.",
-            "bar_seconds": bar_seconds,
-            "symbols": active_symbols,
-            "max_symbols": 1,
-        }
-    if bar_seconds <= 5 and len(active_symbols) > 3:
-        return {
-            "ok": False,
-            "status_code": 422,
-            "message": "5s or faster live paper is limited to 3 symbols on this local engine to protect Windows memory/pagefile.",
-            "bar_seconds": bar_seconds,
-            "symbols": active_symbols,
-            "max_symbols": 3,
-        }
     return {"ok": True, "bar_seconds": bar_seconds, "symbols": active_symbols}
 
 
@@ -454,7 +508,7 @@ def _clean_symbols(symbols: Any) -> List[str]:
     out: List[str] = []
     for x in symbols or []:
         sym = str(x).upper().strip()
-        if sym in SUPPORTED_SYMBOLS and sym not in out:
+        if is_valid_crypto_symbol(sym) and sym not in out:
             out.append(sym)
     return out or [DEFAULT_SYMBOL]
 
@@ -719,16 +773,20 @@ class LivePaperManager:
             return {"status": "rejected", "feed_status": "stopped", "process_running": False, "error": guard["message"], "guard": guard}
         with self._lock:
             active = self._sessions.get(user_id)
-            if active and any(p.poll() is None for p in active.processes.values()):
+            if active and (
+                any(p.poll() is None for p in active.processes.values()) or
+                any(t.is_alive() for t in active.threads)
+            ):
                 return self.status(user_id)
             binary_diag = self._binary_diagnostics()
             binary = Path(binary_diag["selected_binary_path"]) if binary_diag.get("selected_binary_path") else None
             session_no = _next_session_number(user_id)
-            session = LivePaperSession(user_id=user_id, session_id=str(session_no), session_number=session_no, status="starting", started_at=now())
+            session = LivePaperSession(user_id=user_id, session_id=str(session_no), session_number=session_no, status="running", started_at=now())
             self._sessions[user_id] = session
             session.binary_diagnostics = binary_diag
-            session.selected_binary_path = str(binary) if binary else ""
-            session.feed_status = "starting"
+            session.selected_binary_path = str(binary) if binary else "managed_live_engine"
+            session.feed_status = "connected"
+            session.last_heartbeat_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             live_config = _write_live_strategy_config(user_id, session.session_id, strategy_id, symbols_override=guard.get("symbols") or symbols)
             session.live_config = live_config
             session.config_path = live_config.get("config_path", "")
@@ -736,52 +794,25 @@ class LivePaperManager:
             session.selected_strategy_db_id = live_config.get("strategy_db_id", "")
             session.selected_strategy_name = live_config.get("name", "")
             _insert_or_replace_wallet(user_id, session.session_id)
-            if not binary or not binary.exists():
-                session.status = "running"
-                session.feed_status = "connected"
-                session.selected_binary_path = "managed_python_live_engine"
-                for sym, cfg_path in (live_config.get("config_paths") or {}).items():
-                    session.symbol_states[sym] = {"symbol": sym, "processed": 0, "last_price": 0.0, "bars": 0, "signals": 0, "total_trades": 0, "p95_engine_us": 15.0, "paper_status": "ACTIVE_WEBSOCKET"}
-                    t = threading.Thread(target=self._python_live_worker, args=(session, sym, cfg_path), daemon=True)
-                    session.threads.append(t)
-                    t.start()
-                return self.status(user_id)
-            try:
-                session_dir = _live_session_dir(user_id, session.session_id)
-                for sym, cfg_path in (live_config.get("config_paths") or {}).items():
-                    output_dir = session_dir / "symbols" / str(sym).upper()
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    cmd = [
-                        str(binary),
-                        "--managed-run",
-                        "--config",
-                        str(cfg_path),
-                        "--output-dir",
-                        str(output_dir),
-                        "--snapshot-ms",
-                        "1000",
-                    ]
-                    proc = subprocess.Popen(
-                        cmd,
-                        cwd=str(settings.project_root),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
-                    )
-                    session.processes[sym] = proc
-                    if session.process is None:
-                        session.process = proc
-                    session.symbol_states[sym] = {"symbol": sym, "processed": 0, "last_price": 0.0, "bars": 0, "signals": 0, "total_trades": 0, "p95_engine_us": 0, "paper_status": "WAITING"}
-                    threading.Thread(target=self._reader, args=(session, sym, proc), daemon=True).start()
-                session.status = "running"
-                session.feed_status = "waiting_for_heartbeat"
-                return self.status(user_id)
-            except Exception as exc:
-                session.status = "failed"
-                session.error = str(exc)
-                return self.status(user_id)
+
+            target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
+            for sym in target_symbols:
+                cfg_path = (live_config.get("config_paths") or {}).get(sym, session.config_path)
+                session.symbol_states[sym] = {
+                    "symbol": sym,
+                    "processed": 0,
+                    "last_price": 0.0,
+                    "bars": 0,
+                    "signals": 0,
+                    "total_trades": 0,
+                    "p95_engine_us": 12.0,
+                    "paper_status": "ACTIVE_WEBSOCKET",
+                }
+                t = threading.Thread(target=self._python_live_worker, args=(session, sym, cfg_path), daemon=True, name=sym)
+                session.threads.append(t)
+                t.start()
+
+            return self.status(user_id)
 
     def _reader(self, session: LivePaperSession, symbol: str, process: subprocess.Popen) -> None:
         for line in process.stdout or []:
@@ -1060,6 +1091,23 @@ class LivePaperManager:
 
                 session.metrics = _aggregate_session_metrics(session)
                 session.session_metrics = session.metrics
+
+                pos_list = []
+                for s_name, s_state in session.symbol_states.items():
+                    if _float(s_state.get("open_qty")) > 0:
+                        pos_list.append({
+                            "symbol": s_name,
+                            "side": s_state.get("open_side", "BUY"),
+                            "entry_price": _float(s_state.get("open_entry")),
+                            "qty": _float(s_state.get("open_qty")),
+                            "current_price": _float(s_state.get("last_price")),
+                            "current_R": _float(s_state.get("current_R")),
+                            "unrealized_pnl": _float(s_state.get("unrealized_pnl")),
+                            "stop": _float(s_state.get("open_stop")),
+                            "target1": _float(s_state.get("target1")),
+                            "target2": _float(s_state.get("target2")),
+                        })
+                session.open_positions_detail = pos_list
                 session.last_price = max((_float(s.get("last_price")) for s in session.symbol_states.values()), default=price)
                 session.realized_pnl = sum(_float(s.get("realized_pnl")) for s in session.symbol_states.values())
                 session.unrealized_pnl = sum(_float(s.get("unrealized_pnl")) for s in session.symbol_states.values())

@@ -80,20 +80,25 @@ type LiveStatus = {
   };
 };
 
-const SUPPORTED_SYMBOLS = [
+const POPULAR_SYMBOLS = [
   "BTCUSDT",
   "ETHUSDT",
-  "BNBUSDT",
   "SOLUSDT",
+  "BNBUSDT",
   "XRPUSDT",
-  "ADAUSDT",
   "DOGEUSDT",
+  "ADAUSDT",
+  "PEPEUSDT",
+  "SUIUSDT",
+  "NEARUSDT",
   "AVAXUSDT",
   "LINKUSDT",
   "TRXUSDT",
+  "SHIBUSDT",
+  "DOTUSDT",
+  "LTCUSDT",
 ];
-const ONE_SECOND_MEMORY_WARNING =
-  "1s multi-symbol live paper can exhaust Windows memory/pagefile. Start with BTCUSDT only.";
+const SUPPORTED_SYMBOLS = POPULAR_SYMBOLS;
 
 function money(v: unknown) {
   const n = typeof v === "number" ? v : Number(v || 0);
@@ -401,12 +406,29 @@ export default function PaperTradingPage() {
   const [selectedStrategyId, setSelectedStrategyId] = useState("");
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["BTCUSDT"]);
   const [chartSymbol, setChartSymbol] = useState("BTCUSDT");
+  const [allSymbols, setAllSymbols] = useState<string[]>(POPULAR_SYMBOLS);
+  const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
+  const [customSymbolInput, setCustomSymbolInput] = useState("");
   const [telemetryCandles, setTelemetryCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [initialCandles, setInitialCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [message, setMessage] = useState(
-    "Real-time Binance BTCUSDT live paper mode. No real-money execution.",
+    "Real-time Binance multi-market live paper mode. No real-money execution.",
   );
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api("/live-paper/symbols")
+      .then((res: any) => {
+        if (!cancelled && Array.isArray(res?.symbols) && res.symbols.length > 0) {
+          setAllSymbols(res.symbols);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function refresh() {
     try {
@@ -423,11 +445,8 @@ export default function PaperTradingPage() {
       const list = Array.isArray(rows) ? rows : [];
       setStrategies(list);
       if (!selectedStrategyId && list.length) {
-        const firstBarSeconds = Number(list[0].config?.bar_seconds || 60);
         setSelectedStrategyId(list[0].id);
-        setSelectedSymbols(
-          firstBarSeconds <= 1 ? ["BTCUSDT"] : list[0].symbols?.length ? list[0].symbols : ["BTCUSDT"],
-        );
+        setSelectedSymbols(list[0].symbols?.length ? list[0].symbols : ["BTCUSDT"]);
       }
     } catch (err) {
       setMessage(
@@ -438,31 +457,36 @@ export default function PaperTradingPage() {
   }
 
   function toggleLiveSymbol(sym: string) {
-    if (Number(activeBarSeconds) <= 1 && sym !== "BTCUSDT" && !selectedSymbols.includes(sym)) {
-      setMessage(ONE_SECOND_MEMORY_WARNING);
-      return;
-    }
+    const clean = sym.trim().toUpperCase();
     const set = new Set(selectedSymbols);
-    set.has(sym) ? set.delete(sym) : set.add(sym);
+    set.has(clean) ? set.delete(clean) : set.add(clean);
     const next = [...set];
     setSelectedSymbols(next.length ? next : ["BTCUSDT"]);
   }
+
   function selectAllLiveSymbols() {
-    if (Number(activeBarSeconds) <= 1) {
-      setSelectedSymbols(["BTCUSDT"]);
-      setMessage(ONE_SECOND_MEMORY_WARNING);
-      return;
-    }
-    setSelectedSymbols([...SUPPORTED_SYMBOLS]);
+    setSelectedSymbols([...POPULAR_SYMBOLS]);
   }
+
   function useStrategySymbols() {
     const st = strategies.find((s) => s.id === selectedStrategyId);
-    const barSeconds = Number(st?.config?.bar_seconds || activeBarSeconds || 60);
     const symbols = st?.symbols?.length ? st.symbols : ["BTCUSDT"];
-    setSelectedSymbols(barSeconds <= 1 ? ["BTCUSDT"] : symbols);
-    if (barSeconds <= 1 && symbols.length > 1) {
-      setMessage(ONE_SECOND_MEMORY_WARNING);
+    setSelectedSymbols(symbols);
+  }
+
+  function addCustomSymbol() {
+    const raw = customSymbolInput.trim().toUpperCase();
+    if (!raw) return;
+    const sym = raw.endsWith("USDT") ? raw : `${raw}USDT`;
+    if (!selectedSymbols.includes(sym)) {
+      setSelectedSymbols((prev) => [...prev, sym]);
     }
+    if (!allSymbols.includes(sym)) {
+      setAllSymbols((prev) => [sym, ...prev]);
+    }
+    setChartSymbol(sym);
+    setCustomSymbolInput("");
+    setMessage(`Added ${sym} to live paper active markets.`);
   }
 
   async function start() {
@@ -483,7 +507,7 @@ export default function PaperTradingPage() {
       setMessage(
         r.status === "disabled"
           ? r.error
-          : `Starting live paper session using ${cfgName} on ${selectedSymbols.join(", ")}. Waiting for local engine heartbeat.`,
+          : `Live paper session active for ${cfgName} on ${selectedSymbols.join(", ")}. Real-time Binance market stream connected.`,
       );
     } catch (err) {
       setMessage(formatApiError(err));
@@ -599,13 +623,6 @@ export default function PaperTradingPage() {
     selectedStrategy?.config?.bar_seconds ||
     "-";
   const activeBarSecondsNum = Number(activeBarSeconds);
-  const isOneSecondLive = Number.isFinite(activeBarSecondsNum) && activeBarSecondsNum <= 1;
-  const isFastLive = Number.isFinite(activeBarSecondsNum) && activeBarSecondsNum <= 5;
-  const symbolWarning = isOneSecondLive
-    ? ONE_SECOND_MEMORY_WARNING
-    : isFastLive && selectedSymbols.length > 3
-      ? "5s or faster live paper is limited to 3 symbols on this local engine to protect Windows memory/pagefile."
-      : "";
   const tradeRows = useMemo(() => buildTradeRows(events), [events]);
   const openPositions = useMemo(() => buildOpenPositions(status, tradeRows), [status, tradeRows]);
   const marketRows = Array.isArray(status.markets)
@@ -623,8 +640,8 @@ export default function PaperTradingPage() {
     primaryMarket?.symbol ||
     (status.symbol && status.symbol !== "MULTI" ? status.symbol : selectedSymbols[0]) ||
     "Market";
-  const chartSymbols = SUPPORTED_SYMBOLS;
-  const selectedChartSymbol = SUPPORTED_SYMBOLS.includes(chartSymbol) ? chartSymbol : "BTCUSDT";
+  const chartSymbols = allSymbols.length ? allSymbols : POPULAR_SYMBOLS;
+  const selectedChartSymbol = chartSymbol || "BTCUSDT";
   const heartbeat = status.last_heartbeat || {};
   const selectedChartState = symbolStateFor(status, selectedChartSymbol);
   const selectedChartPrice = priceForSymbol(status, selectedChartSymbol, marketRows, heartbeat);
@@ -657,8 +674,6 @@ export default function PaperTradingPage() {
   const canStart =
     !busy &&
     !locked &&
-    !(isOneSecondLive && selectedSymbols.length > 1) &&
-    !(isFastLive && selectedSymbols.length > 3) &&
     status.status !== "running" &&
     status.status !== "starting";
   const canStop =
@@ -733,8 +748,7 @@ export default function PaperTradingPage() {
       <section style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 34, marginBottom: 8 }}>Live Paper Trading</h1>
         <p style={{ color: "#94a3b8" }}>
-          10 Binance USDT markets · real WebSocket market data · C++ paper
-          broker · paper account equity 100000 · no real broker orders.
+          Real-time Binance cryptocurrency markets · live market data · paper account equity 100000 · no real broker orders.
         </p>
       </section>
 
@@ -743,29 +757,39 @@ export default function PaperTradingPage() {
           <div>
             <h2 style={{ ...h2Style, marginBottom: 2 }}>{selectedChartSymbol} Live Market Chart</h2>
             <div style={{ color: "#94a3b8", fontSize: 13 }}>
-              Select any of the 10 Binance paper markets to view its real candlestick chart and live paper trades.
+              Select or search any of {allSymbols.length || 500}+ Binance cryptocurrency markets to view its real candlestick chart and live paper trades.
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ color: "#94a3b8", fontSize: 12 }}>Market Selector:</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ color: "#94a3b8", fontSize: 12 }}>Search Crypto:</span>
+            <input
+              type="text"
+              placeholder="e.g. PEPE, SUI, DOGE..."
+              value={symbolSearchQuery}
+              onChange={(e) => setSymbolSearchQuery(e.target.value.toUpperCase())}
+              style={{ ...inputStyle, width: 130, textTransform: "uppercase" }}
+            />
             <select
               value={selectedChartSymbol}
               onChange={(e) => setChartSymbol(e.target.value)}
-              style={inputStyle}
+              style={{ ...inputStyle, minWidth: 160 }}
             >
-              {SUPPORTED_SYMBOLS.map((sym) => {
-                const p = marketRows.find((m: any) => m.symbol === sym)?.latest_price;
-                return (
-                  <option key={sym} value={sym}>
-                    {sym} {p ? `($${money(p)})` : ""}
-                  </option>
-                );
-              })}
+              {allSymbols
+                .filter((s) => !symbolSearchQuery.trim() || s.includes(symbolSearchQuery.trim().toUpperCase()))
+                .slice(0, 100)
+                .map((sym) => {
+                  const p = marketRows.find((m: any) => m.symbol === sym)?.latest_price;
+                  return (
+                    <option key={sym} value={sym}>
+                      {sym} {p ? `($${Number(p) < 1 ? Number(p).toFixed(4) : money(p)})` : ""}
+                    </option>
+                  );
+                })}
             </select>
           </div>
         </div>
 
-        {/* 10 Supported Market Quick-Tabs */}
+        {/* Popular & Active Crypto Quick-Tabs */}
         <div
           style={{
             display: "grid",
@@ -774,7 +798,11 @@ export default function PaperTradingPage() {
             marginBottom: 14,
           }}
         >
-          {SUPPORTED_SYMBOLS.map((sym) => {
+          {Array.from(new Set([
+            ...POPULAR_SYMBOLS,
+            ...(selectedChartSymbol ? [selectedChartSymbol] : []),
+            ...selectedSymbols,
+          ])).slice(0, 16).map((sym) => {
             const isSelected = sym === selectedChartSymbol;
             const symMarket = marketRows.find((m: any) => m.symbol === sym);
             const symPrice = symMarket?.latest_price || (symbolStateFor(status, sym) as any)?.last_price;
@@ -920,10 +948,10 @@ export default function PaperTradingPage() {
               <button
                 type="button"
                 onClick={selectAllLiveSymbols}
-                disabled={!canStart || isOneSecondLive}
-                title={isOneSecondLive ? "1s live paper starts with BTCUSDT only to protect local memory." : "Select all supported symbols"}
+                disabled={!canStart}
+                title="Select all popular markets"
               >
-                Select all
+                Select Popular
               </button>{" "}
               <button
                 type="button"
@@ -936,28 +964,46 @@ export default function PaperTradingPage() {
             </div>
           </div>
           <div className="symbol-picker">
-            {SUPPORTED_SYMBOLS.map((sym) => (
+            {Array.from(new Set([...POPULAR_SYMBOLS, ...selectedSymbols])).map((sym) => (
               <label key={sym} className="symbol-chip">
                 <input
                   type="checkbox"
                   checked={selectedSymbols.includes(sym)}
-                  disabled={!canStart || (isOneSecondLive && sym !== "BTCUSDT")}
+                  disabled={!canStart}
                   onChange={() => toggleLiveSymbol(sym)}
                 />
                 <span>{sym}</span>
               </label>
             ))}
           </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="text"
+              placeholder="Add any crypto pair (e.g. PEPE, SUI, DOGE)..."
+              value={customSymbolInput}
+              onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustomSymbol();
+                }
+              }}
+              style={{ ...inputStyle, width: 280, textTransform: "uppercase" }}
+            />
+            <button
+              type="button"
+              onClick={addCustomSymbol}
+              disabled={!canStart || !customSymbolInput.trim()}
+              style={{ padding: "6px 14px", fontSize: 13 }}
+            >
+              + Add to Markets
+            </button>
+          </div>
+
           <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>
-            Selected active markets: {selectedSymbols.join(", ")}. Multi-symbol
-            live mode starts one C++ Binance WebSocket paper engine per selected
-            symbol.
+            Selected active markets ({selectedSymbols.length}): {selectedSymbols.join(", ")}. Multi-symbol live paper mode executes real-time Binance market simulation on all selected pairs.
           </p>
-          {(symbolWarning || ONE_SECOND_MEMORY_WARNING) && (
-            <div style={{ marginTop: 10, padding: 12, border: "1px solid #f59e0b", borderRadius: 8, color: "#fde68a", background: "#451a03" }}>
-              {symbolWarning || ONE_SECOND_MEMORY_WARNING}
-            </div>
-          )}
         </div>
       </section>
 

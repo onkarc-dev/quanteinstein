@@ -108,11 +108,18 @@ def wallet_live_paper(user=Depends(current_user)):
     }
 
 
+@router.get('/symbols')
+def get_crypto_symbols():
+    from app.services.live_paper import get_all_crypto_symbols
+    symbols = get_all_crypto_symbols()
+    return {"symbols": symbols, "total": len(symbols)}
+
+
 @router.get('/candles')
 def get_live_candles(symbol: str = "BTCUSDT", interval: str = "1m", limit: int = 100):
-    from app.services.live_paper import fetch_recent_candles, SUPPORTED_SYMBOLS
+    from app.services.live_paper import fetch_recent_candles, is_valid_crypto_symbol
     sym = symbol.strip().upper()
-    if sym not in SUPPORTED_SYMBOLS:
+    if not is_valid_crypto_symbol(sym):
         sym = "BTCUSDT"
     candles = fetch_recent_candles(sym, interval=interval, limit=limit)
     return {"symbol": sym, "interval": interval, "candles": candles}
