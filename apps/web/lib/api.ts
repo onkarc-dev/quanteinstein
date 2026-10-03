@@ -213,6 +213,17 @@ export async function fetchMe(): Promise<AuthUser> {
 export async function restoreSession(): Promise<AuthUser | null> {
   if (supabase) {
     try {
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code');
+        if (code) {
+          try {
+            await supabase.auth.exchangeCodeForSession(code);
+            url.searchParams.delete('code');
+            window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''));
+          } catch {}
+        }
+      }
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const authUser: AuthUser = {
