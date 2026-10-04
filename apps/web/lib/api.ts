@@ -317,8 +317,8 @@ export async function api(path: string, options: RequestInit = {}, retries = 2):
     throw new ApiError(GENERIC_SERVICE_ERROR, 0);
   }
 
-  // If status is 502 or 503 (Render container spinning up from cold sleep), retry automatically
-  if ((res.status === 502 || res.status === 503) && retries > 0) {
+  // If status is 502, 503, or 504 (Render container spinning up or gateway warmup), retry automatically
+  if ((res.status === 502 || res.status === 503 || res.status === 504) && retries > 0) {
     console.info(`[QuantOS][api] Engine warming up (${res.status}). Retrying ${path} in 4s (${retries} attempts left)...`);
     await new Promise(r => setTimeout(r, 4000));
     return api(path, options, retries - 1);

@@ -14,7 +14,7 @@ import json
 import subprocess
 import uuid
 import sys
-import time
+import concurrent.futures
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -324,12 +324,20 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
     market_paths: dict[str, str] = {}
     if mode == "backtest" and start_date:
         try:
-            # Download/cache real Binance candles for every selected symbol so
-            # the UI can truthfully show all selected markets.
+            # Download/cache real Binance candles for every selected symbol in parallel so
+            # the UI can truthfully show all selected markets without serial network latency.
             market_rows = {}
             primary_md = None
-            for sym in (symbols or [symbol_for_data]):
-                md_i = fetch_real_binance_csv(sym, timeframe, start_date, end_date)
+            syms_to_fetch = list(symbols or [symbol_for_data])
+
+            def _fetch_single_symbol(sym: str):
+                return sym, fetch_real_binance_csv(sym, timeframe, start_date, end_date)
+
+            max_fetch_workers = min(len(syms_to_fetch), 8)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_fetch_workers) as executor:
+                fetched_items = list(executor.map(_fetch_single_symbol, syms_to_fetch))
+
+            for sym, md_i in fetched_items:
                 market_rows[sym] = md_i.get("rows")
                 market_paths[sym] = md_i.get("path")
                 if primary_md is None:
@@ -341,7 +349,7 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
                 md["total_rows_all_symbols"] = sum(int(v or 0) for v in market_rows.values())
             except Exception:
                 md["total_rows_all_symbols"] = None
-            job_payload["input_data"] = md["path"]
+            job_payload["input_data"] = md.get("path")
             job_payload["market_data"] = md
             job_payload["market_paths"] = market_paths
             job_payload["real_binance_data_used"] = True
@@ -393,7 +401,8 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
         combined_stdout = ""
         combined_stderr = ""
         any_success = False
-        for sym in symbols:
+
+        def _run_single_symbol(sym: str) -> tuple[str, bool, list[dict[str, Any]], str, str]:
             sym_input = market_paths.get(sym) or job_payload.get("input_data")
             sym_dir = output_dir / sym
             sym_dir.mkdir(parents=True, exist_ok=True)
@@ -410,16 +419,27 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
                     cwd=str(settings.project_root),
                     timeout=ENGINE_TIMEOUT_SECONDS,
                 )
-                combined_stdout += f"\n[{sym}]\n" + (sub_res.stdout[-1000:] if sub_res.stdout else "")
-                combined_stderr += f"\n[{sym}]\n" + (sub_res.stderr[-1000:] if sub_res.stderr else "")
+                stdout_part = f"\n[{sym}]\n" + (sub_res.stdout[-1000:] if sub_res.stdout else "")
+                stderr_part = f"\n[{sym}]\n" + (sub_res.stderr[-1000:] if sub_res.stderr else "")
                 if sub_res.returncode == 0:
-                    any_success = True
                     sym_trades = read_csv(sym_dir / "trade_log.csv")
                     for t in sym_trades:
                         t["symbol"] = sym
-                    all_basket_trades.extend(sym_trades)
+                    return sym, True, sym_trades, stdout_part, stderr_part
+                return sym, False, [], stdout_part, stderr_part
             except Exception as exc:
-                combined_stderr += f"\n[{sym}] Error: {exc}"
+                return sym, False, [], "", f"\n[{sym}] Error: {exc}"
+
+        max_proc_workers = min(len(symbols), 4)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc_workers) as executor:
+            proc_results = list(executor.map(_run_single_symbol, symbols))
+
+        for sym, ok, sym_trades, stdout_part, stderr_part in proc_results:
+            combined_stdout += stdout_part
+            combined_stderr += stderr_part
+            if ok:
+                any_success = True
+                all_basket_trades.extend(sym_trades)
 
         status = "completed" if any_success else "failed"
         stdout_tail = combined_stdout[-4000:]

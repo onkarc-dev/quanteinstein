@@ -353,19 +353,25 @@ export default function StrategyBuilderPage() {
   }
 
   async function poll(jobId: string) {
-    for (let i = 0; i < 45; i++) {
-      const j: any = await api(`/jobs/${jobId}`);
-      setPollJob(j);
-      setJob(j);
-      const total = payload.symbols.length;
-      if (total > 1) {
-        setRunProgress(
-          `Executing basket (${total} symbols) on historical Binance klines. Poll ${i + 1} / 45...`,
-        );
-      } else {
-        setRunProgress(`Processing candles and generating backtest report (poll ${i + 1} / 45)...`);
+    const maxPolls = 80;
+    for (let i = 0; i < maxPolls; i++) {
+      try {
+        const j: any = await api(`/jobs/${jobId}`);
+        setPollJob(j);
+        setJob(j);
+        const total = payload.symbols.length;
+        const currentStatus = (j.status || "processing").toUpperCase();
+        if (total > 1) {
+          setRunProgress(
+            `Executing basket (${total} symbols) on historical Binance klines [${currentStatus}]. Poll ${i + 1} / ${maxPolls}...`,
+          );
+        } else {
+          setRunProgress(`Processing candles and generating backtest report [${currentStatus}] (poll ${i + 1} / ${maxPolls})...`);
+        }
+        if (j.status === "completed" || j.status === "failed") return j;
+      } catch (err: any) {
+        console.warn(`[poll] Transient polling issue on attempt ${i + 1}:`, err);
       }
-      if (j.status === "completed" || j.status === "failed") return j;
       await new Promise((r) => setTimeout(r, 1500));
     }
     return null;
@@ -430,7 +436,7 @@ export default function StrategyBuilderPage() {
       if (r.status === "completed") {
         setMsg("Backtest completed successfully.");
         setRunProgress("Backtest completed.");
-      } else if (r.status === "queued" && r.job_id) {
+      } else if ((r.status === "queued" || r.status === "running") && r.job_id) {
         setMsg(`Backtest queued (Job ID: ${r.job_id.slice(0, 8)}...). Polling results...`);
         const finalJob = await poll(r.job_id);
         if (finalJob) {

@@ -32,6 +32,7 @@ class BacktestPayload(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
     config: dict = {}
+    sync: bool | None = None
 
 
 def _p() -> str:
@@ -101,7 +102,11 @@ def _insert_queued_job(job_id: str, user_id: str, payload: BacktestPayload) -> N
 
 
 @router.post("/submit-backtest", summary="Submit a backtest job (async)")
-def submit_backtest(payload: BacktestPayload, user=Depends(current_user)):
+def submit_backtest(
+    payload: BacktestPayload,
+    background_tasks: BackgroundTasks,
+    user=Depends(current_user),
+):
     """Queue a backtest job. Returns immediately with job ID. Use /jobs/{id} to poll."""
     if _hosted_guard_enabled():
         reason = heavy_backtest_reason(payload)
@@ -126,25 +131,41 @@ def submit_backtest(payload: BacktestPayload, user=Depends(current_user)):
     # Queue the job (non-blocking)
     q_job = queue.enqueue("backtest", job_payload)
 
-    # For demo: run synchronously if it's a simple case
-    # In production with Redis: background worker picks this up
-    if not settings.has_redis():
-        # Synchronous demo mode — run immediately
+    # Determine whether to execute synchronously:
+    # Synchronous execution is ONLY used when explicitly requested via sync=True
+    # or for legacy single-symbol non-hosted local test environments where sync is not False.
+    is_multi = len(payload.symbols) > 1
+    is_hosted = _hosted_guard_enabled()
+    explicit_sync = payload.sync is True
+    explicit_async = payload.sync is False
+
+    should_run_sync = explicit_sync or (
+        not explicit_async and not is_hosted and not is_multi and not settings.has_redis()
+    )
+
+    if should_run_sync:
         result = run_engine_sync(job_payload)
         return {
             "job_id": result.get("job_id"),
             "status": result.get("status"),
             "queue_id": q_job.id,
             "mode": "sync_demo",
-            "message": "Backtest completed synchronously (no Redis worker)",
+            "message": "Backtest completed synchronously",
             **result,
         }
+
+    # Asynchronous execution:
+    # If Redis is active, background worker handles it.
+    # Otherwise, dispatch to FastAPI background tasks so the client gets an immediate response (<20ms)
+    # and avoids reverse-proxy gateway timeouts on hosted environments.
+    if not settings.has_redis():
+        background_tasks.add_task(run_engine_sync, job_payload)
 
     return {
         "job_id": job_id,
         "queue_id": q_job.id,
         "status": "queued",
-        "message": "Backtest job submitted. Poll /jobs/{id} for status.",
+        "message": "Backtest job queued. Polling /jobs/{id} for status.",
     }
 
 
@@ -191,6 +212,10 @@ def get_job(job_id: str, user=Depends(current_user)):
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
     data = row_to_dict(row)
+    try:
+        data["symbols"] = json.loads(data.get("symbols_json") or "[]")
+    except Exception:
+        data["symbols"] = []
     out_dir_str = data.get("output_dir")
     if out_dir_str:
         out_path = Path(out_dir_str)
@@ -201,6 +226,16 @@ def get_job(job_id: str, user=Depends(current_user)):
             trade_path = out_path / "trade_log.csv"
             if trade_path.exists():
                 data["trades"] = read_csv(trade_path)
+            cfg_path = out_path / "strategy_config.json"
+            if cfg_path.exists():
+                try:
+                    cfg = read_json(cfg_path)
+                    if "market_data" in cfg:
+                        data["market_data"] = cfg["market_data"]
+                    if "real_binance_data_used" in cfg:
+                        data["real_binance_data_used"] = cfg["real_binance_data_used"]
+                except Exception:
+                    pass
     return data
 
 

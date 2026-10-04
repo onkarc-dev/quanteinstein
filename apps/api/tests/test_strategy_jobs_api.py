@@ -108,6 +108,43 @@ class StrategyJobsApiTests(unittest.TestCase):
         self.assertEqual(jobs.status_code, 200, jobs.text)
         self.assertGreaterEqual(len(jobs.json().get("jobs", [])), 1)
 
+    def test_multi_symbol_backtest_submits_async_without_blocking(self):
+        create_res = self.client.post(
+            "/strategies",
+            json={
+                "name": "Async Basket Test",
+                "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+                "timeframe": "1m",
+                "risk_per_trade_pct": 1.0,
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_res.status_code, 200, create_res.text)
+        strategy_id = create_res.json()["id"]
+
+        with patch("app.routes.jobs.run_engine_sync") as mock_engine:
+            submitted = self.client.post(
+                "/jobs/submit-backtest",
+                json={
+                    "strategy_id": strategy_id,
+                    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+                    "timeframe": "1m",
+                    "config": {"source": "test_multi"},
+                },
+                headers=self.headers,
+            )
+            self.assertEqual(submitted.status_code, 200, submitted.text)
+            body = submitted.json()
+            self.assertEqual(body["status"], "queued")
+            self.assertIn("job_id", body)
+            # Verify run_engine_sync was dispatched via background tasks
+            mock_engine.assert_called_once()
+
+            job_id = body["job_id"]
+            job_status = self.client.get(f"/jobs/{job_id}", headers=self.headers)
+            self.assertEqual(job_status.status_code, 200)
+            self.assertEqual(job_status.json()["symbols"], ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+
     def test_strategy_requires_auth(self):
         resp = self.client.get("/strategies")
         self.assertIn(resp.status_code, {401, 403})
