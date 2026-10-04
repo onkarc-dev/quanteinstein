@@ -469,6 +469,8 @@ def _run_engine_sync_impl(
                 peak = max(peak, equity)
                 max_dd = max(max_dd, peak - equity)
 
+            total_friction = ((fee_rate * 2.0) + (slip_rate * 2.0)) / risk_pct * len(all_basket_trades)
+            net_r = gross_r - total_friction
             total_bars = sum(int(v or 0) for v in (job_payload.get("market_data", {}).get("rows_per_symbol", {}).values()))
             combined_summary = {
                 "bars_processed": total_bars,
@@ -477,6 +479,7 @@ def _run_engine_sync_impl(
                 "losses": len(losses),
                 "win_rate": round(len(wins) / len(all_basket_trades), 4) if all_basket_trades else 0.0,
                 "gross_R": round(gross_r, 4),
+                "net_R": round(net_r, 4),
                 "average_R": round(gross_r / len(all_basket_trades), 4) if all_basket_trades else 0.0,
                 "profit_factor": pf,
                 "max_drawdown_in_R": round(max_dd, 4),
@@ -533,6 +536,9 @@ def _run_engine_sync_impl(
             fee_rate, slip_rate = _friction_params(job_payload)
             risk_pct = _risk_per_trade_pct(job_payload) or 1.0
             summary = read_json(output_dir / "backtest_summary.json")
+            gross_r = float(summary.get("gross_R") or 0.0)
+            total_friction = ((fee_rate * 2.0) + (slip_rate * 2.0)) / risk_pct * len(trades)
+            summary["net_R"] = round(gross_r - total_friction, 4)
             summary["per_symbol_breakdown"] = compute_symbol_breakdown(trades, symbols, fee_rate, slip_rate, risk_pct)
             if "performance_and_robustness" not in summary:
                 summary["performance_and_robustness"] = build_performance_and_robustness(

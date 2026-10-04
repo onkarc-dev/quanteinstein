@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from statistics import mean, median, pstdev
 from typing import Any
 
@@ -31,16 +31,21 @@ def _display_percent(value: float | None, digits: int = 2) -> str:
 def _parse_dt(value: Any) -> datetime | None:
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
     text = str(value).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            return datetime.strptime(text[: len(fmt)], fmt)
+            dt = datetime.strptime(text[: len(fmt)], fmt)
+            return dt.replace(tzinfo=timezone.utc)
         except Exception:
             pass
-    try:
-        return datetime.fromisoformat(text)
-    except Exception:
-        return None
+    return None
 
 
 def _r_values(trades: list[dict[str, Any]]) -> list[float]:
@@ -119,7 +124,8 @@ def _date_span_days(trades: list[dict[str, Any]], fallback_start: Any = None, fa
         dates.append(end)
     if len(dates) < 2:
         return None
-    seconds = max((max(dates) - min(dates)).total_seconds(), 0.0)
+    clean_dates = [d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc) for d in dates]
+    seconds = max((max(clean_dates) - min(clean_dates)).total_seconds(), 0.0)
     return max(seconds / 86400.0, 1.0)
 
 
