@@ -192,6 +192,7 @@ export default function StrategyBuilderPage() {
   const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
   const [customSymbolInput, setCustomSymbolInput] = useState("");
   const [strategyId, setStrategyId] = useState("");
+  const [strategyDisplayName, setStrategyDisplayName] = useState("");
   const [job, setJob] = useState<any>(null);
   const [pollJob, setPollJob] = useState<any>(null);
   const [msg, setMsg] = useState("Configure strategy parameters, select crypto markets, and run a backtest.");
@@ -271,13 +272,13 @@ export default function StrategyBuilderPage() {
 
   const payload = useMemo(
     () => ({
-      user_strategy_id: cfg.strategyCode.trim() || "PRISM_BREAKOUT_RETEST",
-      name: "Quanteinstein Breakout Retest",
+      user_strategy_id: cfg.strategyCode.trim() || "PRISM",
+      name: cfg.strategyCode.trim() || "PRISM",
       symbols: cfg.symbols.map((s) => s.toUpperCase()),
       timeframe: cfg.timeframe,
       bar_seconds: timeframeToSeconds(cfg.timeframe),
       strategy: {
-        name: "Quanteinstein Breakout Retest",
+        name: cfg.strategyCode.trim() || "PRISM",
         direction: cfg.direction,
         breakout_lookback: cfg.lookback,
         retest_tolerance_pct: Number(cfg.retest),
@@ -339,8 +340,10 @@ export default function StrategyBuilderPage() {
         body: JSON.stringify(payload),
       });
       const resolvedId = r.strategy_id || r.id;
+      const resolvedName = r.display_name || r.name || payload.name;
       setStrategyId(resolvedId);
-      setMsg("Strategy saved successfully: " + (r.user_strategy_id || resolvedId));
+      setStrategyDisplayName(resolvedName);
+      setMsg("Strategy saved successfully: " + resolvedName);
     } catch (e: any) {
       const message = e?.message || "Save failed";
       if (message.toLowerCase().includes("already used")) alert(message);
@@ -394,16 +397,19 @@ export default function StrategyBuilderPage() {
             body: JSON.stringify(payload),
           });
           sid = s.strategy_id || s.id;
+          const sName = s.display_name || s.name || payload.name;
           setStrategyId(sid);
+          setStrategyDisplayName(sName);
         } catch (stratErr: any) {
           try {
             const strats: any = await api("/strategies");
             const found = Array.isArray(strats) && strats.find((st: any) =>
-              st.user_strategy_id === payload.user_strategy_id || st.name === payload.name
+              st.user_strategy_id === payload.user_strategy_id || st.name === payload.name || st.display_name === payload.name
             );
             if (found) {
               sid = found.id;
               setStrategyId(sid);
+              setStrategyDisplayName(found.display_name || found.name || payload.name);
             }
           } catch (_) {}
         }
@@ -1408,7 +1414,7 @@ export default function StrategyBuilderPage() {
         {job && <BacktestResult job={job} pollJob={pollJob} deployTargetId={deployTargetId} />}
 
         {/* ─── Strategy Configuration Summary ─── */}
-        <StrategyPreview payload={payload} strategyId={strategyId} />
+        <StrategyPreview payload={payload} strategyId={strategyId} strategyDisplayName={strategyDisplayName} />
       </div>
       <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
     </div>
@@ -1676,13 +1682,16 @@ function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: a
 function StrategyPreview({
   payload,
   strategyId,
+  strategyDisplayName,
 }: {
   payload: any;
   strategyId: string;
+  strategyDisplayName?: string;
 }) {
   const s = payload.strategy;
+  const activeLabel = strategyDisplayName || payload.name || payload.user_strategy_id || "PRISM";
   const rows = [
-    ["Strategy Identifier", payload.user_strategy_id],
+    ["Strategy Identifier", activeLabel],
     ["Active Markets", payload.symbols?.join(", ")],
     ["Trade Direction", s.direction === "both" ? "Both (Long & Short)" : s.direction === "long_only" ? "Long Only" : "Short Only"],
     ["Execution Timeframe", `${payload.timeframe} (${payload.bar_seconds}s bars)`],
@@ -1735,13 +1744,13 @@ function StrategyPreview({
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {strategyId && (
-            <span style={{ fontSize: 11, color: "#a5b4fc", background: "rgba(99, 102, 241, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(99, 102, 241, 0.3)" }}>
-              Database ID: {strategyId.slice(0, 8)}...
+          {activeLabel && (
+            <span style={{ fontSize: 11, color: "#a5b4fc", background: "rgba(99, 102, 241, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(99, 102, 241, 0.3)", fontWeight: 700 }}>
+              {activeLabel}
             </span>
           )}
           <Link
-            href={`/paper-trading?strategy_id=${encodeURIComponent(strategyId || payload.user_strategy_id || "PRISM_BREAKOUT_RETEST")}`}
+            href={`/paper-trading?strategy_id=${encodeURIComponent(strategyId || payload.user_strategy_id || payload.name || "PRISM")}`}
             style={{
               background: "rgba(34, 197, 94, 0.15)",
               color: "#4ade80",

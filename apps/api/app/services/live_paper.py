@@ -529,13 +529,19 @@ def _safe_strategy_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     if not symbols:
         symbols = cfg.get("symbols") or [DEFAULT_SYMBOL]
     strategy = cfg.get("strategy") if isinstance(cfg.get("strategy"), dict) else cfg
+    tf = str(row.get("timeframe") or cfg.get("timeframe") or "1m").strip()
+    bar_sec = int(cfg.get("bar_seconds") or (
+        int(tf[:-1]) if tf.endswith("s") and tf[:-1].isdigit() else
+        int(tf[:-1]) * 60 if tf.endswith("m") and tf[:-1].isdigit() else
+        int(tf[:-1]) * 3600 if tf.endswith("h") and tf[:-1].isdigit() else 60
+    ))
     return {
         "strategy_id": cfg.get("user_strategy_id") or cfg.get("strategy_id") or row.get("id") or "default_cpp_config",
         "strategy_db_id": row.get("id") or "",
-        "name": row.get("name") or cfg.get("name") or strategy.get("name") or "QuantOS Breakout Retest",
+        "name": row.get("name") or cfg.get("name") or strategy.get("name") or "PRISM",
         "symbols": [str(x).upper() for x in symbols] if symbols else [DEFAULT_SYMBOL],
-        "timeframe": row.get("timeframe") or cfg.get("timeframe") or "1m",
-        "bar_seconds": int(cfg.get("bar_seconds") or 10),
+        "timeframe": tf,
+        "bar_seconds": bar_sec,
         "strategy": strategy,
     }
 
@@ -852,7 +858,7 @@ class LivePaperManager:
                             "bars": 0,
                             "signals": 0,
                             "total_trades": 0,
-                            "p95_engine_us": 12.0,
+                            "p95_engine_us": 0.0,
                             "paper_status": "ACTIVE_WEBSOCKET",
                         }
                         t = threading.Thread(target=self._python_live_worker, args=(session, sym, cfg_path), daemon=True, name=sym)
@@ -905,7 +911,7 @@ class LivePaperManager:
                         "bars": 0,
                         "signals": 0,
                         "total_trades": 0,
-                        "p95_engine_us": 12.0,
+                        "p95_engine_us": 0.0,
                         "paper_status": "WAITING",
                     }
                     t = threading.Thread(target=self._reader, args=(session, sym, proc), daemon=True, name=sym)
@@ -1120,6 +1126,7 @@ class LivePaperManager:
                 recent_prices = recent_prices[-200:]
 
             with self._lock:
+                t_eval_start = time.perf_counter()
                 st = session.symbol_states.setdefault(sym, {"symbol": sym})
                 st["last_price"] = price
                 st["processed"] = processed
@@ -1193,6 +1200,18 @@ class LivePaperManager:
                         self._capture_event_from_line(session, line)
                         session.stdout_tail.append(line)
                         session.stdout_tail = session.stdout_tail[-80:]
+
+                # Dynamically measure microsecond engine evaluation latency
+                eval_latency_us = (time.perf_counter() - t_eval_start) * 1_000_000.0
+                recent_lats = st.setdefault("_recent_latencies", [])
+                recent_lats.append(eval_latency_us)
+                if len(recent_lats) > 100:
+                    recent_lats.pop(0)
+                sorted_lats = sorted(recent_lats)
+                p95_idx = min(int(0.95 * len(sorted_lats)), len(sorted_lats) - 1)
+                p99_idx = min(int(0.99 * len(sorted_lats)), len(sorted_lats) - 1)
+                st["p95_engine_us"] = round(sorted_lats[p95_idx], 2)
+                st["p99_engine_us"] = round(sorted_lats[p99_idx], 2)
 
                 session.metrics = _aggregate_session_metrics(session)
                 session.session_metrics = session.metrics

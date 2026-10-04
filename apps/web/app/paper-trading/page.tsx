@@ -15,12 +15,29 @@ import TradingChart from "../../components/TradingChart";
 type StrategyRow = {
   id: string;
   name?: string;
+  display_name?: string;
   timeframe?: string;
   symbols?: string[];
   config?: any;
   created_at?: string;
   user_strategy_id?: string;
+  has_backtest?: boolean;
 };
+
+function timeframeToSeconds(tf: string): number {
+  switch (tf) {
+    case "1s": return 1;
+    case "5s": return 5;
+    case "10s": return 10;
+    case "15s": return 15;
+    case "30s": return 30;
+    case "1m": return 60;
+    case "5m": return 300;
+    case "15m": return 900;
+    case "1h": return 3600;
+    default: return 60;
+  }
+}
 
 type LiveStatus = {
   status: string;
@@ -480,6 +497,7 @@ export default function PaperTradingPage() {
               s.id === q ||
               s.user_strategy_id === q ||
               s.config?.user_strategy_id === q ||
+              s.display_name === q ||
               s.name === q
           );
         }
@@ -487,13 +505,15 @@ export default function PaperTradingPage() {
 
       if (matched) {
         setSelectedStrategyId(matched.id);
-        setSelectedSymbols(matched.symbols?.length ? matched.symbols : ["BTCUSDT"]);
+        if (matched.symbols?.length) setSelectedSymbols(matched.symbols);
+        if (matched.symbols?.[0]) setChartSymbol(matched.symbols[0]);
         setMessage(
-          `Loaded strategy "${matched.name || matched.user_strategy_id || matched.id}" from Strategy Builder.`
+          `Loaded strategy "${matched.display_name || matched.name || matched.user_strategy_id || matched.id}" from Strategy Builder.`
         );
       } else if (!selectedStrategyId && list.length) {
         setSelectedStrategyId(list[0].id);
-        setSelectedSymbols(list[0].symbols?.length ? list[0].symbols : ["BTCUSDT"]);
+        if (list[0].symbols?.length) setSelectedSymbols(list[0].symbols);
+        if (list[0].symbols?.[0]) setChartSymbol(list[0].symbols[0]);
       }
     } catch (err) {
       setMessage(
@@ -612,7 +632,7 @@ export default function PaperTradingPage() {
   // Production-safe config display:
   // Backend no longer exposes internal live_config/config_path for security.
   // So the UI must read saved Strategy Builder parameters from /strategies.
-  const selectedStrategy = strategies.find((s) => s.id === selectedStrategyId);
+  const selectedStrategy = strategies.find((s) => s.id === selectedStrategyId) || strategies[0];
   const selectedConfig = selectedStrategy?.config || {};
   const selectedRules = selectedConfig.strategy || selectedConfig || {};
   const selectedRisk = selectedRules.risk || selectedConfig.risk || {};
@@ -661,25 +681,28 @@ export default function PaperTradingPage() {
   const activeStrategyName =
     status.selected_strategy_name ||
     liveConfig.name ||
+    selectedStrategy?.display_name ||
     selectedStrategy?.name ||
     selectedRules.name ||
-    "Default C++ config";
+    "PRISM";
 
   const activeStrategyId =
     status.selected_strategy_id ||
     liveConfig.strategy_id ||
+    selectedStrategy?.display_name ||
+    selectedStrategy?.name ||
     selectedStrategy?.user_strategy_id ||
     selectedConfig.user_strategy_id ||
     selectedConfig.strategy_id ||
     selectedStrategyId ||
-    "";
+    "-";
 
   const activeBarSeconds =
     metrics.cfg_bar_seconds ||
     liveConfig.bar_seconds ||
     selectedConfig.bar_seconds ||
     selectedStrategy?.config?.bar_seconds ||
-    "-";
+    (selectedStrategy?.timeframe ? String(timeframeToSeconds(selectedStrategy.timeframe)) : "60");
   const activeBarSecondsNum = Number(activeBarSeconds);
   const tradeRows = useMemo(() => buildTradeRows(events), [events]);
   const openPositions = useMemo(() => buildOpenPositions(status, tradeRows), [status, tradeRows]);
@@ -978,18 +1001,26 @@ export default function PaperTradingPage() {
                 const id = e.target.value;
                 setSelectedStrategyId(id);
                 const st = strategies.find((s) => s.id === id);
-                if (st?.symbols?.length) setSelectedSymbols(st.symbols);
+                if (st?.symbols?.length) {
+                  setSelectedSymbols(st.symbols);
+                  if (st.symbols[0]) setChartSymbol(st.symbols[0]);
+                }
+                if (st) {
+                  setMessage(`Selected "${st.display_name || st.name || st.user_strategy_id}". Live engine parameters updated.`);
+                }
               }}
               disabled={!canStart}
               style={inputStyle}
             >
-              <option value="">Latest saved strategy / default config</option>
-              {strategies.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name || "Strategy"} ·{" "}
-                  {s.user_strategy_id || s.id.slice(0, 8)}
-                </option>
-              ))}
+              {strategies.length === 0 ? (
+                <option value="">Default QuantOS Strategy</option>
+              ) : (
+                strategies.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.display_name || s.name || s.user_strategy_id || "Strategy"} {s.has_backtest ? "· Tested" : "· Saved"} ({s.timeframe || "1m"})
+                  </option>
+                ))
+              )}
             </select>
           </label>
           <Mini label="Active" value={activeStrategyName} />
@@ -1348,7 +1379,13 @@ export default function PaperTradingPage() {
         />
         <Card
           label="P95 engine"
-          value={metrics.p95_engine_us ? `${metrics.p95_engine_us} us` : "< 15 us"}
+          value={
+            Number(metrics.p95_engine_us) > 0
+              ? `${Number(metrics.p95_engine_us).toFixed(2)} µs`
+              : (status.status === "running" || status.status === "starting")
+                ? "measuring..."
+                : "0.00 µs"
+          }
           hint="Internal execution latency"
         />
         <Card label="Strategy ID" value={activeStrategyId || "-"} />
@@ -1415,7 +1452,13 @@ export default function PaperTradingPage() {
                       <Td>{m.bars || 0}</Td>
                       <Td>{m.signals || 0}</Td>
                       <Td>{m.trades || 0}</Td>
-                      <Td>{m.p95_engine_us ? `${m.p95_engine_us} us` : "< 15 us"}</Td>
+                      <Td>
+                        {Number(m.p95_engine_us) > 0
+                          ? `${Number(m.p95_engine_us).toFixed(2)} µs`
+                          : isStreaming
+                            ? "measuring..."
+                            : "0.00 µs"}
+                      </Td>
                     </tr>
                   );
                 })
@@ -1497,7 +1540,7 @@ export default function PaperTradingPage() {
               />
               <SummaryRow
                 label="Timeframe"
-                value={liveConfig.timeframe || "1m"}
+                value={liveConfig.timeframe || selectedStrategy?.timeframe || selectedConfig.timeframe || "1m"}
               />
               <SummaryRow
                 label="Bar length"
