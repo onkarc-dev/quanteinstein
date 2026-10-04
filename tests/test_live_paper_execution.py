@@ -85,3 +85,27 @@ def test_manual_execute_short_order_and_close(monkeypatch):
 
     st_after = manager.status("test-short-exec")
     assert len(st_after["open_positions_detail"]) == 0
+
+
+def test_managed_live_engine_precedence_over_binary(tmp_path, monkeypatch):
+    # Create a dummy binary file to simulate Docker/Render /app/build/Release/prism_live_paper_trading
+    binary = tmp_path / "build" / "Release" / "prism_live_paper_trading.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(live_paper.settings, "project_root", tmp_path)
+    monkeypatch.setattr(live_paper, "_fetch_market_prices", lambda max_age=5.0: {"BTCUSDT": 85000.0})
+    monkeypatch.setattr(live_paper, "fetch_recent_candles", lambda symbol, interval="1m", limit=30: [
+        {"time": 1700000000, "open": 85000.0, "high": 85100.0, "low": 84900.0, "close": 85050.0}
+    ])
+    monkeypatch.setenv("QUANTOS_MANAGED_LIVE", "1")
+
+    manager = LivePaperManager()
+    started = manager.start("test-managed-user", symbols=["BTCUSDT"])
+
+    assert started["status"] == "running"
+    assert started["feed_status"] == "connected"
+    assert started["selected_binary_path"] == "managed_python_live_engine"
+    assert "BTCUSDT" in started["symbol_states"]
+
+    # Clean up background thread
+    manager.stop("test-managed-user")

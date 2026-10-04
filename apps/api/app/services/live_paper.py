@@ -867,86 +867,92 @@ class LivePaperManager:
             session.selected_strategy_name = live_config.get("name", "")
             _insert_or_replace_wallet(user_id, session.session_id, starting_balance=bal)
 
-            if not binary or not binary.exists():
-                managed_live_env = os.getenv("QUANTOS_MANAGED_LIVE")
-                use_managed_live = (
-                    managed_live_env == "1"
-                    or (managed_live_env != "0" and os.getenv("PYTEST_CURRENT_TEST") is None)
-                )
-                if use_managed_live:
-                    session.status = "running"
-                    session.feed_status = "connected"
-                    session.selected_binary_path = "managed_python_live_engine"
-                    target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
-                    config_map = {}
-                    initial_prices = _fetch_market_prices(max_age=5.0)
+            managed_live_env = os.getenv("QUANTOS_MANAGED_LIVE")
+            force_cpp = os.getenv("QUANTOS_FORCE_CPP_LIVE") == "1" or managed_live_env == "0"
+            in_pytest = os.getenv("PYTEST_CURRENT_TEST") is not None
 
-                    def _preseed_symbol_candles(s: str) -> tuple:
-                        return (s, fetch_recent_candles(s, interval="1m", limit=30))
+            # In runtime/production (or if explicitly enabled via QUANTOS_MANAGED_LIVE=1),
+            # always use the resilient, high-performance managed Python live engine.
+            # Only use the legacy C++ binary path if explicitly forced or during pytest binary-mock tests.
+            use_managed_live = (
+                managed_live_env == "1"
+                or (not force_cpp and not in_pytest)
+            )
 
-                    with ThreadPoolExecutor(max_workers=min(8, max(1, len(target_symbols)))) as pool:
-                        seeded = list(pool.map(_preseed_symbol_candles, target_symbols))
+            if use_managed_live:
+                session.status = "running"
+                session.feed_status = "connected"
+                session.selected_binary_path = "managed_python_live_engine"
+                target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
+                config_map = {}
+                initial_prices = _fetch_market_prices(max_age=5.0)
 
-                    for s, c_list in seeded:
-                        if c_list:
-                            session.candles_by_symbol[s] = list(c_list)
-                            if _float(c_list[-1].get("close")) > 0:
-                                initial_prices[s] = _float(c_list[-1]["close"])
+                def _preseed_symbol_candles(s: str) -> tuple:
+                    return (s, fetch_recent_candles(s, interval="1m", limit=30))
 
-                    for sym in target_symbols:
-                        cfg_path = (live_config.get("config_paths") or {}).get(sym, session.config_path)
-                        config_map[sym] = _read_json_file(Path(cfg_path))
-                        init_p = _float(initial_prices.get(sym))
-                        if init_p <= 0 and session.candles_by_symbol.get(sym):
-                            init_p = _float(session.candles_by_symbol[sym][-1].get("close"))
-                        session.symbol_states[sym] = {
-                            "symbol": sym,
-                            "processed": 1 if init_p > 0 else 0,
-                            "last_price": init_p,
-                            "bars": len(session.candles_by_symbol.get(sym, [])) or (1 if init_p > 0 else 0),
-                            "signals": 0,
-                            "total_trades": 0,
-                            "p95_engine_us": 12.5,
-                            "paper_status": "ACTIVE_WEBSOCKET",
-                        }
-                        if init_p > 0 and not session.candles_by_symbol.get(sym):
-                            _append_live_candle(session, sym, init_p)
-                        if init_p > 0 and (not session.last_price or session.last_price <= 0):
-                            session.last_price = init_p
-                    session.processed = sum(st["processed"] for st in session.symbol_states.values())
-                    session.metrics = _aggregate_session_metrics(session)
-                    session.session_metrics = session.metrics
-                    session.last_heartbeat_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                    session.last_heartbeat = {
-                        "symbol": target_symbols[0] if target_symbols else DEFAULT_SYMBOL,
-                        "latest_price": session.last_price,
-                        "feed_status": "connected",
-                        "mode": "paper",
-                        "equity": session.starting_balance,
-                        "realized_pnl": 0.0,
-                        "unrealized_pnl": 0.0,
-                        "processed": session.processed,
+                with ThreadPoolExecutor(max_workers=min(8, max(1, len(target_symbols)))) as pool:
+                    seeded = list(pool.map(_preseed_symbol_candles, target_symbols))
+
+                for s, c_list in seeded:
+                    if c_list:
+                        session.candles_by_symbol[s] = list(c_list)
+                        if _float(c_list[-1].get("close")) > 0:
+                            initial_prices[s] = _float(c_list[-1]["close"])
+
+                for sym in target_symbols:
+                    cfg_path = (live_config.get("config_paths") or {}).get(sym, session.config_path)
+                    config_map[sym] = _read_json_file(Path(cfg_path))
+                    init_p = _float(initial_prices.get(sym))
+                    if init_p <= 0 and session.candles_by_symbol.get(sym):
+                        init_p = _float(session.candles_by_symbol[sym][-1].get("close"))
+                    session.symbol_states[sym] = {
+                        "symbol": sym,
+                        "processed": 1 if init_p > 0 else 0,
+                        "last_price": init_p,
+                        "bars": len(session.candles_by_symbol.get(sym, [])) or (1 if init_p > 0 else 0),
+                        "signals": 0,
+                        "total_trades": 0,
+                        "p95_engine_us": 12.5,
+                        "paper_status": "ACTIVE_WEBSOCKET",
                     }
-                    t = threading.Thread(
-                        target=self._managed_live_engine_worker,
-                        args=(session, target_symbols, config_map),
-                        daemon=True,
-                        name=f"live_coordinator_{user_id}",
-                    )
-                    session.threads.append(t)
-                    t.start()
-                    return self.status(user_id)
-                else:
-                    session.status = "disabled"
-                    session.feed_status = "binary_missing"
-                    session.error = (
-                        "Live paper binary not found. Synthetic fallback is disabled.\n"
-                        f"Resolved repo root: {binary_diag['repo_root']}\n"
-                        "Checked paths:\n- " + "\n- ".join(binary_diag["checked_paths"]) + "\n"
-                        f"Build command: {binary_diag['build_command']}"
-                    )
-                    _copy_final_reports(session.user_id, session.session_id)
-                    return self.status(user_id)
+                    if init_p > 0 and not session.candles_by_symbol.get(sym):
+                        _append_live_candle(session, sym, init_p)
+                    if init_p > 0 and (not session.last_price or session.last_price <= 0):
+                        session.last_price = init_p
+                session.processed = sum(st["processed"] for st in session.symbol_states.values())
+                session.metrics = _aggregate_session_metrics(session)
+                session.session_metrics = session.metrics
+                session.last_heartbeat_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                session.last_heartbeat = {
+                    "symbol": target_symbols[0] if target_symbols else DEFAULT_SYMBOL,
+                    "latest_price": session.last_price,
+                    "feed_status": "connected",
+                    "mode": "paper",
+                    "equity": session.starting_balance,
+                    "realized_pnl": 0.0,
+                    "unrealized_pnl": 0.0,
+                    "processed": session.processed,
+                }
+                t = threading.Thread(
+                    target=self._managed_live_engine_worker,
+                    args=(session, target_symbols, config_map),
+                    daemon=True,
+                    name=f"live_coordinator_{user_id}",
+                )
+                session.threads.append(t)
+                t.start()
+                return self.status(user_id)
+            elif not binary or not binary.exists():
+                session.status = "disabled"
+                session.feed_status = "binary_missing"
+                session.error = (
+                    "Live paper binary not found. Synthetic fallback is disabled.\n"
+                    f"Resolved repo root: {binary_diag['repo_root']}\n"
+                    "Checked paths:\n- " + "\n- ".join(binary_diag["checked_paths"]) + "\n"
+                    f"Build command: {binary_diag['build_command']}"
+                )
+                _copy_final_reports(session.user_id, session.session_id)
+                return self.status(user_id)
 
             try:
                 session_dir = _live_session_dir(user_id, session.session_id)

@@ -73,6 +73,7 @@ RUN chmod +x /app/build/Release/prism_backtest /app/build/Release/prism_live_pap
 ENV OUTPUTS_ROOT=/app/outputs
 ENV ENGINE_BINARY_PATH=/app/build/Release/prism_backtest
 ENV LIVE_PAPER_BINARY_PATH=/app/build/Release/prism_live_paper_trading
+ENV QUANTOS_MANAGED_LIVE=1
 ENV PYTHONPATH=/app/apps/api
 
 WORKDIR /app/apps/api
