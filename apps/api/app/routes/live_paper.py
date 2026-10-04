@@ -79,6 +79,34 @@ def stop_live_paper(user=Depends(current_user)):
     return result
 
 
+@router.post('/order')
+def execute_live_order(payload: dict = Body(default={}), user=Depends(current_user)):
+    payload = payload or {}
+    user_id = str(user['id'])
+    symbol = str(payload.get('symbol') or 'BTCUSDT').strip().upper()
+    side = str(payload.get('side') or 'BUY').strip().upper()
+    qty = payload.get('qty')
+    _invalidate_status_cache(user_id)
+    result = manager.execute_order(user_id, symbol=symbol, side=side, qty=qty)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to execute paper order."))
+    _STATUS_CACHE[user_id] = (time.time(), manager.status(user_id))
+    return result
+
+
+@router.post('/close-position')
+def close_live_position(payload: dict = Body(default={}), user=Depends(current_user)):
+    payload = payload or {}
+    user_id = str(user['id'])
+    symbol = str(payload.get('symbol') or 'BTCUSDT').strip().upper()
+    _invalidate_status_cache(user_id)
+    result = manager.close_position(user_id, symbol=symbol)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to close paper position."))
+    _STATUS_CACHE[user_id] = (time.time(), manager.status(user_id))
+    return result
+
+
 @router.get('/status')
 def status_live_paper(user=Depends(current_user)):
     return _cached_status(str(user['id']))

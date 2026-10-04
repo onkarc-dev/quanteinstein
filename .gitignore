@@ -77,5 +77,6 @@ _deps/
 # Local market-data captures; keep curated samples under data/ committed intentionally
 captures/
 local_engine_data/
+scratch/
 .vercel
 .env*

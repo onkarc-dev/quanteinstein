@@ -245,9 +245,10 @@ function buildTradeRows(events: any[]) {
     openBySymbol[symbol] = openBySymbol[symbol] || [];
 
     if (type === "PAPER_BUY_FILL") {
+      const entrySide = String(e.side || "BUY").toUpperCase();
       openBySymbol[symbol].push({
         symbol,
-        side: "BUY",
+        side: entrySide,
         entry_time: e.created_at,
         entry_price: e.fill || e.entry || e.price,
         qty: e.qty,
@@ -262,9 +263,10 @@ function buildTradeRows(events: any[]) {
     } else if (type === "PAPER_SELL_FILL") {
       const queue = openBySymbol[symbol] || [];
       const matchedBuy = queue.length ? queue[queue.length - 1] : null;
+      const tradeSide = matchedBuy?.side || e.side || "BUY";
       const row: any = {
         symbol,
-        side: "BUY",
+        side: tradeSide,
         entry_time: matchedBuy?.entry_time || e.entry_time || e.created_at,
         exit_time: e.created_at,
         entry_price: e.entry || matchedBuy?.entry_price,
@@ -596,6 +598,46 @@ export default function PaperTradingPage() {
       );
     } catch (err) {
       setMessage(formatApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleExecuteManualOrder(side: "BUY" | "SELL") {
+    setBusy(true);
+    try {
+      const res: any = await api("/live-paper/order", {
+        method: "POST",
+        body: JSON.stringify({ symbol: selectedChartSymbol, side }),
+      });
+      if (res?.ok) {
+        setMessage(`Executed paper ${side} order on ${selectedChartSymbol} at $${money(res.fill)}. Open position active.`);
+        await refresh();
+      } else {
+        setMessage(`Order failed: ${res?.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      setMessage(`Order failed: ${formatApiError(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClosePosition(symbol: string) {
+    setBusy(true);
+    try {
+      const res: any = await api("/live-paper/close-position", {
+        method: "POST",
+        body: JSON.stringify({ symbol }),
+      });
+      if (res?.ok) {
+        setMessage(`Closed paper position on ${symbol}. Realized PnL: ${res.pnl >= 0 ? "+" : ""}$${money(res.pnl)} (${res.r >= 0 ? "+" : ""}${res.r}R).`);
+        await refresh();
+      } else {
+        setMessage(`Close failed: ${res?.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      setMessage(`Close failed: ${formatApiError(err)}`);
     } finally {
       setBusy(false);
     }
@@ -977,6 +1019,92 @@ export default function PaperTradingPage() {
           <span>Last price: {Number(selectedChartPrice) > 0 ? (selectedChartPrice < 1 ? `$${Number(selectedChartPrice).toFixed(4)}` : `$${money(selectedChartPrice)}`) : "not available"}</span>
           <span>Last update: {chartUpdateTime(chartLastUpdate)}</span>
         </div>
+        {status.status === "running" && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: "10px 16px",
+              background: "rgba(15, 23, 42, 0.8)",
+              border: "1px solid rgba(56, 189, 248, 0.25)",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 10,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#f8fafc" }}>
+                Interactive Co-Pilot Desk: <strong style={{ color: "#38bdf8" }}>{selectedChartSymbol}</strong>
+              </span>
+              <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                Instant paper execution with dynamic Risk, Stop-Loss & Targets
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {(() => {
+                const currentPos = openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol);
+                if (currentPos) {
+                  return (
+                    <button
+                      onClick={() => handleClosePosition(selectedChartSymbol)}
+                      disabled={busy}
+                      style={{
+                        padding: "7px 16px",
+                        background: "rgba(239, 68, 68, 0.2)",
+                        color: "#f87171",
+                        border: "1px solid rgba(239, 68, 68, 0.5)",
+                        borderRadius: 6,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: busy ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      ✕ Close {selectedChartSymbol} Position ({currentPos.side} @ ${money(currentPos.entry_price)})
+                    </button>
+                  );
+                }
+                return (
+                  <>
+                    <button
+                      onClick={() => handleExecuteManualOrder("BUY")}
+                      disabled={busy}
+                      style={{
+                        padding: "7px 16px",
+                        background: "rgba(34, 197, 94, 0.2)",
+                        color: "#4ade80",
+                        border: "1px solid rgba(34, 197, 94, 0.5)",
+                        borderRadius: 6,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: busy ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      🟢 Market Buy ({selectedChartSymbol})
+                    </button>
+                    <button
+                      onClick={() => handleExecuteManualOrder("SELL")}
+                      disabled={busy}
+                      style={{
+                        padding: "7px 16px",
+                        background: "rgba(239, 68, 68, 0.2)",
+                        color: "#f87171",
+                        border: "1px solid rgba(239, 68, 68, 0.5)",
+                        borderRadius: 6,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: busy ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      🔴 Market Sell ({selectedChartSymbol})
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
         <p style={{ color: '#fbbf24', marginBottom: 0, marginTop: 8 }}>Paper trading only. No real broker orders. No financial advice.</p>
       </section>
 
@@ -1269,7 +1397,7 @@ export default function PaperTradingPage() {
               <p style={{ color: "#cbd5e1", fontSize: 13, margin: "6px 0 0 0", lineHeight: 1.5 }}>
                 {status.status === "running"
                   ? (openPositions.length > 0
-                      ? `Holding long position on ${openPositions[0].symbol} (Qty ${openPositions[0].qty}) entered at $${money(openPositions[0].entry_price)}. Floating PnL: ${unrealizedPnl >= 0 ? "+" : ""}$${money(unrealizedPnl)}. Stop-Loss is protected at $${money(openPositions[0].stop)} and Profit Target is active at $${money(openPositions[0].target1)}.`
+                      ? `Holding ${String(openPositions[0].side || "").toUpperCase() === "SELL" ? "short" : "long"} position on ${openPositions[0].symbol} (Qty ${openPositions[0].qty}) entered at $${money(openPositions[0].entry_price)}. Floating PnL: ${unrealizedPnl >= 0 ? "+" : ""}$${money(unrealizedPnl)}. Stop-Loss is protected at $${money(openPositions[0].stop)} and Profit Target is active at $${money(openPositions[0].target1)}.`
                       : `Streaming real-time Binance ticks across ${status.active_symbols?.length || selectedSymbols.length} active market${(status.active_symbols?.length || selectedSymbols.length) > 1 ? "s" : ""} (${selectedSymbols.slice(0, 4).join(", ")}${selectedSymbols.length > 4 ? ` +${selectedSymbols.length - 4} more` : ""}). The engine is analyzing 1m candles for breakout & retest momentum.`)
                   : `Simulate real cryptocurrency market execution on live Binance price action with zero financial risk. Customize your paper balance, select your pairs above, and click 'Start Live Paper Trading'.`}
               </p>
@@ -1500,13 +1628,14 @@ export default function PaperTradingPage() {
                     <Th>Unrealized</Th>
                     <Th>Stop</Th>
                     <Th>Targets</Th>
+                    <Th>Action</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {openPositions.map((p: any, i: number) => (
                     <tr key={`${p.symbol || "POS"}-${i}`}>
                       <Td><span style={{ color: "#93c5fd", fontWeight: 800 }}>{p.symbol || "-"}</span></Td>
-                      <Td>{p.side || "BUY"}</Td>
+                      <Td><span style={{ color: p.side === "SELL" ? "#f87171" : "#4ade80", fontWeight: 700 }}>{p.side || "BUY"}</span></Td>
                       <Td>{displayValue(p.entry_price, (v) => `$${money(v)}`)}</Td>
                       <Td>{displayValue(p.qty)}</Td>
                       <Td>{displayValue(p.current_price, (v) => `$${money(v)}`)}</Td>
@@ -1514,6 +1643,24 @@ export default function PaperTradingPage() {
                       <Td><span style={signedStyle(p.unrealized_pnl)}>{displayValue(p.unrealized_pnl, (v) => `$${money(v)}`)}</span></Td>
                       <Td>{displayValue(p.stop, (v) => `$${money(v)}`)}</Td>
                       <Td>{p.target1 ? `$${money(p.target1)} / ${displayValue(p.target2, (v) => `$${money(v)}`)}` : "not available"}</Td>
+                      <Td>
+                        <button
+                          onClick={() => handleClosePosition(p.symbol)}
+                          disabled={busy}
+                          style={{
+                            padding: "4px 10px",
+                            background: "rgba(239, 68, 68, 0.15)",
+                            color: "#f87171",
+                            border: "1px solid rgba(239, 68, 68, 0.4)",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: busy ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          Close
+                        </button>
+                      </Td>
                     </tr>
                   ))}
                 </tbody>

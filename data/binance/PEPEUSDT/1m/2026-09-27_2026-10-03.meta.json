@@ -1,0 +1,12 @@
+{
+  "symbol": "PEPEUSDT",
+  "timeframe": "1m",
+  "binance_interval_used": "1m",
+  "rows": 10080,
+  "start_date": "2026-09-27",
+  "end_date": "2026-10-03",
+  "cached": false,
+  "real_binance_data": true,
+  "synthetic_data_used": false,
+  "note": "OHLCV candles are fetched from Binance REST in retryable chunks and cached locally. PRISM metadata columns are deterministic labels derived from candles."
+}

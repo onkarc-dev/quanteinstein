@@ -1,0 +1,12 @@
+{
+  "symbol": "ETHUSDT",
+  "timeframe": "1m",
+  "binance_interval_used": "1m",
+  "rows": 4320,
+  "start_date": "2026-09-28",
+  "end_date": "2026-09-30",
+  "cached": false,
+  "real_binance_data": true,
+  "synthetic_data_used": false,
+  "note": "OHLCV candles are fetched from Binance REST in retryable chunks and cached locally. PRISM metadata columns are deterministic labels derived from candles."
+}
