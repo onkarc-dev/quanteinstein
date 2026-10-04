@@ -24,8 +24,8 @@ from app.services.live_paper import POPULAR_SYMBOLS
 SUPPORTED_SYMBOLS = POPULAR_SYMBOLS
 SUPPORTED_INTERVALS = ["1s", "5s", "10s", "15s", "30s", "1m", "5m", "15m", "1h"]
 BINANCE_INTERVALS = {"1s", "1m", "5m", "15m", "1h"}
-REQUEST_TIMEOUT = 45
-MAX_RETRIES = 4
+REQUEST_TIMEOUT = 6
+MAX_RETRIES = 2
 
 
 def yesterday_utc() -> str:
@@ -125,7 +125,6 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> Lis
                         break
                 except Exception as e:
                     last_err = e
-                    time.sleep(0.3)
             if data is not None and isinstance(data, list):
                 break
 
@@ -140,7 +139,6 @@ def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> Lis
         if next_cursor <= cursor:
             break
         cursor = next_cursor
-        time.sleep(0.02)
     return rows
 
 
@@ -162,7 +160,6 @@ def _download_chunked(symbol: str, base_interval: str, start_dt: datetime, end_d
         part = _fetch_klines(symbol, base_interval, int(cur.timestamp() * 1000), int(nxt.timestamp() * 1000))
         rows.extend(part)
         cur = nxt
-        time.sleep(0.12)
     # Deduplicate by open time.
     by_time: Dict[int, list] = {}
     for r in rows:
@@ -189,40 +186,60 @@ def _aggregate_rows(rows: List[list], target_tf: str) -> List[Dict[str, Any]]:
 
 
 def _rows_to_prism(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    closes: List[float] = []
+    n = len(rows)
+    if n == 0:
+        return []
+    out: List[Dict[str, Any]] = [None] * n
+    tr_window = [0.0] * 14
+    running_tr_sum = 0.0
+    prev_close = float(rows[0]["close"])
+
     for i, b in enumerate(rows):
-        high = float(b["high"]); low = float(b["low"]); close = float(b["close"]); open_ = float(b["open"])
-        closes.append(close)
+        high = float(b["high"])
+        low = float(b["low"])
+        close = float(b["close"])
+        open_ = float(b["open"])
+        vol = float(b["volume"])
+
         vwap = (high + low + close) / 3.0
-        if i >= 14:
-            atr_vals = []
-            for j in range(max(1, i - 13), i + 1):
-                prev_close = closes[j - 1]
-                hj = float(rows[j]["high"]); lj = float(rows[j]["low"])
-                atr_vals.append(max(hj - lj, abs(hj - prev_close), abs(lj - prev_close)))
-            atr = sum(atr_vals) / len(atr_vals)
+
+        if i == 0:
+            tr = max(high - low, close * 0.001)
+            atr = tr
+            tr_window[0] = tr
+            running_tr_sum = tr
         else:
-            atr = max(high - low, close * 0.001)
-        ts = datetime.fromtimestamp(int(b["timestamp_ms"]) / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
-        out.append({
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            idx = i % 14
+            running_tr_sum = running_tr_sum - tr_window[idx] + tr
+            tr_window[idx] = tr
+            if i < 14:
+                atr = running_tr_sum / (i + 1)
+            else:
+                atr = running_tr_sum / 14.0
+
+        prev_close = close
+        ts = datetime.fromtimestamp(int(b["timestamp_ms"]) / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        is_up = close >= open_
+
+        out[i] = {
             "timestamp": ts,
             "open": round(open_, 8),
             "high": round(high, 8),
             "low": round(low, 8),
             "close": round(close, 8),
-            "volume": round(float(b["volume"]), 8),
+            "volume": round(vol, 8),
             "vwap": round(vwap, 8),
             "atr_14": round(atr, 8),
             "spread_pct": 0.05,
             "liquidity_score": 0.90,
             "oi": 0,
-            "mse_state": "TREND_UP" if close >= open_ else "TREND_DOWN",
+            "mse_state": "TREND_UP" if is_up else "TREND_DOWN",
             "regime": "NORMAL",
-            "ipse_alignment": "ALIGNED" if close >= open_ else "NEUTRAL",
+            "ipse_alignment": "ALIGNED" if is_up else "NEUTRAL",
             "microstructure_state": "HEALTHY",
             "mps_state": "ALLOW",
-        })
+        }
     return out
 
 
@@ -260,9 +277,15 @@ def fetch_real_binance_csv(symbol: str, timeframe: str, start_date: str, end_dat
         raise ValueError("No Binance historical rows returned for the selected range.")
     fields = ["timestamp","open","high","low","close","volume","vwap","atr_14","spread_pct","liquidity_score","oi","mse_state","regime","ipse_alignment","microstructure_state","mps_state"]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        w.writerows(prism_rows)
+        w = csv.writer(f)
+        w.writerow(fields)
+        for r in prism_rows:
+            w.writerow([
+                r["timestamp"], r["open"], r["high"], r["low"], r["close"],
+                r["volume"], r["vwap"], r["atr_14"], r["spread_pct"],
+                r["liquidity_score"], r["oi"], r["mse_state"], r["regime"],
+                r["ipse_alignment"], r["microstructure_state"], r["mps_state"]
+            ])
     meta = {"symbol": symbol, "timeframe": timeframe, "binance_interval_used": base_interval, "rows": len(prism_rows), "start_date": start_dt.date().isoformat(), "end_date": end_dt.date().isoformat(), "cached": False, "real_binance_data": True, "synthetic_data_used": False, "note": "OHLCV candles are fetched from Binance REST in retryable chunks and cached locally. PRISM metadata columns are deterministic labels derived from candles."}
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return {"path": str(csv_path), **meta}

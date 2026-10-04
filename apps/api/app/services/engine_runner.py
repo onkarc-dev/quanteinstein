@@ -313,6 +313,7 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
     timeframe = job_payload.get("timeframe", "1m")
 
     output_dir = create_job_folder(user_id, job_id)
+    _start_job(job_id, user_id, strategy_id, mode, symbols, timeframe, output_dir)
 
     # Phase 3 foundation: backtests use real Binance historical data for the
     # selected symbol/timeframe/date range instead of silently falling back to
@@ -333,7 +334,7 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
             def _fetch_single_symbol(sym: str):
                 return sym, fetch_real_binance_csv(sym, timeframe, start_date, end_date)
 
-            max_fetch_workers = min(len(syms_to_fetch), 8)
+            max_fetch_workers = min(len(syms_to_fetch), 16)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_fetch_workers) as executor:
                 fetched_items = list(executor.map(_fetch_single_symbol, syms_to_fetch))
 
@@ -373,8 +374,6 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
             "error_category": "market_data_fetch_failed",
             "synthetic_data_used": False,
         }
-
-    _start_job(job_id, user_id, strategy_id, mode, symbols, timeframe, output_dir)
 
     engine = settings.engine_binary
 
@@ -430,7 +429,7 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as exc:
                 return sym, False, [], "", f"\n[{sym}] Error: {exc}"
 
-        max_proc_workers = min(len(symbols), 4)
+        max_proc_workers = min(len(symbols), 8)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc_workers) as executor:
             proc_results = list(executor.map(_run_single_symbol, symbols))
 

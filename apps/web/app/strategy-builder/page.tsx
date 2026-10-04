@@ -363,16 +363,17 @@ export default function StrategyBuilderPage() {
         const currentStatus = (j.status || "processing").toUpperCase();
         if (total > 1) {
           setRunProgress(
-            `Executing basket (${total} symbols) on historical Binance klines [${currentStatus}]. Poll ${i + 1} / ${maxPolls}...`,
+            `Executing basket (${total} symbols) on authentic Binance data [${currentStatus}]...`,
           );
         } else {
-          setRunProgress(`Processing candles and generating backtest report [${currentStatus}] (poll ${i + 1} / ${maxPolls})...`);
+          setRunProgress(`Processing market data and generating backtest report [${currentStatus}]...`);
         }
         if (j.status === "completed" || j.status === "failed") return j;
       } catch (err: any) {
         console.warn(`[poll] Transient polling issue on attempt ${i + 1}:`, err);
       }
-      await new Promise((r) => setTimeout(r, 1500));
+      const delayMs = i < 6 ? 400 : i < 16 ? 800 : 1200;
+      await new Promise((r) => setTimeout(r, delayMs));
     }
     return null;
   }
