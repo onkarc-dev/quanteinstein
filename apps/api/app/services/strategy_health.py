@@ -68,7 +68,23 @@ def build_strategy_health_score(trades: list[dict[str, Any]], journal_entries: l
     for j in mistakes:
         key = str(j.get('rule_broken') or j.get('mistake_tag'))
         repeated[key] = repeated.get(key, 0) + 1
-    pr = build_performance_and_robustness(trades, profit_factor=(gross_profit / gross_loss) if gross_loss else None, risk_per_trade_pct=risk_per_trade_pct)
+    from app.services.coach import (
+        walk_forward_analysis,
+        compute_out_of_sample,
+        compute_parameter_sensitivity,
+    )
+    wf_res = walk_forward_analysis(trades)
+    oos_res = compute_out_of_sample(trades)
+    sens_res = compute_parameter_sensitivity(trades)
+
+    pr = build_performance_and_robustness(
+        trades,
+        profit_factor=(gross_profit / gross_loss) if gross_loss else None,
+        risk_per_trade_pct=risk_per_trade_pct,
+        has_walk_forward=bool(wf_res.get("status") in {"PASS", "ROBUST"}),
+        has_out_of_sample=bool(oos_res.get("status") == "PASS"),
+        parameter_sensitivity=sens_res.get("stability_score"),
+    )
     sharpe = pr['risk_adjusted']['sharpe']
     sortino = pr['risk_adjusted']['sortino']
     calmar = pr['risk_adjusted']['calmar']
@@ -97,7 +113,13 @@ def build_strategy_health_score(trades: list[dict[str, Any]], journal_entries: l
         'risk_adjusted': {'sharpe': sharpe, 'sortino': sortino, 'calmar': calmar, 'omega': omega, 'information_ratio': information_ratio, 'recovery_factor': recovery_factor},
         'trading_quality': {'win_rate': len(wins) / n if n else 0, 'loss_rate': len(losses) / n if n else 0, 'average_winner_R': mean(wins) if wins else 0, 'average_loser_R': mean(losses) if losses else 0, 'profit_factor': profit_factor, 'recovery_factor': recovery_factor, 'expectancy_R': expectancy, 'payoff_ratio': payoff, 'average_trade_duration_seconds': mean(trade_durations) if trade_durations else 0},
         'execution_quality': {'turnover': turnover, 'estimated_fees': fees, 'estimated_slippage': slippage, 'cost_vs_gross_profit': ((fees + slippage) / gross_profit) if gross_profit else 0, 'fill_delay': None},
-        'robustness': {**pr['robustness'], 'overfitting_warning': pr['robustness']['overfitting_risk_label'] in {'MEDIUM', 'HIGH'}, 'parameter_sensitivity_legacy': 'placeholder_not_implemented', 'out_of_sample_walk_forward': 'placeholder_not_implemented'},
+        'robustness': {
+            **pr['robustness'],
+            'overfitting_warning': pr['robustness']['overfitting_risk_label'] in {'MEDIUM', 'HIGH'},
+            'walk_forward': wf_res,
+            'out_of_sample': oos_res,
+            'parameter_sensitivity': sens_res,
+        },
         'performance_and_robustness': pr,
         'warnings': pr['warnings'],
         'regime_behavior': {'bull_score': None, 'sideways_score': None, 'bear_score': None, 'high_volatility_score': None, 'low_volatility_score': None},

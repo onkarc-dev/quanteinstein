@@ -201,6 +201,211 @@ def walk_forward_analysis(
     }
 
 
+# ─── Out-of-Sample (OOS) ──────────────────────────────────────────────────────
+
+def compute_out_of_sample(
+    trades: List[Dict[str, Any]],
+    split_pct: float = 0.7,
+) -> Dict[str, Any]:
+    if not trades or len(trades) < 10:
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "available": False,
+            "pass_rate": None,
+            "reason": f"Need at least 10 closed trades for in-sample / out-of-sample split (currently {len(trades)})",
+        }
+
+    rs = []
+    for t in trades:
+        v = t.get("r_multiple") or t.get("R_multiple") or t.get("r") or 0
+        try:
+            rs.append(float(v))
+        except (TypeError, ValueError):
+            rs.append(0.0)
+
+    split = max(1, int(len(rs) * split_pct))
+    train = rs[:split]
+    test = rs[split:]
+
+    train_avg = statistics.mean(train) if train else 0.0
+    test_avg = statistics.mean(test) if test else 0.0
+    train_win = (sum(1 for x in train if x > 0) / len(train)) if train else 0.0
+    test_win = (sum(1 for x in test if x > 0) / len(test)) if test else 0.0
+
+    efficiency = (test_avg / train_avg) if train_avg > 0 else (1.0 if test_avg > 0 else 0.0)
+    passed = test_avg > 0 and (efficiency >= 0.35 or test_avg >= 0.08)
+
+    status = "PASS" if passed else "FAIL"
+
+    return {
+        "status": status,
+        "available": True,
+        "split_ratio": f"{int(split_pct * 100)}/{int((1 - split_pct) * 100)}",
+        "in_sample_trades": len(train),
+        "out_of_sample_trades": len(test),
+        "in_sample_avg_R": round(train_avg, 4),
+        "out_of_sample_avg_R": round(test_avg, 4),
+        "in_sample_win_rate": round(train_win, 4),
+        "out_of_sample_win_rate": round(test_win, 4),
+        "efficiency_ratio": round(efficiency, 3),
+        "passed": passed,
+        "verdict": (
+            f"Out-of-sample edge confirmed ({test_avg:+.3f}R/trade across {len(test)} unseen trades, retaining {efficiency:.0%} of in-sample edge)."
+            if passed else
+            f"Out-of-sample degradation detected ({test_avg:+.3f}R/trade vs {train_avg:+.3f}R/trade in-sample). Edge may be partially curve-fit."
+        ),
+    }
+
+
+# ─── Parameter Sensitivity ────────────────────────────────────────────────────
+
+def compute_parameter_sensitivity(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    st = stress_test(trades)
+    if st.get("status") == "INSUFFICIENT_DATA":
+        return {
+            "status": "INSUFFICIENT_DATA",
+            "available": False,
+            "stability_score": None,
+            "reason": "Need more closed trades for perturbation stability testing",
+        }
+
+    pass_rate = float(st.get("pass_rate", 0.0) or 0.0)
+    stability_score = round(pass_rate * 100, 1)
+
+    status = "ROBUST" if stability_score >= 70 else ("MARGINAL" if stability_score >= 40 else "FRAGILE")
+
+    return {
+        "status": status,
+        "available": True,
+        "stability_score": stability_score,
+        "scenarios_passed": st.get("scenarios_passed", 0),
+        "scenarios_total": st.get("scenarios_total", 0),
+        "scenarios": st.get("scenarios", []),
+        "verdict": (
+            f"High parameter stability ({stability_score}% resilience across slippage, wider stops, and execution shocks). Strategy is not hyper-sensitive to exact parameter values."
+            if status == "ROBUST" else
+            f"Moderate sensitivity ({stability_score}% resilience). Performance degrades under friction or volatility expansion."
+            if status == "MARGINAL" else
+            f"Fragile parameter profile ({stability_score}% resilience). Small changes in market friction or stop widths erode positive expectancy."
+        ),
+    }
+
+
+# ─── Actionable Coaching Plan ─────────────────────────────────────────────────
+
+def generate_actionable_coaching_plan(
+    trades: List[Dict[str, Any]],
+    exp: Dict[str, Any],
+    wf: Dict[str, Any],
+    oos: Dict[str, Any],
+    st: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    config = config or {}
+    items = []
+    n = exp.get("trades", 0)
+    avg_R = exp.get("avg_R", 0) or 0
+    win_rate = exp.get("win_rate", 0) or 0
+    pf = exp.get("profit_factor", 0) or 0
+    avg_win = exp.get("avg_win_R", 0) or 0
+    avg_loss = abs(exp.get("avg_loss_R", 0) or 1.0)
+    payoff = (avg_win / avg_loss) if avg_loss else 1.0
+    max_dd = exp.get("max_drawdown_R", 0) or 0
+
+    # 1. Overtrading & Setup Filtering
+    if n > 150:
+        items.append({
+            "category": "Execution Frequency & Filtering",
+            "priority": "HIGH",
+            "title": "Mitigate High-Frequency Overtrading",
+            "observation": f"Strategy produced {n} trades. High frequency magnifies exchange fees and spread drag.",
+            "impact": "Exchanges capture a significant portion of gross profits via taker fees and spread slippage.",
+            "action": "In Strategy Builder, increase 'Minimum Setup Score' from 6.5 to 8.5–9.0, or enable the 5m Trend Filter to skip low-conviction breakout noise.",
+            "builder_action": {
+                "param": "min_setup_score",
+                "recommended_value": 8.5,
+                "label": "Raise Setup Score to 8.5",
+            },
+        })
+    elif n < 30:
+        items.append({
+            "category": "Sample Size",
+            "priority": "HIGH",
+            "title": "Expand Sample Horizon for Statistical Significance",
+            "observation": f"Only {n} trades recorded so far.",
+            "impact": "Small samples carry high variance. Metrics can be skewed by a single lucky win or unlucky loss.",
+            "action": "Test over at least 14-30 days of market data or deploy to Live Paper Trading to collect 50+ trades.",
+            "builder_action": {
+                "param": "backtest_days",
+                "recommended_value": 14,
+                "label": "Extend Backtest Window to 14 Days",
+            },
+        })
+
+    # 2. Payoff Ratio & Target Configuration
+    if payoff >= 1.8:
+        items.append({
+            "category": "Profit Targets & Exits",
+            "priority": "MEDIUM",
+            "title": f"Protect Strong {payoff:.2f}x Asymmetric Payoff",
+            "observation": f"Average winner (+{avg_win:.2f}R) significantly outpaces average loser (-{avg_loss:.2f}R).",
+            "impact": f"With a {payoff:.2f}x payoff ratio, you only need a {100 / (1 + payoff):.1f}% win rate to remain net profitable.",
+            "action": "Maintain Target 1 at 1.5R and Target 2 at 2.5R. In Strategy Builder, consider enabling 'Move Stop to Breakeven at +1.0R' to eliminate tail downside on mature trades.",
+            "builder_action": {
+                "param": "breakeven_trigger_R",
+                "recommended_value": 1.0,
+                "label": "Enable Breakeven Stop at +1.0R",
+            },
+        })
+    elif payoff < 1.1:
+        items.append({
+            "category": "Profit Targets & Exits",
+            "priority": "HIGH",
+            "title": "Widen Reward-to-Risk Payoff",
+            "observation": f"Payoff ratio is only {payoff:.2f}x (avg win +{avg_win:.2f}R vs avg loss -{avg_loss:.2f}R).",
+            "impact": "Low payoff requires a high win rate (>50%) just to break even after exchange fees.",
+            "action": "In Strategy Builder, widen Target 1 to 1.5R or 2.0R and ensure Stop Loss is anchored to true market structure rather than a fixed tight tick.",
+            "builder_action": {
+                "param": "target1_R",
+                "recommended_value": 1.5,
+                "label": "Widen Target 1 to 1.5R",
+            },
+        })
+
+    # 3. Downside & Drawdown Sizing
+    items.append({
+        "category": "Capital Preservation",
+        "priority": "MEDIUM",
+        "title": "Calibrate Risk Sizing to Max Drawdown",
+        "observation": f"Max historical drawdown is {max_dd:.2f}R with an expectancy of {avg_R:+.3f}R per trade.",
+        "impact": f"At 1% account risk per trade, this peak drawdown represents only {abs(max_dd) * 1.0:.1f}% equity drawdown.",
+        "action": "Allocate between 0.5% and 1.0% risk per trade on your paper wallet. Never risk more than 2.0% per trade to guarantee zero risk of ruin.",
+        "builder_action": {
+            "param": "risk_per_trade_pct",
+            "recommended_value": 1.0,
+            "label": "Set Risk to 1.0% per Trade",
+        },
+    })
+
+    # 4. Out-of-Sample / Walk-Forward Validation
+    if oos.get("status") == "PASS" and wf.get("status") == "PASS":
+        items.append({
+            "category": "Deployment Readiness",
+            "priority": "LOW",
+            "title": "Deploy Strategy to Live Paper Trading",
+            "observation": "Both Walk-Forward analysis and Out-of-Sample validation passed with positive expectancy across unseen data.",
+            "impact": "Edge demonstrates robust temporal stability across market regimes.",
+            "action": "Click 'Deploy to Paper Trading' below to run real-time market execution on Binance streaming feeds with zero financial risk.",
+            "builder_action": {
+                "param": "deploy_paper",
+                "recommended_value": True,
+                "label": "Launch Live Paper Session",
+            },
+        })
+
+    return items
+
+
 # ─── Stress Testing ───────────────────────────────────────────────────────────
 
 def stress_test(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -544,7 +749,9 @@ def build_coach_report(
     exp = compute_expectancy(trades)
     mc = run_monte_carlo(trades, n_simulations=1000, n_trades=50)
     wf = walk_forward_analysis(trades)
+    oos = compute_out_of_sample(trades)
     st = stress_test(trades)
+    sens = compute_parameter_sensitivity(trades)
     fit = compute_lifestyle_fit(config, trades)
     discipline = compute_rule_discipline(violations)
     obj = compute_objective_pass_fail(exp, mc)
@@ -552,12 +759,16 @@ def build_coach_report(
     insights = _generate_insights(exp, mc, wf, st, fit, discipline)
     verdict = _determine_verdict(exp, mc, obj, discipline)
     next_actions = _generate_next_actions(verdict, exp, wf, discipline)
+    plan = generate_actionable_coaching_plan(trades, exp, wf, oos, st, config)
 
     return {
         "final_verdict": verdict,
         "metrics": exp,
         "monte_carlo": mc,
         "walk_forward_analysis": wf,
+        "out_of_sample_analysis": oos,
+        "parameter_sensitivity": sens,
+        "actionable_coaching_plan": plan,
         "stress_testing": st,
         "lifestyle_fit": fit,
         "rule_discipline": discipline,

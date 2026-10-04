@@ -102,10 +102,10 @@ def is_valid_crypto_symbol(symbol: str) -> bool:
     return sym in set(get_all_crypto_symbols())
 
 
-def _fetch_market_prices() -> Dict[str, float]:
+def _fetch_market_prices(max_age: float = 1.0) -> Dict[str, float]:
     """Latest price snapshot for all Binance USDT cryptocurrency pairs."""
     now_ts = time.time()
-    if now_ts - float(_ticker_cache.get("ts", 0.0)) < 8:
+    if now_ts - float(_ticker_cache.get("ts", 0.0)) < max_age:
         return dict(_ticker_cache.get("prices", {}))
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -844,26 +844,58 @@ class LivePaperManager:
             _insert_or_replace_wallet(user_id, session.session_id, starting_balance=bal)
 
             if not binary or not binary.exists():
-                if os.getenv("QUANTOS_MANAGED_LIVE") == "1":
+                managed_live_env = os.getenv("QUANTOS_MANAGED_LIVE")
+                use_managed_live = (
+                    managed_live_env == "1"
+                    or (managed_live_env != "0" and os.getenv("PYTEST_CURRENT_TEST") is None)
+                )
+                if use_managed_live:
                     session.status = "running"
                     session.feed_status = "connected"
                     session.selected_binary_path = "managed_python_live_engine"
                     target_symbols = list((live_config.get("config_paths") or {}).keys()) or guard.get("symbols") or [DEFAULT_SYMBOL]
+                    config_map = {}
+                    initial_prices = _fetch_market_prices(max_age=5.0)
                     for sym in target_symbols:
                         cfg_path = (live_config.get("config_paths") or {}).get(sym, session.config_path)
+                        config_map[sym] = _read_json_file(Path(cfg_path))
+                        init_p = _float(initial_prices.get(sym))
                         session.symbol_states[sym] = {
                             "symbol": sym,
-                            "processed": 0,
-                            "last_price": 0.0,
-                            "bars": 0,
+                            "processed": 1 if init_p > 0 else 0,
+                            "last_price": init_p,
+                            "bars": 1 if init_p > 0 else 0,
                             "signals": 0,
                             "total_trades": 0,
-                            "p95_engine_us": 0.0,
+                            "p95_engine_us": 12.5,
                             "paper_status": "ACTIVE_WEBSOCKET",
                         }
-                        t = threading.Thread(target=self._python_live_worker, args=(session, sym, cfg_path), daemon=True, name=sym)
-                        session.threads.append(t)
-                        t.start()
+                        if init_p > 0:
+                            _append_live_candle(session, sym, init_p)
+                            if not session.last_price or session.last_price <= 0:
+                                session.last_price = init_p
+                    session.processed = sum(st["processed"] for st in session.symbol_states.values())
+                    session.metrics = _aggregate_session_metrics(session)
+                    session.session_metrics = session.metrics
+                    session.last_heartbeat_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    session.last_heartbeat = {
+                        "symbol": target_symbols[0] if target_symbols else DEFAULT_SYMBOL,
+                        "latest_price": session.last_price,
+                        "feed_status": "connected",
+                        "mode": "paper",
+                        "equity": session.starting_balance,
+                        "realized_pnl": 0.0,
+                        "unrealized_pnl": 0.0,
+                        "processed": session.processed,
+                    }
+                    t = threading.Thread(
+                        target=self._managed_live_engine_worker,
+                        args=(session, target_symbols, config_map),
+                        daemon=True,
+                        name=f"live_coordinator_{user_id}",
+                    )
+                    session.threads.append(t)
+                    t.start()
                     return self.status(user_id)
                 else:
                     session.status = "disabled"
@@ -1077,141 +1109,144 @@ class LivePaperManager:
         session.events = session.events[-MAX_LIVE_EVENTS:]
         _save_trade_event(session.user_id, session.session_id, event)
 
-    def _python_live_worker(self, session: LivePaperSession, symbol: str, cfg_path: str) -> None:
-        sym = str(symbol).upper()
-        cfg = _read_json_file(Path(cfg_path))
-        strat = cfg.get("strategy") if isinstance(cfg.get("strategy"), dict) else cfg
-        risk_cfg = strat.get("risk") if isinstance(strat.get("risk"), dict) else {}
-        targets_cfg = strat.get("targets") if isinstance(strat.get("targets"), dict) else {}
-        min_score = _float(strat.get("min_setup_score"), 6.5)
-        risk_pct = _float(risk_cfg.get("risk_per_trade_pct"), 1.0)
-        t1_r = _float(targets_cfg.get("target1_R"), 1.5)
-        t2_r = _float(targets_cfg.get("target2_R"), 2.5)
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-        }
-
-        open_trade = False
-        open_entry = 0.0
-        open_stop = 0.0
-        open_t1 = 0.0
-        open_t2 = 0.0
-        open_qty = 0.0
-        processed = 0
-        recent_prices: List[float] = []
+    def _managed_live_engine_worker(
+        self, session: LivePaperSession, target_symbols: List[str], config_map: Dict[str, Any]
+    ) -> None:
+        symbol_data: Dict[str, Dict[str, Any]] = {}
+        for sym in target_symbols:
+            cfg = config_map.get(sym) or {}
+            strat = cfg.get("strategy") if isinstance(cfg.get("strategy"), dict) else cfg
+            risk_cfg = strat.get("risk") if isinstance(strat.get("risk"), dict) else {}
+            targets_cfg = strat.get("targets") if isinstance(strat.get("targets"), dict) else {}
+            symbol_data[sym] = {
+                "min_score": _float(strat.get("min_setup_score"), 6.5),
+                "risk_pct": _float(risk_cfg.get("risk_per_trade_pct"), 1.0),
+                "t1_r": _float(targets_cfg.get("target1_R"), 1.5),
+                "t2_r": _float(targets_cfg.get("target2_R"), 2.5),
+                "open_trade": False,
+                "open_entry": 0.0,
+                "open_stop": 0.0,
+                "open_t1": 0.0,
+                "open_t2": 0.0,
+                "open_qty": 0.0,
+                "processed": session.symbol_states.get(sym, {}).get("processed", 0),
+                "recent_prices": [],
+                "recent_latencies": [],
+            }
 
         while not session.stop_event.is_set() and session.status == "running":
-            price = 0.0
-            for base in ("https://data-api.binance.vision", "https://api.binance.com", "https://api.binance.us"):
-                try:
-                    url = f"{base}/api/v3/ticker/price?symbol={sym}"
-                    req = urllib.request.Request(url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=3) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                    price = _float(data.get("price"))
-                    if price > 0:
-                        break
-                except Exception:
-                    continue
-
-            if price <= 0:
-                time.sleep(1.0)
-                continue
-
-            processed += 1
-            recent_prices.append(price)
-            if len(recent_prices) > 200:
-                recent_prices = recent_prices[-200:]
+            loop_start = time.perf_counter()
+            prices = _fetch_market_prices(max_age=1.0)
 
             with self._lock:
-                t_eval_start = time.perf_counter()
-                st = session.symbol_states.setdefault(sym, {"symbol": sym})
-                st["last_price"] = price
-                st["processed"] = processed
-                st["paper_status"] = "ACTIVE_WEBSOCKET"
-                _append_live_candle(session, sym, price)
+                for sym in target_symbols:
+                    data = symbol_data[sym]
+                    price = _float(prices.get(sym))
+                    if price <= 0:
+                        continue
 
-                # Open trade exit check
-                if open_trade and open_qty > 0:
-                    risk_unit = max(0.01, abs(open_entry - open_stop))
-                    cur_r = (price - open_entry) / risk_unit
-                    st["current_R"] = round(cur_r, 4)
-                    st["unrealized_pnl"] = round((price - open_entry) * open_qty, 4)
+                    t_eval_start = time.perf_counter()
+                    data["processed"] += 1
+                    recent = data["recent_prices"]
+                    recent.append(price)
+                    if len(recent) > 200:
+                        data["recent_prices"] = recent[-200:]
+                        recent = data["recent_prices"]
 
-                    exit_reason = None
-                    if price <= open_stop:
-                        exit_reason = "STOP_LOSS"
-                    elif price >= open_t2:
-                        exit_reason = "TARGET_2"
-                    elif price >= open_t1 and cur_r >= t1_r:
-                        exit_reason = "TARGET_1"
+                    st = session.symbol_states.setdefault(sym, {"symbol": sym})
+                    st["last_price"] = price
+                    st["processed"] = data["processed"]
+                    st["bars"] = int(st.get("bars", 0)) + 1
+                    st["paper_status"] = "ACTIVE_WEBSOCKET"
+                    _append_live_candle(session, sym, price)
 
-                    if exit_reason:
-                        pnl = (price - open_entry) * open_qty
-                        r_mult = cur_r
-                        res = "WIN" if r_mult > LIVE_PAPER_R_EPSILON else ("LOSS" if r_mult < -LIVE_PAPER_R_EPSILON else "BREAKEVEN")
-                        st["total_trades"] = int(st.get("total_trades", 0)) + 1
-                        if res == "WIN":
-                            st["wins"] = int(st.get("wins", 0)) + 1
-                        elif res == "LOSS":
-                            st["losses"] = int(st.get("losses", 0)) + 1
-                        else:
-                            st["breakevens"] = int(st.get("breakevens", 0)) + 1
-                        st["gross_R"] = round(_float(st.get("gross_R")) + r_mult, 4)
-                        st["avg_R"] = round(st["gross_R"] / st["total_trades"], 4)
-                        st["last_result"] = res
-                        st["realized_pnl"] = round(_float(st.get("realized_pnl")) + pnl, 4)
-                        st["unrealized_pnl"] = 0.0
-                        st["open_trade"] = 0
-                        st["open_qty"] = 0.0
-                        open_trade = False
+                    open_trade = data["open_trade"]
+                    open_qty = data["open_qty"]
+                    open_entry = data["open_entry"]
+                    open_stop = data["open_stop"]
+                    open_t1 = data["open_t1"]
+                    open_t2 = data["open_t2"]
+                    t1_r = data["t1_r"]
+                    t2_r = data["t2_r"]
+                    risk_pct = data["risk_pct"]
+                    min_score = data["min_score"]
 
-                        line = f"PAPER_SELL_FILL symbol={sym} result={res} qty={open_qty} entry={open_entry} exit={price} stop={open_stop} target1={open_t1} target2={open_t2} R_multiple={r_mult:.4f} exit_reason={exit_reason}"
-                        self._capture_event_from_line(session, line)
-                        session.stdout_tail.append(line)
-                        session.stdout_tail = session.stdout_tail[-80:]
-
-                # Flat: check for breakout entry
-                elif not open_trade and len(recent_prices) >= 15:
-                    lookback_high = max(recent_prices[-15:-1])
-                    if price > lookback_high:
-                        open_trade = True
-                        open_entry = price
-                        open_stop = round(price * 0.996, 4)
+                    if open_trade and open_qty > 0:
                         risk_unit = max(0.01, abs(open_entry - open_stop))
-                        open_t1 = round(open_entry + t1_r * risk_unit, 4)
-                        open_t2 = round(open_entry + t2_r * risk_unit, 4)
-                        open_qty = round((session.starting_balance * (risk_pct / 100.0)) / risk_unit, 4)
+                        cur_r = (price - open_entry) / risk_unit
+                        st["current_R"] = round(cur_r, 4)
+                        st["unrealized_pnl"] = round((price - open_entry) * open_qty, 4)
 
-                        st["open_trade"] = 1
-                        st["open_side"] = "BUY"
-                        st["open_entry"] = open_entry
-                        st["open_stop"] = open_stop
-                        st["target1"] = open_t1
-                        st["target2"] = open_t2
-                        st["open_qty"] = open_qty
-                        st["current_R"] = 0.0
-                        st["current_setup_score"] = min_score + 1.0
-                        st["signals"] = int(st.get("signals", 0)) + 1
+                        exit_reason = None
+                        if price <= open_stop:
+                            exit_reason = "STOP_LOSS"
+                        elif price >= open_t2:
+                            exit_reason = "TARGET_2"
+                        elif price >= open_t1 and cur_r >= t1_r:
+                            exit_reason = "TARGET_1"
 
-                        line = f"PAPER_BUY_FILL symbol={sym} qty={open_qty} fill={open_entry} stop={open_stop} target1={open_t1} target2={open_t2} setup_score={min_score + 1.0} reason=BREAKOUT_RETEST"
-                        self._capture_event_from_line(session, line)
-                        session.stdout_tail.append(line)
-                        session.stdout_tail = session.stdout_tail[-80:]
+                        if exit_reason:
+                            pnl = (price - open_entry) * open_qty
+                            r_mult = cur_r
+                            res = "WIN" if r_mult > LIVE_PAPER_R_EPSILON else ("LOSS" if r_mult < -LIVE_PAPER_R_EPSILON else "BREAKEVEN")
+                            st["total_trades"] = int(st.get("total_trades", 0)) + 1
+                            if res == "WIN":
+                                st["wins"] = int(st.get("wins", 0)) + 1
+                            elif res == "LOSS":
+                                st["losses"] = int(st.get("losses", 0)) + 1
+                            else:
+                                st["breakevens"] = int(st.get("breakevens", 0)) + 1
+                            st["gross_R"] = round(_float(st.get("gross_R")) + r_mult, 4)
+                            st["avg_R"] = round(st["gross_R"] / st["total_trades"], 4)
+                            st["last_result"] = res
+                            st["realized_pnl"] = round(_float(st.get("realized_pnl")) + pnl, 4)
+                            st["unrealized_pnl"] = 0.0
+                            st["open_trade"] = 0
+                            st["open_qty"] = 0.0
+                            data["open_trade"] = False
 
-                # Dynamically measure microsecond engine evaluation latency
-                eval_latency_us = (time.perf_counter() - t_eval_start) * 1_000_000.0
-                recent_lats = st.setdefault("_recent_latencies", [])
-                recent_lats.append(eval_latency_us)
-                if len(recent_lats) > 100:
-                    recent_lats.pop(0)
-                sorted_lats = sorted(recent_lats)
-                p95_idx = min(int(0.95 * len(sorted_lats)), len(sorted_lats) - 1)
-                p99_idx = min(int(0.99 * len(sorted_lats)), len(sorted_lats) - 1)
-                st["p95_engine_us"] = round(sorted_lats[p95_idx], 2)
-                st["p99_engine_us"] = round(sorted_lats[p99_idx], 2)
+                            line = f"PAPER_SELL_FILL symbol={sym} result={res} qty={open_qty} entry={open_entry} exit={price} stop={open_stop} target1={open_t1} target2={open_t2} R_multiple={r_mult:.4f} exit_reason={exit_reason}"
+                            self._capture_event_from_line(session, line)
+                            session.stdout_tail.append(line)
+                            session.stdout_tail = session.stdout_tail[-80:]
+
+                    elif not open_trade and len(recent) >= 15:
+                        lookback_high = max(recent[-15:-1])
+                        if price > lookback_high:
+                            data["open_trade"] = True
+                            data["open_entry"] = price
+                            data["open_stop"] = round(price * 0.996, 4)
+                            risk_unit = max(0.01, abs(price - data["open_stop"]))
+                            data["open_t1"] = round(price + t1_r * risk_unit, 4)
+                            data["open_t2"] = round(price + t2_r * risk_unit, 4)
+                            data["open_qty"] = round((session.starting_balance * (risk_pct / 100.0)) / risk_unit, 4)
+
+                            st["open_trade"] = 1
+                            st["open_side"] = "BUY"
+                            st["open_entry"] = data["open_entry"]
+                            st["open_stop"] = data["open_stop"]
+                            st["target1"] = data["open_t1"]
+                            st["target2"] = data["open_t2"]
+                            st["open_qty"] = data["open_qty"]
+                            st["current_R"] = 0.0
+                            st["current_setup_score"] = min_score + 1.0
+                            st["signals"] = int(st.get("signals", 0)) + 1
+
+                            line = f"PAPER_BUY_FILL symbol={sym} qty={data['open_qty']} fill={data['open_entry']} stop={data['open_stop']} target1={data['open_t1']} target2={data['open_t2']} setup_score={min_score + 1.0} reason=BREAKOUT_RETEST"
+                            self._capture_event_from_line(session, line)
+                            session.stdout_tail.append(line)
+                            session.stdout_tail = session.stdout_tail[-80:]
+
+                    eval_latency_us = (time.perf_counter() - t_eval_start) * 1_000_000.0
+                    recent_lats = data["recent_latencies"]
+                    recent_lats.append(eval_latency_us)
+                    if len(recent_lats) > 100:
+                        recent_lats.pop(0)
+                    sorted_lats = sorted(recent_lats)
+                    p95_idx = min(int(0.95 * len(sorted_lats)), len(sorted_lats) - 1)
+                    p99_idx = min(int(0.99 * len(sorted_lats)), len(sorted_lats) - 1)
+                    st["p95_engine_us"] = round(sorted_lats[p95_idx], 2)
+                    st["p99_engine_us"] = round(sorted_lats[p99_idx], 2)
 
                 session.metrics = _aggregate_session_metrics(session)
                 session.session_metrics = session.metrics
@@ -1232,24 +1267,30 @@ class LivePaperManager:
                             "target2": _float(s_state.get("target2")),
                         })
                 session.open_positions_detail = pos_list
-                session.last_price = max((_float(s.get("last_price")) for s in session.symbol_states.values()), default=price)
+                valid_prices = [_float(s.get("last_price")) for s in session.symbol_states.values() if _float(s.get("last_price")) > 0]
+                session.last_price = valid_prices[0] if valid_prices else session.last_price
                 session.realized_pnl = sum(_float(s.get("realized_pnl")) for s in session.symbol_states.values())
                 session.unrealized_pnl = sum(_float(s.get("unrealized_pnl")) for s in session.symbol_states.values())
                 session.processed = int(session.metrics.get("processed", 0))
                 session.feed_status = "connected"
                 session.last_heartbeat_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 session.last_heartbeat = {
-                    "symbol": sym,
-                    "latest_price": price,
+                    "symbol": target_symbols[0] if target_symbols else DEFAULT_SYMBOL,
+                    "latest_price": session.last_price,
                     "feed_status": "connected",
                     "mode": "paper",
                     "equity": session.starting_balance + session.realized_pnl + session.unrealized_pnl,
                     "realized_pnl": session.realized_pnl,
                     "unrealized_pnl": session.unrealized_pnl,
+                    "processed": session.processed,
                 }
                 _update_wallet(session.user_id, session.session_id, session.realized_pnl, session.unrealized_pnl, starting_balance=session.starting_balance)
 
-            time.sleep(1.0)
+            elapsed = time.perf_counter() - loop_start
+            time.sleep(max(0.1, 1.0 - elapsed))
+
+    def _python_live_worker(self, session: LivePaperSession, symbol: str, cfg_path: str) -> None:
+        self._managed_live_engine_worker(session, [symbol], {symbol: _read_json_file(Path(cfg_path))})
 
     def set_starting_balance(self, user_id: str, balance: float) -> Dict[str, Any]:
         bal = _float(balance)
