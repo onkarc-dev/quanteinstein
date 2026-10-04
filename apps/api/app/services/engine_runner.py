@@ -297,24 +297,16 @@ def insert_outputs(job_payload: Dict[str, Any], job_id: str, output_dir: Path):
         conn.commit()
 
 
-def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Run the C++ backtest engine synchronously.
-
-    If the binary doesn't exist, returns a structured error with clear instructions
-    rather than an opaque 500. The API can still return 200 with status=failed
-    so the frontend shows a useful message.
-    """
-    job_id = job_payload.get("job_id") or str(uuid.uuid4())
-    user_id = job_payload.get("user_id", "demo_user")
-    strategy_id = job_payload.get("strategy_id", "demo")
-    mode = job_payload.get("mode", "backtest")
-    symbols = job_payload.get("symbols", ["BTCUSDT"])
-    timeframe = job_payload.get("timeframe", "1m")
-
-    output_dir = create_job_folder(user_id, job_id)
-    _start_job(job_id, user_id, strategy_id, mode, symbols, timeframe, output_dir)
-
+def _run_engine_sync_impl(
+    job_payload: Dict[str, Any],
+    output_dir: Path,
+    job_id: str,
+    user_id: str,
+    strategy_id: str,
+    mode: str,
+    symbols: list[str],
+    timeframe: str,
+) -> Dict[str, Any]:
     # Phase 3 foundation: backtests use real Binance historical data for the
     # selected symbol/timeframe/date range instead of silently falling back to
     # sample/synthetic CSV. The user chooses start_date; end_date defaults to
@@ -597,6 +589,43 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
         response["hint"] = _engine_error_hint(error_category)
 
     return response
+
+
+def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Run the C++ backtest engine synchronously with automatic error recovery and DB updates.
+    """
+    job_id = job_payload.get("job_id") or str(uuid.uuid4())
+    user_id = job_payload.get("user_id", "demo_user")
+    strategy_id = job_payload.get("strategy_id", "demo")
+    mode = job_payload.get("mode", "backtest")
+    symbols = job_payload.get("symbols", ["BTCUSDT"])
+    timeframe = job_payload.get("timeframe", "1m")
+
+    output_dir = create_job_folder(user_id, job_id)
+    _start_job(job_id, user_id, strategy_id, mode, symbols, timeframe, output_dir)
+
+    try:
+        return _run_engine_sync_impl(
+            job_payload=job_payload,
+            output_dir=output_dir,
+            job_id=job_id,
+            user_id=user_id,
+            strategy_id=strategy_id,
+            mode=mode,
+            symbols=symbols,
+            timeframe=timeframe,
+        )
+    except Exception as exc:
+        err_msg = f"Backtest execution error: {exc}"
+        _update_job(job_id, status="failed", error_message=err_msg, completed_at=now())
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "error": err_msg,
+            "error_category": "unhandled_engine_error",
+            "output_dir": str(output_dir),
+        }
 
 
 def _engine_error_hint(category: Optional[str]) -> str:

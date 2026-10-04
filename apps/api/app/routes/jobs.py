@@ -5,6 +5,7 @@ import json
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -169,10 +170,52 @@ def submit_backtest(
     }
 
 
+def _clean_stale_jobs_for_user(conn, user_id: str) -> None:
+    p = _p()
+    now_dt = datetime.now(timezone.utc)
+    try:
+        stale_rows = conn.execute(
+            f"SELECT id, output_dir, created_at FROM jobs WHERE user_id={p} AND status IN ('running', 'queued')",
+            (user_id,)
+        ).fetchall()
+        for row in stale_rows:
+            j = row_to_dict(row)
+            created_str = j.get("created_at")
+            if not created_str:
+                continue
+            try:
+                dt_str = created_str.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(dt_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age = (now_dt - dt).total_seconds()
+            except Exception:
+                age = 0
+            if age > 180:  # 3 minutes threshold
+                jid = j["id"]
+                out_dir = Path(j.get("output_dir") or (settings.outputs_dir / user_id / jid))
+                summary_path = out_dir / "backtest_summary.json"
+                rep = conn.execute(f"SELECT id FROM reports WHERE job_id={p}", (jid,)).fetchone()
+                if summary_path.exists() or rep:
+                    conn.execute(
+                        f"UPDATE jobs SET status='completed', output_dir={p}, completed_at={p} WHERE id={p}",
+                        (str(out_dir), now(), jid)
+                    )
+                else:
+                    conn.execute(
+                        f"UPDATE jobs SET status='failed', error_message='Job execution timed out or background worker was restarted. Please re-run the backtest.', completed_at={p} WHERE id={p}",
+                        (now(), jid)
+                    )
+        conn.commit()
+    except Exception:
+        pass
+
+
 @router.get("/", summary="List jobs for current user")
 def list_jobs(user=Depends(current_user)):
     p = _p()
     with get_conn() as conn:
+        _clean_stale_jobs_for_user(conn, user["id"])
         rows = conn.execute(
             f"""
             SELECT j.*, s.config_json AS strategy_config_json
@@ -205,6 +248,7 @@ def list_jobs(user=Depends(current_user)):
 def get_job(job_id: str, user=Depends(current_user)):
     p = _p()
     with get_conn() as conn:
+        _clean_stale_jobs_for_user(conn, user["id"])
         row = conn.execute(
             f"SELECT * FROM jobs WHERE id={p} AND user_id={p}",
             (job_id, user["id"])

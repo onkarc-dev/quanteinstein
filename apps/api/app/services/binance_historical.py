@@ -8,6 +8,7 @@ Policy:
 """
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import json
 import time
@@ -74,11 +75,11 @@ def _safe_timeframe(tf: str) -> str:
 
 
 BINANCE_BASES = [
-    "https://data-api.binance.vision",
     "https://api.binance.com",
     "https://api1.binance.com",
     "https://api2.binance.com",
     "https://api3.binance.com",
+    "https://data-api.binance.vision",
     "https://api.binance.us",
 ]
 
@@ -97,74 +98,69 @@ def _urlopen_json(url: str) -> Any:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             last_err = e
-            time.sleep(min(1.0 * attempt, 4.0))
+            time.sleep(0.2 * attempt)
     raise RuntimeError(f"Binance request failed after {MAX_RETRIES} retries: {last_err}")
 
 
+def _fetch_kline_slice(args: tuple[str, str, int, int, int]) -> List[list]:
+    symbol, interval, s_ms, e_ms, idx = args
+    params = urllib.parse.urlencode({
+        "symbol": symbol,
+        "interval": interval,
+        "startTime": s_ms,
+        "endTime": e_ms,
+        "limit": 1000,
+    })
+    last_err = None
+    num_bases = len(BINANCE_BASES)
+    for attempt in range(num_bases):
+        base = BINANCE_BASES[(idx + attempt) % num_bases]
+        url = f"{base}/api/v3/klines?{params}"
+        try:
+            req = urllib.request.Request(url, headers=BROWSER_HEADERS)
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            last_err = e
+            continue
+    return []
+
+
 def _fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> List[list]:
-    rows: List[list] = []
-    cursor = start_ms
     step_ms = interval_seconds(interval) * 1000
-    while cursor < end_ms:
-        params = urllib.parse.urlencode({
-            "symbol": symbol,
-            "interval": interval,
-            "startTime": cursor,
-            "endTime": end_ms,
-            "limit": 1000,
-        })
-        data = None
-        last_err = None
-        for base in BINANCE_BASES:
-            url = f"{base}/api/v3/klines?{params}"
-            for attempt in range(1, 3):
-                try:
-                    req = urllib.request.Request(url, headers=BROWSER_HEADERS)
-                    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                        break
-                except Exception as e:
-                    last_err = e
-            if data is not None and isinstance(data, list):
-                break
+    chunk_span = 1000 * step_ms
+    slices = []
+    c = start_ms
+    idx = 0
+    while c < end_ms:
+        nxt = min(end_ms, c + chunk_span - 1)
+        slices.append((symbol, interval, c, nxt, idx))
+        c += chunk_span
+        idx += 1
 
-        if data is None:
-            raise RuntimeError(f"Binance market data fetch failed across all endpoints: {last_err}")
+    if not slices:
+        return []
 
-        if not data:
-            break
-        rows.extend(data)
-        last_open = int(data[-1][0])
-        next_cursor = last_open + step_ms
-        if next_cursor <= cursor:
-            break
-        cursor = next_cursor
-    return rows
+    if len(slices) == 1:
+        raw_chunks = [_fetch_kline_slice(slices[0])]
+    else:
+        max_workers = min(len(slices), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            raw_chunks = list(executor.map(_fetch_kline_slice, slices))
+
+    by_time: Dict[int, list] = {}
+    for chunk in raw_chunks:
+        for r in chunk:
+            by_time[int(r[0])] = r
+    return [by_time[k] for k in sorted(by_time)]
 
 
 def _download_chunked(symbol: str, base_interval: str, start_dt: datetime, end_dt: datetime) -> List[list]:
-    # Chunking avoids one long fragile request cycle and makes retries recoverable.
-    sec = interval_seconds(base_interval)
-    if sec < 60:
-        chunk_days = 1
-    elif sec == 60:
-        chunk_days = 7
-    elif sec <= 300:
-        chunk_days = 30
-    else:
-        chunk_days = 90
-    rows: List[list] = []
-    cur = start_dt
-    while cur < end_dt:
-        nxt = min(end_dt, cur + timedelta(days=chunk_days))
-        part = _fetch_klines(symbol, base_interval, int(cur.timestamp() * 1000), int(nxt.timestamp() * 1000))
-        rows.extend(part)
-        cur = nxt
-    # Deduplicate by open time.
-    by_time: Dict[int, list] = {}
-    for r in rows:
-        by_time[int(r[0])] = r
-    return [by_time[k] for k in sorted(by_time)]
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+    return _fetch_klines(symbol, base_interval, start_ms, end_ms)
 
 
 def _aggregate_rows(rows: List[list], target_tf: str) -> List[Dict[str, Any]]:
