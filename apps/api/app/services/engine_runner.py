@@ -9,6 +9,7 @@ Improvements over MVP:
 """
 from __future__ import annotations
 
+import csv
 import json
 import subprocess
 import uuid
@@ -76,6 +77,81 @@ def _friction_params(job_payload: Dict[str, Any]) -> tuple[float, float]:
     except Exception:
         slip = 0.01
     return fee, slip
+
+
+def write_trade_log_csv(trades: list[dict[str, Any]], path: Path) -> None:
+    fieldnames = [
+        "trade_id", "symbol", "entry_time", "entry_price", "stop_loss",
+        "target1", "target2", "exit_time", "exit_price", "exit_reason",
+        "r_multiple", "setup_score_at_entry", "regime_at_entry", "holding_bars"
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for t in trades:
+            writer.writerow(t)
+
+
+def compute_symbol_breakdown(
+    trades: list[dict[str, Any]],
+    expected_symbols: list[str] | None = None,
+    fee_pct: float = 0.04,
+    slippage_pct: float = 0.01,
+    risk_pct: float = 1.0,
+) -> dict[str, dict[str, Any]]:
+    effective_risk = risk_pct if risk_pct > 0 else 1.0
+    friction_per_trade = ((fee_pct * 2.0) + (slippage_pct * 2.0)) / effective_risk
+    
+    by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for sym in (expected_symbols or []):
+        by_symbol[str(sym).upper()] = []
+    for t in trades:
+        sym = str(t.get("symbol") or (expected_symbols[0] if expected_symbols else "UNKNOWN")).upper()
+        by_symbol.setdefault(sym, []).append(t)
+        
+    breakdown = {}
+    for sym, s_trades in by_symbol.items():
+        rs = []
+        for t in s_trades:
+            raw = t.get("r_multiple", t.get("R_multiple", 0))
+            try:
+                rs.append(float(raw))
+            except Exception:
+                rs.append(0.0)
+        n = len(rs)
+        wins = [x for x in rs if x > 0.0001]
+        losses = [x for x in rs if x < -0.0001]
+        be = [x for x in rs if abs(x) <= 0.0001]
+        gross_r = sum(rs)
+        net_r = gross_r - (friction_per_trade * n)
+        gross_win = sum(wins)
+        gross_loss = abs(sum(losses))
+        pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else (None if gross_win == 0 else 999.0)
+        
+        peak = 0.0
+        cur_eq = 0.0
+        max_dd = 0.0
+        for x in rs:
+            cur_eq += x
+            peak = max(peak, cur_eq)
+            max_dd = max(max_dd, peak - cur_eq)
+            
+        breakdown[sym] = {
+            "symbol": sym,
+            "trades": n,
+            "wins": len(wins),
+            "losses": len(losses),
+            "breakeven": len(be),
+            "win_rate": round(len(wins) / n, 4) if n > 0 else 0.0,
+            "gross_R": round(gross_r, 4),
+            "net_R": round(net_r, 4),
+            "profit_factor": pf,
+            "max_drawdown_in_R": round(max_dd, 4),
+            "avg_R": round(gross_r / n, 4) if n > 0 else 0.0,
+            "best_R": round(max(rs), 4) if rs else 0.0,
+            "worst_R": round(min(rs), 4) if rs else 0.0,
+        }
+    return breakdown
 
 
 def create_job_folder(user_id: str, job_id: str) -> Path:
@@ -191,9 +267,10 @@ def insert_outputs(job_payload: Dict[str, Any], job_id: str, output_dir: Path):
                 rv = float(r)
             except Exception:
                 rv = 0.0
+            row_sym = str(row.get("symbol") or symbol).upper()
             conn.execute(
                 f"INSERT INTO trades(id,job_id,user_id,strategy_id,symbol,trade_json,r_multiple,created_at) VALUES({p},{p},{p},{p},{p},{p},{p},{p})",
-                (str(uuid.uuid4()), job_id, job_payload["user_id"], job_payload["strategy_id"], symbol, json.dumps(row), rv, now())
+                (str(uuid.uuid4()), job_id, job_payload["user_id"], job_payload["strategy_id"], row_sym, json.dumps(row), rv, now())
             )
         report_id = str(uuid.uuid4())
         report_values = (report_id, job_id, job_payload["user_id"], json.dumps(summary), json.dumps(validation), json.dumps(snapshot), now())
@@ -244,17 +321,17 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
     symbol_for_data = (symbols or ["BTCUSDT"])[0]
     end_date = job_payload.get("end_date") or yesterday_utc()
     start_date = job_payload.get("start_date")
+    market_paths: dict[str, str] = {}
     if mode == "backtest" and start_date:
         try:
             # Download/cache real Binance candles for every selected symbol so
-            # the UI can truthfully show all selected markets. The current C++
-            # research backtest engine consumes the primary CSV path, while the
-            # market-data manifest records every selected symbol and row count.
+            # the UI can truthfully show all selected markets.
             market_rows = {}
             primary_md = None
             for sym in (symbols or [symbol_for_data]):
                 md_i = fetch_real_binance_csv(sym, timeframe, start_date, end_date)
                 market_rows[sym] = md_i.get("rows")
+                market_paths[sym] = md_i.get("path")
                 if primary_md is None:
                     primary_md = md_i
             md = dict(primary_md or {})
@@ -266,6 +343,7 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
                 md["total_rows_all_symbols"] = None
             job_payload["input_data"] = md["path"]
             job_payload["market_data"] = md
+            job_payload["market_paths"] = market_paths
             job_payload["real_binance_data_used"] = True
             job_payload["end_date"] = end_date
         except Exception as e:
@@ -309,35 +387,154 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
             "hint": "Run cmake to build the C++ engine, or use the demo output at outputs/demo_user/demo_job/",
         }
 
-    # Run the engine
-    cmd = [str(engine), "--config", str(config_path)]
-    try:
-        result = subprocess.run(
-            cmd,
-            text=True,
-            capture_output=True,
-            cwd=str(settings.project_root),
-            timeout=ENGINE_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        _update_job(job_id, status="failed", error_message=f"Engine timed out after {ENGINE_TIMEOUT_SECONDS}s", completed_at=now())
-        return {"job_id": job_id, "status": "failed", "error_category": "engine_timeout", "output_dir": str(output_dir)}
-    except FileNotFoundError as e:
-        msg = f"Engine binary not executable: {e}"
-        _update_job(job_id, status="failed", error_message=msg, completed_at=now())
-        return {"job_id": job_id, "status": "failed", "error": msg, "error_category": "binary_not_found"}
-    except Exception as e:
-        msg = f"Unexpected subprocess error: {e}"
-        _update_job(job_id, status="failed", error_message=msg, completed_at=now())
-        return {"job_id": job_id, "status": "failed", "error": msg, "error_category": "subprocess_error"}
+    multi_symbol = len(symbols) > 1 and bool(market_paths) and mode == "backtest"
+    if multi_symbol:
+        all_basket_trades: list[dict[str, Any]] = []
+        combined_stdout = ""
+        combined_stderr = ""
+        any_success = False
+        for sym in symbols:
+            sym_input = market_paths.get(sym) or job_payload.get("input_data")
+            sym_dir = output_dir / sym
+            sym_dir.mkdir(parents=True, exist_ok=True)
+            sym_payload = dict(job_payload)
+            sym_payload["symbols"] = [sym]
+            sym_payload["input_data"] = sym_input
+            sym_cfg_path = write_config(sym_payload, f"{job_id}_{sym}", sym_dir)
+            sym_cmd = [str(engine), "--config", str(sym_cfg_path)]
+            try:
+                sub_res = subprocess.run(
+                    sym_cmd,
+                    text=True,
+                    capture_output=True,
+                    cwd=str(settings.project_root),
+                    timeout=ENGINE_TIMEOUT_SECONDS,
+                )
+                combined_stdout += f"\n[{sym}]\n" + (sub_res.stdout[-1000:] if sub_res.stdout else "")
+                combined_stderr += f"\n[{sym}]\n" + (sub_res.stderr[-1000:] if sub_res.stderr else "")
+                if sub_res.returncode == 0:
+                    any_success = True
+                    sym_trades = read_csv(sym_dir / "trade_log.csv")
+                    for t in sym_trades:
+                        t["symbol"] = sym
+                    all_basket_trades.extend(sym_trades)
+            except Exception as exc:
+                combined_stderr += f"\n[{sym}] Error: {exc}"
 
-    status = "completed" if result.returncode == 0 else "failed"
-    stderr_tail = result.stderr[-4000:] if result.stderr else ""
-    stdout_tail = result.stdout[-4000:] if result.stdout else ""
-    error_category = None
+        status = "completed" if any_success else "failed"
+        stdout_tail = combined_stdout[-4000:]
+        stderr_tail = combined_stderr[-4000:]
+        error_category = None if any_success else "engine_nonzero_exit"
 
-    if status == "failed":
-        error_category = _classify_engine_error(result.returncode, result.stderr, result.stdout)
+        if any_success:
+            all_basket_trades.sort(key=lambda t: str(t.get("entry_time") or ""))
+            for idx, t in enumerate(all_basket_trades, start=1):
+                t["trade_id"] = idx
+
+            write_trade_log_csv(all_basket_trades, output_dir / "trade_log.csv")
+
+            fee_rate, slip_rate = _friction_params(job_payload)
+            risk_pct = _risk_per_trade_pct(job_payload) or 1.0
+            breakdown = compute_symbol_breakdown(all_basket_trades, symbols, fee_rate, slip_rate, risk_pct)
+
+            rs = []
+            for t in all_basket_trades:
+                try:
+                    rs.append(float(t.get("r_multiple") or 0))
+                except Exception:
+                    rs.append(0.0)
+            wins = [x for x in rs if x > 0.0001]
+            losses = [x for x in rs if x < -0.0001]
+            gross_r = sum(rs)
+            gross_win = sum(wins)
+            gross_loss = abs(sum(losses))
+            pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else (None if gross_win == 0 else 999.0)
+
+            peak = 0.0
+            equity = 0.0
+            max_dd = 0.0
+            for x in rs:
+                equity += x
+                peak = max(peak, equity)
+                max_dd = max(max_dd, peak - equity)
+
+            total_bars = sum(int(v or 0) for v in (job_payload.get("market_data", {}).get("rows_per_symbol", {}).values()))
+            combined_summary = {
+                "bars_processed": total_bars,
+                "total_trades": len(all_basket_trades),
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate": round(len(wins) / len(all_basket_trades), 4) if all_basket_trades else 0.0,
+                "gross_R": round(gross_r, 4),
+                "average_R": round(gross_r / len(all_basket_trades), 4) if all_basket_trades else 0.0,
+                "profit_factor": pf,
+                "max_drawdown_in_R": round(max_dd, 4),
+                "symbols": symbols,
+                "per_symbol_breakdown": breakdown,
+            }
+            combined_summary["performance_and_robustness"] = build_performance_and_robustness(
+                all_basket_trades,
+                start_time=job_payload.get("start_date"),
+                end_time=job_payload.get("end_date"),
+                bars_processed=total_bars,
+                profit_factor=pf,
+                risk_per_trade_pct=risk_pct,
+                fee_pct=fee_rate,
+                slippage_pct=slip_rate,
+            )
+            (output_dir / "backtest_summary.json").write_text(json.dumps(combined_summary, indent=2), encoding="utf-8")
+    else:
+        # Run the engine for single symbol
+        cmd = [str(engine), "--config", str(config_path)]
+        try:
+            result = subprocess.run(
+                cmd,
+                text=True,
+                capture_output=True,
+                cwd=str(settings.project_root),
+                timeout=ENGINE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            _update_job(job_id, status="failed", error_message=f"Engine timed out after {ENGINE_TIMEOUT_SECONDS}s", completed_at=now())
+            return {"job_id": job_id, "status": "failed", "error_category": "engine_timeout", "output_dir": str(output_dir)}
+        except FileNotFoundError as e:
+            msg = f"Engine binary not executable: {e}"
+            _update_job(job_id, status="failed", error_message=msg, completed_at=now())
+            return {"job_id": job_id, "status": "failed", "error": msg, "error_category": "binary_not_found"}
+        except Exception as e:
+            msg = f"Unexpected subprocess error: {e}"
+            _update_job(job_id, status="failed", error_message=msg, completed_at=now())
+            return {"job_id": job_id, "status": "failed", "error": msg, "error_category": "subprocess_error"}
+
+        status = "completed" if result.returncode == 0 else "failed"
+        stderr_tail = result.stderr[-4000:] if result.stderr else ""
+        stdout_tail = result.stdout[-4000:] if result.stdout else ""
+        error_category = None
+
+        if status == "failed":
+            error_category = _classify_engine_error(result.returncode, result.stderr, result.stdout)
+
+        if status == "completed":
+            trades = read_csv(output_dir / "trade_log.csv")
+            for t in trades:
+                t["symbol"] = symbols[0]
+            write_trade_log_csv(trades, output_dir / "trade_log.csv")
+            fee_rate, slip_rate = _friction_params(job_payload)
+            risk_pct = _risk_per_trade_pct(job_payload) or 1.0
+            summary = read_json(output_dir / "backtest_summary.json")
+            summary["per_symbol_breakdown"] = compute_symbol_breakdown(trades, symbols, fee_rate, slip_rate, risk_pct)
+            if "performance_and_robustness" not in summary:
+                summary["performance_and_robustness"] = build_performance_and_robustness(
+                    trades,
+                    start_time=job_payload.get("start_date"),
+                    end_time=job_payload.get("end_date"),
+                    bars_processed=summary.get("bars_processed"),
+                    profit_factor=summary.get("profit_factor"),
+                    risk_per_trade_pct=risk_pct,
+                    fee_pct=fee_rate,
+                    slippage_pct=slip_rate,
+                )
+            (output_dir / "backtest_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if status == "completed":
         try:
@@ -366,21 +563,12 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     if status == "completed":
         trades = read_csv(output_dir / "trade_log.csv")
-        response["summary"] = read_json(output_dir / "backtest_summary.json")
-        if "performance_and_robustness" not in response["summary"]:
-            fee_rate, slip_rate = _friction_params(job_payload)
-            response["summary"]["performance_and_robustness"] = build_performance_and_robustness(
-                trades,
-                start_time=job_payload.get("start_date"),
-                end_time=job_payload.get("end_date"),
-                bars_processed=response["summary"].get("bars_processed"),
-                profit_factor=response["summary"].get("profit_factor"),
-                risk_per_trade_pct=_risk_per_trade_pct(job_payload),
-                fee_pct=fee_rate,
-                slippage_pct=slip_rate,
-            )
+        summary = read_json(output_dir / "backtest_summary.json")
+        response["summary"] = summary
+        response["trades"] = trades
         response["trade_count"] = len(trades)
         response["trades_available"] = True
+        response["per_symbol_breakdown"] = summary.get("per_symbol_breakdown", {})
         response["market_data"] = job_payload.get("market_data", {})
         response["symbols"] = symbols
         response["real_binance_data_used"] = bool(job_payload.get("real_binance_data_used"))

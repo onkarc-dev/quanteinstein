@@ -60,6 +60,54 @@ class TestEngine(unittest.TestCase):
         category = _classify_engine_error(139, "Segmentation fault", "")
         self.assertEqual(category, "engine_crash_segfault")
 
+    def test_compute_symbol_breakdown(self):
+        from app.services.engine_runner import compute_symbol_breakdown
+        trades = [
+            {"symbol": "BTCUSDT", "r_multiple": 2.0},
+            {"symbol": "BTCUSDT", "r_multiple": -1.0},
+            {"symbol": "ETHUSDT", "r_multiple": 1.5},
+            {"symbol": "ETHUSDT", "r_multiple": 0.5},
+        ]
+        breakdown = compute_symbol_breakdown(trades, expected_symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+        self.assertIn("BTCUSDT", breakdown)
+        self.assertIn("ETHUSDT", breakdown)
+        self.assertIn("SOLUSDT", breakdown)
+        self.assertEqual(breakdown["BTCUSDT"]["trades"], 2)
+        self.assertEqual(breakdown["BTCUSDT"]["wins"], 1)
+        self.assertEqual(breakdown["BTCUSDT"]["losses"], 1)
+        self.assertAlmostEqual(breakdown["BTCUSDT"]["gross_R"], 1.0)
+        self.assertEqual(breakdown["ETHUSDT"]["trades"], 2)
+        self.assertEqual(breakdown["ETHUSDT"]["wins"], 2)
+        self.assertEqual(breakdown["SOLUSDT"]["trades"], 0)
+
+    def test_write_trade_log_csv(self):
+        import tempfile
+        from app.services.engine_runner import write_trade_log_csv
+        from app.services.output_reader import read_csv
+        trades = [
+            {
+                "trade_id": 1,
+                "symbol": "BTCUSDT",
+                "entry_time": "2026-10-01 10:00:00",
+                "entry_price": 85000.0,
+                "exit_time": "2026-10-01 10:15:00",
+                "exit_price": 86000.0,
+                "exit_reason": "TARGET1_HIT",
+                "r_multiple": 1.85,
+            }
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
+            p = Path(f.name)
+        try:
+            write_trade_log_csv(trades, p)
+            read_back = read_csv(p)
+            self.assertEqual(len(read_back), 1)
+            self.assertEqual(read_back[0]["symbol"], "BTCUSDT")
+            self.assertEqual(read_back[0]["exit_reason"], "TARGET1_HIT")
+        finally:
+            if p.exists():
+                p.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

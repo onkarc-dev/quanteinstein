@@ -5,6 +5,7 @@ import json
 import os
 import re
 import uuid
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
@@ -13,6 +14,7 @@ from app.core.config import settings
 from app.deps import current_user
 from app.services.job_queue import queue, JobStatus
 from app.services.engine_runner import run_engine_sync
+from app.services.output_reader import read_csv, read_json
 
 router = APIRouter()
 
@@ -188,7 +190,18 @@ def get_job(job_id: str, user=Depends(current_user)):
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
-    return row_to_dict(row)
+    data = row_to_dict(row)
+    out_dir_str = data.get("output_dir")
+    if out_dir_str:
+        out_path = Path(out_dir_str)
+        if out_path.exists():
+            summary_path = out_path / "backtest_summary.json"
+            if summary_path.exists():
+                data["summary"] = read_json(summary_path)
+            trade_path = out_path / "trade_log.csv"
+            if trade_path.exists():
+                data["trades"] = read_csv(trade_path)
+    return data
 
 
 @router.get("/{job_id}/download-output", summary="Download all output files (ZIP)")

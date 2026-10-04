@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, getUser, getToken } from "../../lib/api";
+import BacktestAnalytics from "../../components/BacktestAnalytics";
 
 type Cfg = {
   strategyCode: string;
@@ -1453,6 +1454,26 @@ const td = { borderBottom: "1px solid rgba(255, 255, 255, 0.05)", padding: "10px
 const tdStrong = { ...td, color: "#94a3b8", fontWeight: 700, width: 260 };
 
 function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: any; deployTargetId: string }) {
+  const [loadedTrades, setLoadedTrades] = useState<any[]>(job.trades || []);
+
+  useEffect(() => {
+    if (Array.isArray(job.trades) && job.trades.length > 0) {
+      setLoadedTrades(job.trades);
+      return;
+    }
+    const jid = job.id || job.job_id;
+    if (jid) {
+      api(`/reports/${jid}/trade-log`)
+        .then((t: any) => {
+          if (Array.isArray(t) && t.length > 0) {
+            setLoadedTrades(t);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [job.id, job.job_id, job.trades]);
+
+  const activeTradesList = loadedTrades.length > 0 ? loadedTrades : (job.trades || []);
   const s = job.summary || {};
   const pr = s.performance_and_robustness || job.performance_and_robustness || {};
   const ra = pr.risk_adjusted || {};
@@ -1509,16 +1530,8 @@ function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: a
       s.trend_filter_rejections ?? 0,
       "Setups blocked because higher-timeframe EMA was against bias.",
     ],
-    [
-      "Max Drawdown (R)",
-      `${fmt(s.max_drawdown_in_R)} R`,
-      "Worst peak-to-trough equity drawdown.",
-    ],
-    [
-      "Average Holding Duration",
-      `${fmt(s.average_holding_bars)} bars`,
-      "Average bar duration per trade.",
-    ],
+    ["Max Drawdown (R)", `${fmt(s.max_drawdown_in_R)} R`, "Worst peak-to-trough equity drawdown."],
+    ["Average Holding Duration", `${fmt(s.average_holding_bars)} bars`, "Average bar duration per trade."],
   ];
 
   return (
@@ -1582,12 +1595,22 @@ function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: a
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 24 }}>
         <Kpi label="Status" value={pollJob?.status?.toUpperCase() || job.status?.toUpperCase()} color="#38bdf8" />
-        <Kpi label="Total Trades" value={s.total_trades ?? job.trades?.length ?? 0} />
+        <Kpi label="Total Trades" value={s.total_trades ?? activeTradesList.length ?? 0} />
         <Kpi label="Gross R" value={`${fmt(s.gross_R)} R`} color={signedClass(s.gross_R)} />
         <Kpi label="Net Return (Friction)" value={`${fmt(netAfterFriction)} R`} color={signedClass(netAfterFriction)} />
         <Kpi label="Win Rate" value={pct(s.win_rate)} color="#4ade80" />
         <Kpi label="Profit Factor" value={fmt(s.profit_factor)} />
       </div>
+
+      {/* ─── Institutional Backtest Analytics: Equity Curve, Per-Symbol Breakdown & Trade Log ─── */}
+      <BacktestAnalytics
+        trades={activeTradesList}
+        summary={s}
+        strategyName={job.display_strategy_id || deployTargetId}
+        feePct={fric.fee_pct_per_side ?? 0.04}
+        slippagePct={fric.slippage_pct_per_side ?? 0.01}
+        riskPct={risk.risk_per_trade_pct ?? 1.0}
+      />
 
       {job.market_data && (
         <div
