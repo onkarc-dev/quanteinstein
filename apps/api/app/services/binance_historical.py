@@ -19,10 +19,9 @@ from typing import Any, Dict, List
 
 from app.core.config import settings
 
-SUPPORTED_SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-    "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "TRXUSDT",
-]
+from app.services.live_paper import POPULAR_SYMBOLS
+
+SUPPORTED_SYMBOLS = POPULAR_SYMBOLS
 SUPPORTED_INTERVALS = ["1s", "5s", "10s", "15s", "30s", "1m", "5m", "15m", "1h"]
 BINANCE_INTERVALS = {"1s", "1m", "5m", "15m", "1h"}
 REQUEST_TIMEOUT = 45
@@ -61,8 +60,9 @@ def _interval_for_binance(tf: str) -> str:
 
 def _safe_symbol(symbol: str) -> str:
     s = (symbol or "BTCUSDT").upper().strip()
-    if s not in SUPPORTED_SYMBOLS:
-        raise ValueError(f"Unsupported symbol {s}. Allowed: {', '.join(SUPPORTED_SYMBOLS)}")
+    import re
+    if not re.match(r"^[A-Z0-9]{2,16}(USDT|BUSD|USDC)$", s):
+        raise ValueError(f"Invalid cryptocurrency pair format: {s}. Expected Binance pair ending with USDT, BUSD, or USDC.")
     return s
 
 

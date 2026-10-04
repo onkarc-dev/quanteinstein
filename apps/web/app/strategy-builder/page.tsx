@@ -506,19 +506,6 @@ export default function StrategyBuilderPage() {
             >
               ✓ Authentic Binance Klines
             </span>
-            <span
-              style={{
-                background: "rgba(59, 130, 246, 0.1)",
-                color: "#60a5fa",
-                border: "1px solid rgba(59, 130, 246, 0.25)",
-                padding: "6px 12px",
-                borderRadius: 8,
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              B2B / B2C Ready
-            </span>
             <Link
               href={`/paper-trading?strategy_id=${encodeURIComponent(deployTargetId)}`}
               style={{
