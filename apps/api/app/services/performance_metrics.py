@@ -135,10 +135,20 @@ def build_performance_and_robustness(
     has_out_of_sample: bool = False,
     parameter_sensitivity: Any = None,
     source_note: str | None = None,
+    fee_pct: float | None = None,
+    slippage_pct: float | None = None,
 ) -> dict[str, Any]:
     trades = trades or []
     r = _r_values(trades)
     n = len(r)
+
+    # Friction calculations (fees + slippage in R-multiples)
+    effective_risk = risk_per_trade_pct if (risk_per_trade_pct and risk_per_trade_pct > 0) else 1.0
+    f_rate = _f(fee_pct, 0.04) or 0.04
+    s_rate = _f(slippage_pct, 0.01) or 0.01
+    round_trip_friction_pct = (f_rate * 2.0) + (s_rate * 2.0)
+    friction_r_per_trade = round_trip_friction_pct / effective_risk
+    total_friction_R = friction_r_per_trade * n
     wins = [x for x in r if x > 0]
     losses = [x for x in r if x < 0]
     gross_profit = sum(wins)
@@ -233,8 +243,18 @@ def build_performance_and_robustness(
             "omega": _round(omega),
             "recovery_factor": _round(recovery),
         },
+        "friction": {
+            "fee_pct_per_side": _round(f_rate, 4),
+            "slippage_pct_per_side": _round(s_rate, 4),
+            "round_trip_friction_pct": _round(round_trip_friction_pct, 4),
+            "friction_R_per_trade": _round(friction_r_per_trade, 4),
+            "total_friction_R": _round(total_friction_R, 4),
+            "net_R_gross": _round(net, 4),
+            "net_R_after_friction": _round(net - total_friction_R, 4),
+        },
         "expectancy": {
             "expectancy_R_per_trade": _round(avg),
+            "expectancy_R_net": _round(avg - friction_r_per_trade) if avg is not None else None,
             "average_winner_R": _round(mean(wins) if wins else None),
             "average_loser_R": _round(mean(losses) if losses else None),
             "payoff_ratio": _round((mean(wins) / abs(mean(losses))) if wins and losses else None),

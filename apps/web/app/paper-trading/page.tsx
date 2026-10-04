@@ -468,7 +468,30 @@ export default function PaperTradingPage() {
       const rows: any = await api("/strategies");
       const list = Array.isArray(rows) ? rows : [];
       setStrategies(list);
-      if (!selectedStrategyId && list.length) {
+
+      let matched: any = null;
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryStrat = urlParams.get("strategy_id");
+        if (queryStrat) {
+          const q = queryStrat.trim();
+          matched = list.find(
+            (s) =>
+              s.id === q ||
+              s.user_strategy_id === q ||
+              s.config?.user_strategy_id === q ||
+              s.name === q
+          );
+        }
+      }
+
+      if (matched) {
+        setSelectedStrategyId(matched.id);
+        setSelectedSymbols(matched.symbols?.length ? matched.symbols : ["BTCUSDT"]);
+        setMessage(
+          `Loaded strategy "${matched.name || matched.user_strategy_id || matched.id}" from Strategy Builder.`
+        );
+      } else if (!selectedStrategyId && list.length) {
         setSelectedStrategyId(list[0].id);
         setSelectedSymbols(list[0].symbols?.length ? list[0].symbols : ["BTCUSDT"]);
       }
@@ -594,6 +617,16 @@ export default function PaperTradingPage() {
   const selectedRules = selectedConfig.strategy || selectedConfig || {};
   const selectedRisk = selectedRules.risk || selectedConfig.risk || {};
   const selectedTargets = selectedRules.targets || selectedConfig.targets || {};
+
+  const selectedTradeMgmt = selectedRules.trade_management || selectedConfig.trade_management || {};
+  const selectedFriction = selectedRules.execution_friction || selectedConfig.execution_friction || {};
+  const selectedTiming = selectedRules.timing_filter || selectedConfig.timing_filter || {};
+
+  const cfgDirection = selectedRules.direction || selectedConfig.direction || "both";
+  const cfgBreakeven = selectedTradeMgmt.breakeven_stop !== false ? "BE at T1" : "No BE";
+  const cfgDailyLoss = selectedRisk.max_daily_loss_pct != null ? `${selectedRisk.max_daily_loss_pct}%` : "3.0%";
+  const cfgMaxOpen = selectedRisk.max_open_positions != null ? `${selectedRisk.max_open_positions}` : "5";
+  const cfgFeePct = selectedFriction.fee_pct != null ? `${selectedFriction.fee_pct}%` : "0.04%";
 
   const cfgLookback =
     metrics.cfg_lookback ??
@@ -930,8 +963,8 @@ export default function PaperTradingPage() {
           style={{
             display: "grid",
             gridTemplateColumns:
-              "minmax(260px, 1fr) repeat(5, minmax(120px, 170px))",
-            gap: 12,
+              "minmax(240px, 1fr) repeat(auto-fit, minmax(110px, 1fr))",
+            gap: 10,
             alignItems: "end",
           }}
         >
@@ -960,18 +993,11 @@ export default function PaperTradingPage() {
             </select>
           </label>
           <Mini label="Active" value={activeStrategyName} />
-          <Mini
-            label="Lookback"
-            value={String(cfgLookback)}
-          />
-          <Mini
-            label="Min score"
-            value={String(cfgMinScore)}
-          />
-          <Mini
-            label="Risk %"
-            value={String(cfgRiskPct)}
-          />
+          <Mini label="Direction" value={cfgDirection === "both" ? "Long & Short" : cfgDirection === "long_only" ? "Long Only" : "Short Only"} />
+          <Mini label="Exits / BE" value={cfgBreakeven} />
+          <Mini label="Daily Loss Limit" value={cfgDailyLoss} />
+          <Mini label="Max Open" value={`${cfgMaxOpen} max`} />
+          <Mini label="Fee Model" value={`${cfgFeePct} taker`} />
           <Mini
             label="Bar length"
             value={activeBarSeconds === "-" ? "-" : `${activeBarSeconds}s`}
@@ -1486,6 +1512,26 @@ export default function PaperTradingPage() {
               <SummaryRow
                 label="Risk / Targets"
                 value={`${cfgRiskPct}% · ${cfgTarget1}R / ${cfgTarget2}R`}
+              />
+              <SummaryRow
+                label="Trade direction"
+                value={cfgDirection === "both" ? "Both (Long & Short)" : cfgDirection === "long_only" ? "Long Only" : "Short Only"}
+              />
+              <SummaryRow
+                label="Dynamic exits"
+                value={`${cfgBreakeven} · ${selectedTradeMgmt.partial_tp_pct ?? 50}% T1 scaling`}
+              />
+              <SummaryRow
+                label="Prop firm risk"
+                value={`${cfgRiskPct}% Risk · ${cfgDailyLoss} Daily Loss Halt · ${cfgMaxOpen} Max Positions`}
+              />
+              <SummaryRow
+                label="Friction model"
+                value={`${cfgFeePct} taker fee · ${selectedFriction.slippage_pct ?? 0.01}% slippage`}
+              />
+              <SummaryRow
+                label="Session timing"
+                value={selectedTiming.trading_hours === "all_day" ? "24/7 Global Trading" : selectedTiming.trading_hours || "24/7 Global Trading"}
               />
               <SummaryRow
                 label="Config file"

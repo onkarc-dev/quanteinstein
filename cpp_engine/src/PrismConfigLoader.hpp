@@ -78,6 +78,7 @@ inline PrismConfig load(const std::string& path) {
     c.bar_seconds = get_int(json, "bar_seconds", c.bar_seconds);
 
     c.strategy.name = get_string(json, "name", c.strategy.name);
+    c.strategy.direction = get_string(json, "direction", c.strategy.direction);
     c.strategy.breakout_lookback = get_int(json, "breakout_lookback", c.strategy.breakout_lookback);
     c.strategy.retest_tolerance_pct = get_double(json, "retest_tolerance_pct", c.strategy.retest_tolerance_pct);
     c.strategy.min_setup_score = get_double(json, "min_setup_score", c.strategy.min_setup_score);
@@ -102,6 +103,19 @@ inline PrismConfig load(const std::string& path) {
     c.strategy.trend_filter.higher_timeframe_seconds = get_int(json, "higher_timeframe_seconds", c.strategy.trend_filter.higher_timeframe_seconds);
     c.strategy.trend_filter.fast_ema = get_int(json, "fast_ema", c.strategy.trend_filter.fast_ema);
     c.strategy.trend_filter.slow_ema = get_int(json, "slow_ema", c.strategy.trend_filter.slow_ema);
+
+    c.strategy.trade_management.breakeven_stop = get_bool(json, "breakeven_stop", c.strategy.trade_management.breakeven_stop);
+    c.strategy.trade_management.partial_tp_pct = get_double(json, "partial_tp_pct", c.strategy.trade_management.partial_tp_pct);
+    c.strategy.trade_management.trailing_stop = get_bool(json, "trailing_stop", c.strategy.trade_management.trailing_stop);
+    c.strategy.trade_management.trailing_atr_multiplier = get_double(json, "trailing_atr_multiplier", c.strategy.trade_management.trailing_atr_multiplier);
+
+    c.strategy.execution_friction.fee_pct = get_double(json, "fee_pct", c.strategy.execution_friction.fee_pct);
+    c.strategy.execution_friction.slippage_pct = get_double(json, "slippage_pct", c.strategy.execution_friction.slippage_pct);
+
+    c.strategy.timing_filter.trading_hours = get_string(json, "trading_hours", c.strategy.timing_filter.trading_hours);
+    c.strategy.timing_filter.skip_weekends = get_bool(json, "skip_weekends", c.strategy.timing_filter.skip_weekends);
+    c.strategy.timing_filter.rvol_filter = get_bool(json, "rvol_filter", c.strategy.timing_filter.rvol_filter);
+    c.strategy.timing_filter.rvol_threshold = get_double(json, "rvol_threshold", c.strategy.timing_filter.rvol_threshold);
 
     c.input_data = get_string(json, "input_data", c.input_data);
     c.output_dir = get_string(json, "output_dir", c.output_dir);

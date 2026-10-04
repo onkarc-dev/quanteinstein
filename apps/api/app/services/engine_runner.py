@@ -63,6 +63,21 @@ def _risk_per_trade_pct(job_payload: Dict[str, Any]) -> float | None:
         return None
 
 
+def _friction_params(job_payload: Dict[str, Any]) -> tuple[float, float]:
+    config = job_payload.get("config") if isinstance(job_payload.get("config"), dict) else {}
+    strat = config.get("strategy") if isinstance(config.get("strategy"), dict) else config
+    fric = strat.get("execution_friction") if isinstance(strat.get("execution_friction"), dict) else {}
+    try:
+        fee = float(fric.get("fee_pct", 0.04))
+    except Exception:
+        fee = 0.04
+    try:
+        slip = float(fric.get("slippage_pct", 0.01))
+    except Exception:
+        slip = 0.01
+    return fee, slip
+
+
 def create_job_folder(user_id: str, job_id: str) -> Path:
     out = settings.outputs_dir / user_id / job_id
     out.mkdir(parents=True, exist_ok=True)
@@ -152,6 +167,7 @@ def insert_outputs(job_payload: Dict[str, Any], job_id: str, output_dir: Path):
     trades = read_csv(output_dir / "trade_log.csv")
     summary = read_json(output_dir / "backtest_summary.json")
     if "performance_and_robustness" not in summary:
+        fee_rate, slip_rate = _friction_params(job_payload)
         summary["performance_and_robustness"] = build_performance_and_robustness(
             trades,
             start_time=job_payload.get("start_date"),
@@ -159,6 +175,8 @@ def insert_outputs(job_payload: Dict[str, Any], job_id: str, output_dir: Path):
             bars_processed=summary.get("bars_processed"),
             profit_factor=summary.get("profit_factor"),
             risk_per_trade_pct=_risk_per_trade_pct(job_payload),
+            fee_pct=fee_rate,
+            slippage_pct=slip_rate,
         )
         (output_dir / "backtest_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     validation = read_json(output_dir / "setup_validation_report.json")
@@ -350,6 +368,7 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
         trades = read_csv(output_dir / "trade_log.csv")
         response["summary"] = read_json(output_dir / "backtest_summary.json")
         if "performance_and_robustness" not in response["summary"]:
+            fee_rate, slip_rate = _friction_params(job_payload)
             response["summary"]["performance_and_robustness"] = build_performance_and_robustness(
                 trades,
                 start_time=job_payload.get("start_date"),
@@ -357,6 +376,8 @@ def run_engine_sync(job_payload: Dict[str, Any]) -> Dict[str, Any]:
                 bars_processed=response["summary"].get("bars_processed"),
                 profit_factor=response["summary"].get("profit_factor"),
                 risk_per_trade_pct=_risk_per_trade_pct(job_payload),
+                fee_pct=fee_rate,
+                slippage_pct=slip_rate,
             )
         response["trade_count"] = len(trades)
         response["trades_available"] = True

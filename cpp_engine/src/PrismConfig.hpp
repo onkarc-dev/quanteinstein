@@ -35,8 +35,28 @@ struct TrendFilterConfig {
     int slow_ema = 50;
 };
 
+struct TradeManagementConfig {
+    bool breakeven_stop = true;
+    double partial_tp_pct = 50.0;
+    bool trailing_stop = false;
+    double trailing_atr_multiplier = 1.5;
+};
+
+struct ExecutionFrictionConfig {
+    double fee_pct = 0.04;
+    double slippage_pct = 0.01;
+};
+
+struct TimingFilterConfig {
+    std::string trading_hours = "all_day";
+    bool skip_weekends = false;
+    bool rvol_filter = false;
+    double rvol_threshold = 1.5;
+};
+
 struct StrategyRulesConfig {
     std::string name = "QuantOS Breakout Retest";
+    std::string direction = "both";
     int breakout_lookback = 20;
     double retest_tolerance_pct = 0.001;
     double min_setup_score = 6.5;
@@ -49,6 +69,9 @@ struct StrategyRulesConfig {
     RiskConfigPrism risk;
     ReentryConfig reentry;
     TrendFilterConfig trend_filter;
+    TradeManagementConfig trade_management;
+    ExecutionFrictionConfig execution_friction;
+    TimingFilterConfig timing_filter;
 };
 
 struct PrismConfig {

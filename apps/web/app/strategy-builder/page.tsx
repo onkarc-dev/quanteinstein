@@ -8,6 +8,7 @@ type Cfg = {
   strategyCode: string;
   symbols: string[];
   timeframe: string;
+  direction: "both" | "long_only" | "short_only";
   lookback: number;
   retest: number;
   score: number;
@@ -28,6 +29,20 @@ type Cfg = {
   trendTimeframe: string;
   trendFastEma: number;
   trendSlowEma: number;
+  // Trade Management & Exits
+  breakevenStop: boolean;
+  partialTpPct: number;
+  trailingStop: boolean;
+  trailingAtrMultiplier: number;
+  // Execution Friction & Fees
+  feeTier: string;
+  feePct: number;
+  slippagePct: number;
+  // Session & Timing Filters
+  tradingHours: string;
+  skipWeekends: boolean;
+  rvolFilter: boolean;
+  rvolThreshold: number;
 };
 
 function yesterdayIso() {
@@ -122,21 +137,21 @@ const inputStyle = {
 };
 
 const labelStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
+  display: "grid",
   gap: 6,
+  color: "#94a3b8",
   fontSize: 12,
   fontWeight: 600,
-  color: "#94a3b8",
+  letterSpacing: "0.02em",
   textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
 };
 
-export default function StrategyBuilder() {
+export default function StrategyBuilderPage() {
   const [cfg, setCfg] = useState<Cfg>({
     strategyCode: "PRISM_BREAKOUT_RETEST",
     symbols: ["BTCUSDT"],
     timeframe: "1m",
+    direction: "both",
     lookback: 20,
     retest: 0.001,
     score: 6.5,
@@ -157,6 +172,20 @@ export default function StrategyBuilder() {
     trendTimeframe: "5m",
     trendFastEma: 20,
     trendSlowEma: 50,
+    // Trade Management
+    breakevenStop: true,
+    partialTpPct: 50,
+    trailingStop: false,
+    trailingAtrMultiplier: 1.5,
+    // Execution Friction
+    feeTier: "binance_vip0",
+    feePct: 0.04,
+    slippagePct: 0.01,
+    // Timing & Volume
+    tradingHours: "all_day",
+    skipWeekends: false,
+    rvolFilter: false,
+    rvolThreshold: 1.5,
   });
 
   const [allAvailableSymbols, setAllAvailableSymbols] = useState<string[]>(POPULAR_SYMBOLS);
@@ -227,16 +256,13 @@ export default function StrategyBuilder() {
     setCustomSymbolInput("");
   }
 
-  // Filtered symbols to display in picker based on search
   const visibleSymbols = useMemo(() => {
     const q = symbolSearchQuery.trim().toUpperCase();
     const combinedSet = new Set([...POPULAR_SYMBOLS, ...cfg.symbols]);
     if (!q) {
       return Array.from(combinedSet);
     }
-    // Search across all 200+ available Binance symbols
     const matched = allAvailableSymbols.filter((s) => s.includes(q));
-    // Always include selected symbols so they stay visible
     cfg.symbols.forEach((s) => {
       if (!matched.includes(s)) matched.unshift(s);
     });
@@ -252,6 +278,7 @@ export default function StrategyBuilder() {
       bar_seconds: timeframeToSeconds(cfg.timeframe),
       strategy: {
         name: "Quanteinstein Breakout Retest",
+        direction: cfg.direction,
         breakout_lookback: cfg.lookback,
         retest_tolerance_pct: Number(cfg.retest),
         min_setup_score: cfg.score,
@@ -283,6 +310,22 @@ export default function StrategyBuilder() {
           fast_ema: cfg.trendFastEma,
           slow_ema: cfg.trendSlowEma,
         },
+        trade_management: {
+          breakeven_stop: cfg.breakevenStop,
+          partial_tp_pct: cfg.partialTpPct,
+          trailing_stop: cfg.trailingStop,
+          trailing_atr_multiplier: cfg.trailingAtrMultiplier,
+        },
+        execution_friction: {
+          fee_pct: cfg.feePct,
+          slippage_pct: cfg.slippagePct,
+        },
+        timing_filter: {
+          trading_hours: cfg.tradingHours,
+          skip_weekends: cfg.skipWeekends,
+          rvol_filter: cfg.rvolFilter,
+          rvol_threshold: cfg.rvolThreshold,
+        },
       },
     }),
     [cfg],
@@ -295,8 +338,9 @@ export default function StrategyBuilder() {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      setStrategyId(r.strategy_id || r.id);
-      setMsg("Strategy saved successfully: " + (r.user_strategy_id || r.strategy_id || r.id));
+      const resolvedId = r.strategy_id || r.id;
+      setStrategyId(resolvedId);
+      setMsg("Strategy saved successfully: " + (r.user_strategy_id || resolvedId));
     } catch (e: any) {
       const message = e?.message || "Save failed";
       if (message.toLowerCase().includes("already used")) alert(message);
@@ -358,45 +402,34 @@ export default function StrategyBuilder() {
               st.user_strategy_id === payload.user_strategy_id || st.name === payload.name
             );
             if (found) {
-              sid = found.id || found.strategy_id;
+              sid = found.id;
               setStrategyId(sid);
             }
-          } catch {}
-          if (!sid) throw stratErr;
+          } catch (_) {}
         }
       }
       const r: any = await api("/jobs/submit-backtest", {
         method: "POST",
         body: JSON.stringify({
-          strategy_id: sid,
-          symbols: payload.symbols,
+          strategy_id: sid || "PRISM_BREAKOUT_RETEST",
+          symbols: selectedSymbols,
           timeframe: payload.timeframe,
-          start_date: startDate,
-          end_date: endDate || yesterdayIso(),
-          config: payload.strategy,
+          start_date: startDate || undefined,
+          end_date: endDate || undefined,
+          config: payload,
         }),
       });
       setJob(r);
-      localStorage.setItem(
-        "prismflow_last_job",
-        JSON.stringify({ job_id: r.job_id, user_id: getUser()?.id }),
-      );
-      setMsg(
-        `${r.status === "completed" ? "Backtest completed" : "Backtest submitted"}. Job: ${r.job_id}`,
-      );
-      if (selectedSymbols.length > 1 && r.status === "completed") {
-        setRunProgress(`Completed ${selectedSymbols.length} / ${selectedSymbols.length} selected symbols.`);
-      }
-      if (r.job_id && r.status !== "completed" && r.status !== "failed") {
-        setMsg("Backtest queued in runner. Polling execution...");
+      if (r.status === "completed") {
+        setMsg("Backtest completed successfully.");
+        setRunProgress("Backtest completed.");
+      } else if (r.status === "queued" && r.job_id) {
+        setMsg(`Backtest queued (Job ID: ${r.job_id.slice(0, 8)}...). Polling results...`);
         const finalJob = await poll(r.job_id);
         if (finalJob) {
           setJob(finalJob);
-          setPollJob(finalJob);
-          setMsg(`Backtest ${finalJob.status}. Job: ${r.job_id}`);
-          if (selectedSymbols.length > 1 && finalJob.status === "completed") {
-            setRunProgress(`Completed ${selectedSymbols.length} / ${selectedSymbols.length} selected symbols.`);
-          } else if (finalJob.status === "completed") {
+          if (finalJob.status === "completed") {
+            setMsg("Backtest completed successfully.");
             setRunProgress("Backtest completed successfully.");
           } else if (finalJob.status === "failed") {
             setMsg("Backtest failed: " + (finalJob.error || finalJob.error_message || "Unknown error"));
@@ -414,6 +447,8 @@ export default function StrategyBuilder() {
       setRunning(false);
     }
   }
+
+  const deployTargetId = strategyId || cfg.strategyCode || "PRISM_BREAKOUT_RETEST";
 
   return (
     <div style={{ background: "#0b0f19", minHeight: "100vh", color: "#e2e8f0", paddingBottom: 60, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -446,14 +481,14 @@ export default function StrategyBuilder() {
               </span>
               <span style={{ fontSize: 13, color: "#64748b" }}>•</span>
               <span style={{ fontSize: 13, color: "#94a3b8" }}>
-                PRISM Breakout & Retest Engine
+                Institutional Quant & Day Trading Lab
               </span>
             </div>
             <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.02em" }}>
               Quant Strategy Builder & Backtest Lab
             </h1>
             <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: 13 }}>
-              Formulate user-defined rules, select from 200+ Binance cryptocurrency markets, and execute authentic historical backtests.
+              Formulate user-defined rules, configure friction and dynamic exits, test against 200+ Binance markets, and deploy directly to Live Paper Trading.
             </p>
           </div>
 
@@ -482,8 +517,26 @@ export default function StrategyBuilder() {
                 fontWeight: 600,
               }}
             >
-              Pure Paper Mode
+              B2B / B2C Ready
             </span>
+            <Link
+              href={`/paper-trading?strategy_id=${encodeURIComponent(deployTargetId)}`}
+              style={{
+                background: "linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.35) 100%)",
+                color: "#4ade80",
+                border: "1px solid rgba(34, 197, 94, 0.4)",
+                padding: "6px 14px",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 700,
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>🚀</span> Deploy to Paper Trading →
+            </Link>
           </div>
         </div>
       </div>
@@ -500,11 +553,11 @@ export default function StrategyBuilder() {
             marginBottom: 28,
           }}
         >
-          {/* Section 1: Identification & Timeframe */}
+          {/* Section 1: Identification & Trade Direction */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
             <span style={{ fontSize: 16 }}>⚙️</span>
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-              Strategy Identity & Timeframe
+              Strategy Identity, Direction & Timeframe
             </h2>
           </div>
 
@@ -518,6 +571,22 @@ export default function StrategyBuilder() {
                 placeholder="PRISM_BREAKOUT_RETEST"
               />
               <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Unique label for backtest and live tracking</span>
+            </label>
+
+            <label style={labelStyle}>
+              Trade Direction
+              <select
+                style={{ ...inputStyle, borderColor: "#6366f1" }}
+                value={cfg.direction}
+                onChange={(e) => upd("direction", e.target.value as any)}
+              >
+                <option value="both">Both (Long & Short Breakouts)</option>
+                <option value="long_only">Long Only (Spot / Bullish)</option>
+                <option value="short_only">Short Only (Hedge / Bearish)</option>
+              </select>
+              <span style={{ color: "#818cf8", fontSize: 11, textTransform: "none" }}>
+                {cfg.direction === "both" ? "Executes long breakouts & short breakdowns" : cfg.direction === "long_only" ? "Only buys high breakouts" : "Only shorts breakdown support"}
+              </span>
             </label>
 
             <label style={labelStyle}>
@@ -683,7 +752,7 @@ export default function StrategyBuilder() {
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
                 gap: 8,
-                maxHeight: 220,
+                maxHeight: 200,
                 overflowY: "auto",
                 background: "rgba(11, 16, 28, 0.6)",
                 border: "1px solid rgba(255, 255, 255, 0.05)",
@@ -740,12 +809,12 @@ export default function StrategyBuilder() {
             )}
           </div>
 
-          {/* ─── Section 3: PRISM Setup & Risk Architecture ─── */}
+          {/* ─── Section 3: Dynamic Exits & Trade Management Architecture ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-              <span style={{ fontSize: 16 }}>🛡</span>
+              <span style={{ fontSize: 16 }}>🎯</span>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                Risk Management, Exits & Re-Entry Discipline
+                Dynamic Exits & Trade Management Architecture
               </h2>
             </div>
 
@@ -801,6 +870,62 @@ export default function StrategyBuilder() {
               </label>
 
               <label style={labelStyle}>
+                Breakeven Stop Trigger
+                <select
+                  style={{ ...inputStyle, borderColor: cfg.breakevenStop ? "#4ade80" : "rgba(255,255,255,0.12)" }}
+                  value={cfg.breakevenStop ? "enabled" : "disabled"}
+                  onChange={(e) => upd("breakevenStop", e.target.value === "enabled")}
+                >
+                  <option value="enabled">Enabled (Move Stop to BE at T1)</option>
+                  <option value="disabled">Disabled (Hold Hard Stop)</option>
+                </select>
+                <span style={{ color: "#4ade80", fontSize: 11, textTransform: "none" }}>
+                  {cfg.breakevenStop ? "Protects profits once price hits Target 1" : "Risk remains open until T2 or hard stop"}
+                </span>
+              </label>
+
+              <label style={labelStyle}>
+                Target 1 Scaling Size %
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="10"
+                  max="100"
+                  step="5"
+                  value={cfg.partialTpPct}
+                  onChange={(e) => upd("partialTpPct", +e.target.value)}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>
+                  {cfg.partialTpPct}% closed at T1; {100 - cfg.partialTpPct}% runs to T2
+                </span>
+              </label>
+
+              <label style={labelStyle}>
+                Trailing Stop Loss
+                <select
+                  style={inputStyle}
+                  value={cfg.trailingStop ? "enabled" : "disabled"}
+                  onChange={(e) => upd("trailingStop", e.target.value === "enabled")}
+                >
+                  <option value="disabled">Disabled (Fixed T2)</option>
+                  <option value="enabled">Enabled (ATR Chandelier Exit)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Trails stop via ATR after T1 profit</span>
+              </label>
+            </div>
+          </div>
+
+          {/* ─── Section 4: Prop Firm & Portfolio Risk Controls ─── */}
+          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <span style={{ fontSize: 16 }}>🛡</span>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                Account, Prop Firm & Portfolio Risk Discipline
+              </h2>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
+              <label style={labelStyle}>
                 Risk Per Trade %
                 <input
                   style={inputStyle}
@@ -810,6 +935,34 @@ export default function StrategyBuilder() {
                   onChange={(e) => upd("risk", +e.target.value)}
                 />
                 <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>% of paper equity risked per setup</span>
+              </label>
+
+              <label style={labelStyle}>
+                Max Daily Loss % (Circuit Breaker)
+                <input
+                  style={{ ...inputStyle, borderColor: "#f59e0b" }}
+                  type="number"
+                  step="0.5"
+                  value={cfg.maxDailyLoss}
+                  onChange={(e) => upd("maxDailyLoss", +e.target.value)}
+                />
+                <span style={{ color: "#fbbf24", fontSize: 11, textTransform: "none" }}>
+                  Prop firm rule: halts trading if down {cfg.maxDailyLoss}% in 1 day
+                </span>
+              </label>
+
+              <label style={labelStyle}>
+                Max Open Positions
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="1"
+                  max="20"
+                  step="1"
+                  value={cfg.maxOpen}
+                  onChange={(e) => upd("maxOpen", Math.max(1, +e.target.value))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Concurrent basket position cap</span>
               </label>
 
               <label style={labelStyle}>
@@ -878,12 +1031,104 @@ export default function StrategyBuilder() {
             </div>
           </div>
 
-          {/* ─── Section 4: Higher-Timeframe Trend Filter ─── */}
+          {/* ─── Section 5: Execution Friction & Session Timing ─── */}
+          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <span style={{ fontSize: 16 }}>⚡</span>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                Execution Friction, Fees & Session Timing (Institutional Day Trader Controls)
+              </h2>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
+              <label style={labelStyle}>
+                Exchange Fee Tier
+                <select
+                  style={inputStyle}
+                  value={cfg.feeTier}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    upd("feeTier", val);
+                    if (val === "binance_vip0") upd("feePct", 0.04);
+                    else if (val === "maker") upd("feePct", 0.02);
+                    else if (val === "zero") upd("feePct", 0.00);
+                  }}
+                >
+                  <option value="binance_vip0">Binance VIP0 Taker (0.04%)</option>
+                  <option value="maker">Binance VIP0 Maker (0.02%)</option>
+                  <option value="zero">Zero Commission (0.00%)</option>
+                  <option value="custom">Custom Fee %</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>
+                  Fee per side: {cfg.feePct}% (Round-trip: {(cfg.feePct * 2).toFixed(3)}%)
+                </span>
+              </label>
+
+              <label style={labelStyle}>
+                Estimated Slippage %
+                <select
+                  style={inputStyle}
+                  value={cfg.slippagePct}
+                  onChange={(e) => upd("slippagePct", +e.target.value)}
+                >
+                  <option value={0.01}>0.01% (~1 tick Binance USDT)</option>
+                  <option value={0.02}>0.02% (~2 ticks medium market)</option>
+                  <option value={0.05}>0.05% (Higher volatility altcoin)</option>
+                  <option value={0.0}>0.00% (No slippage ideal)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Deducted on entry and exit</span>
+              </label>
+
+              <label style={labelStyle}>
+                Trading Sessions / Kill Zones
+                <select
+                  style={inputStyle}
+                  value={cfg.tradingHours}
+                  onChange={(e) => upd("tradingHours", e.target.value)}
+                >
+                  <option value="all_day">All Day (24/7 Global Trading)</option>
+                  <option value="london_ny">London & NY Overlap (12:00 - 16:00 UTC)</option>
+                  <option value="london">London Session (07:00 - 15:00 UTC)</option>
+                  <option value="ny">New York Session (12:00 - 20:00 UTC)</option>
+                  <option value="asia">Asian Session (00:00 - 08:00 UTC)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Restricts breakouts to high volume windows</span>
+              </label>
+
+              <label style={labelStyle}>
+                Weekend Trading Filter
+                <select
+                  style={inputStyle}
+                  value={cfg.skipWeekends ? "skip" : "include"}
+                  onChange={(e) => upd("skipWeekends", e.target.value === "skip")}
+                >
+                  <option value="include">Trade 24/7 (Include Weekends)</option>
+                  <option value="skip">Skip Weekends (Avoid Saturday/Sunday Chop)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Avoids illiquid weekend price manipulation</span>
+              </label>
+
+              <label style={labelStyle}>
+                Breakout Volume (RVOL) Filter
+                <select
+                  style={inputStyle}
+                  value={cfg.rvolFilter ? "enabled" : "disabled"}
+                  onChange={(e) => upd("rvolFilter", e.target.value === "enabled")}
+                >
+                  <option value="disabled">Disabled (Price Breakout Only)</option>
+                  <option value="enabled">Require High Volume (&gt; 1.5x 20-SMA)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Filters out low volume fakeouts</span>
+              </label>
+            </div>
+          </div>
+
+          {/* ─── Section 6: Higher-Timeframe Trend Filter ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>📈</span>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                Higher-Timeframe EMA Trend Filter
+                Higher-Timeframe EMA Trend Guard
               </h2>
             </div>
 
@@ -895,10 +1140,10 @@ export default function StrategyBuilder() {
                   value={cfg.trendFilter}
                   onChange={(e) => upd("trendFilter", e.target.value)}
                 >
-                  <option value="enabled">Enabled (Require Trend Alignment)</option>
+                  <option value="enabled">Enabled (Require Macro Trend Alignment)</option>
                   <option value="disabled">Disabled (Trade All Breakouts)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Only enter longs when HTF EMA Fast &gt; Slow</span>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Requires Fast EMA &gt; Slow EMA for longs</span>
               </label>
 
               <label style={labelStyle}>
@@ -946,7 +1191,7 @@ export default function StrategyBuilder() {
             </div>
           </div>
 
-          {/* ─── Section 5: Historical Range & Execution ─── */}
+          {/* ─── Section 7: Historical Range & Execution ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>📅</span>
@@ -1074,6 +1319,25 @@ export default function StrategyBuilder() {
               >
                 <span>💾</span> Save Strategy
               </button>
+
+              <Link
+                href={`/paper-trading?strategy_id=${encodeURIComponent(deployTargetId)}`}
+                style={{
+                  background: "linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.3) 100%)",
+                  color: "#4ade80",
+                  border: "1px solid rgba(34, 197, 94, 0.4)",
+                  borderRadius: 10,
+                  padding: "12px 22px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>🚀</span> Deploy to Live Paper Trading
+              </Link>
             </div>
 
             {runProgress && (
@@ -1118,47 +1382,43 @@ export default function StrategyBuilder() {
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
             <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Target Architecture
+              Target & Breakeven Exits
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#4ade80", marginTop: 6 }}>
-              T1 {cfg.t1}R · T2 {cfg.t2}R
+              T1 {cfg.t1}R ({cfg.partialTpPct}%) {cfg.breakevenStop ? "→ BE Lock" : ""} → T2 {cfg.t2}R
             </div>
             <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              Asymmetric payoff model: locks gains at T1 and lets runners reach T2.
+              {cfg.breakevenStop ? "Locks in gains at T1 and moves stop to entry." : "Fixed targets without breakeven move."}
             </p>
           </div>
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
             <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Re-Entry Discipline
+              Prop Firm & Risk Circuit Breaker
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginTop: 6 }}>
-              {payload.strategy.reentry.enabled
-                ? `${payload.strategy.reentry.max_reentries} Max · ${payload.strategy.reentry.cooldown_bars} Bar Cooldown`
-                : "Disabled"}
+              {cfg.risk}% Risk · {cfg.maxDailyLoss}% Daily Loss Halt
             </div>
             <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              Enforces a strict cooling-off period to prevent psychological revenge trading.
+              {cfg.maxOpen} max positions · {payload.strategy.reentry.enabled ? `${payload.strategy.reentry.max_reentries} re-entries` : "No re-entries"}
             </p>
           </div>
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
             <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Macro Trend Filter
+              Direction & Macro Guard
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#c084fc", marginTop: 6 }}>
-              {payload.strategy.trend_filter.use_trend_filter
-                ? `${payload.strategy.trend_filter.higher_timeframe} EMA${payload.strategy.trend_filter.fast_ema} > EMA${payload.strategy.trend_filter.slow_ema}`
-                : "Disabled"}
+              {cfg.direction === "both" ? "Both (Long & Short)" : cfg.direction === "long_only" ? "Long Only" : "Short Only"} · {payload.strategy.trend_filter.use_trend_filter ? `${payload.strategy.trend_filter.higher_timeframe} EMA` : "No Filter"}
             </div>
             <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              Filters out noisy counter-trend breakouts against the primary macro momentum.
+              {cfg.feePct}% taker fee · {cfg.slippagePct}% slippage · {cfg.tradingHours === "all_day" ? "24/7 Hours" : "Session Filtered"}
             </p>
           </div>
         </div>
 
         {/* ─── Backtest Results Section ─── */}
-        {job && <BacktestResult job={job} pollJob={pollJob} />}
+        {job && <BacktestResult job={job} pollJob={pollJob} deployTargetId={deployTargetId} />}
 
         {/* ─── Strategy Configuration Summary ─── */}
         <StrategyPreview payload={payload} strategyId={strategyId} />
@@ -1199,13 +1459,13 @@ function Kpi({
 const td = { borderBottom: "1px solid rgba(255, 255, 255, 0.05)", padding: "10px 12px", color: "#cbd5e1", fontSize: 13 };
 const tdStrong = { ...td, color: "#94a3b8", fontWeight: 700, width: 260 };
 
-function BacktestResult({ job, pollJob }: { job: any; pollJob: any }) {
+function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: any; deployTargetId: string }) {
   const s = job.summary || {};
   const pr = s.performance_and_robustness || job.performance_and_robustness || {};
   const ra = pr.risk_adjusted || {};
   const ex = pr.expectancy || {};
   const risk = pr.risk || {};
-  const tb = pr.trading_behavior || {};
+  const fric = pr.friction || {};
   const robust = pr.robustness || {};
   const warnings = Array.isArray(pr.warnings) ? pr.warnings : [];
   const allSymbols = Array.isArray(job.symbols)
@@ -1225,11 +1485,19 @@ function BacktestResult({ job, pollJob }: { job: any; pollJob: any }) {
   const negative = Number(s.losses || 0);
   const be = Math.max(0, Number(s.total_trades || 0) - positive - negative);
 
+  const netAfterFriction = fric.net_R_after_friction != null ? fric.net_R_after_friction : s.gross_R;
+
   const rows = [
     [
       "Positive / Negative / Breakeven Trades",
       `${positive} / ${negative} / ${be}`,
       "Classified by final realized R-multiple, not just target hits.",
+    ],
+    ["Gross Return (R)", `${fmt(s.gross_R)} R`, "Raw cumulative R before exchange frictions."],
+    [
+      "Net Return (After Fees & Slippage)",
+      `${fmt(netAfterFriction)} R`,
+      `Includes ${(fric.fee_pct_per_side ?? 0.04) * 2}% round-trip fee + ${(fric.slippage_pct_per_side ?? 0.01) * 2}% slippage.`,
     ],
     ["Bars Processed", s.bars_processed, "Historical bars scanned by engine."],
     ["Breakouts Detected", s.breakouts, "Total price level breakout triggers."],
@@ -1246,7 +1514,7 @@ function BacktestResult({ job, pollJob }: { job: any; pollJob: any }) {
     [
       "HTF EMA Trend Rejections",
       s.trend_filter_rejections ?? 0,
-      "Setups blocked because higher-timeframe EMA was bearish.",
+      "Setups blocked because higher-timeframe EMA was against bias.",
     ],
     [
       "Max Drawdown (R)",
@@ -1280,30 +1548,50 @@ function BacktestResult({ job, pollJob }: { job: any; pollJob: any }) {
             Simulated performance metrics across selected historical Binance market data
           </p>
         </div>
-        <Link
-          href="/quant-coach"
-          style={{
-            background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-            color: "#ffffff",
-            textDecoration: "none",
-            padding: "8px 16px",
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 700,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          🧠 Open Quant Coach Report →
-        </Link>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Link
+            href={`/paper-trading?strategy_id=${encodeURIComponent(deployTargetId)}`}
+            style={{
+              background: "linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.35) 100%)",
+              color: "#4ade80",
+              textDecoration: "none",
+              padding: "8px 16px",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              border: "1px solid rgba(34, 197, 94, 0.4)",
+            }}
+          >
+            🚀 Deploy to Paper Trading →
+          </Link>
+          <Link
+            href="/quant-coach"
+            style={{
+              background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+              color: "#ffffff",
+              textDecoration: "none",
+              padding: "8px 16px",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            🧠 Open Quant Coach Report →
+          </Link>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 24 }}>
         <Kpi label="Status" value={pollJob?.status?.toUpperCase() || job.status?.toUpperCase()} color="#38bdf8" />
         <Kpi label="Total Trades" value={s.total_trades ?? job.trades?.length ?? 0} />
         <Kpi label="Gross R" value={`${fmt(s.gross_R)} R`} color={signedClass(s.gross_R)} />
-        <Kpi label="Avg Expectancy" value={`${fmt(s.average_R)} R`} color={signedClass(s.average_R)} />
+        <Kpi label="Net Return (Friction)" value={`${fmt(netAfterFriction)} R`} color={signedClass(netAfterFriction)} />
         <Kpi label="Win Rate" value={pct(s.win_rate)} color="#4ade80" />
         <Kpi label="Profit Factor" value={fmt(s.profit_factor)} />
       </div>
@@ -1358,7 +1646,7 @@ function BacktestResult({ job, pollJob }: { job: any; pollJob: any }) {
           <Kpi label="Sortino Ratio" value={metric(ra.sortino)} />
           <Kpi label="Calmar Ratio" value={metric(ra.calmar)} />
           <Kpi label="Recovery Factor" value={metric(ra.recovery_factor)} />
-          <Kpi label="Trade Expectancy" value={metric(ex.expectancy_R_per_trade, " R")} color={signedClass(ex.expectancy_R_per_trade)} />
+          <Kpi label="Net Expectancy" value={metric(ex.expectancy_R_net ?? ex.expectancy_R_per_trade, " R")} color={signedClass(ex.expectancy_R_net ?? ex.expectancy_R_per_trade)} />
           <Kpi label="Avg Win / Loss" value={`${metric(ex.average_winner_R, "R")} / ${metric(ex.average_loser_R, "R")}`} />
           <Kpi label="Max Streak (W / L)" value={`${risk.max_consecutive_wins ?? 0} / ${risk.max_consecutive_losses ?? 0}`} />
           <Kpi label="Overfitting Risk" value={robust.overfitting_risk_label || "Low"} color="#4ade80" />
@@ -1405,31 +1693,37 @@ function StrategyPreview({
   payload: any;
   strategyId: string;
 }) {
+  const s = payload.strategy;
   const rows = [
     ["Strategy Identifier", payload.user_strategy_id],
     ["Active Markets", payload.symbols?.join(", ")],
+    ["Trade Direction", s.direction === "both" ? "Both (Long & Short)" : s.direction === "long_only" ? "Long Only" : "Short Only"],
     ["Execution Timeframe", `${payload.timeframe} (${payload.bar_seconds}s bars)`],
-    ["Breakout Lookback", `${payload.strategy.breakout_lookback} bars`],
-    ["Retest Tolerance", `${payload.strategy.retest_tolerance_pct} (${Number(payload.strategy.retest_tolerance_pct) * 100}%)`],
-    ["Minimum Setup Score", `${payload.strategy.min_setup_score} / 10`],
+    ["Breakout Lookback", `${s.breakout_lookback} bars`],
+    ["Retest Tolerance", `${s.retest_tolerance_pct} (${Number(s.retest_tolerance_pct) * 100}%)`],
+    ["Minimum Setup Score", `${s.min_setup_score} / 10`],
     [
       "Stop-Loss Rule",
-      `${payload.strategy.stop_loss.type} · ATR Multiplier ${payload.strategy.stop_loss.atr_multiplier}`,
+      `${s.stop_loss.type} · ATR Multiplier ${s.stop_loss.atr_multiplier}`,
     ],
     [
       "Target Architecture",
-      `Target 1: ${payload.strategy.targets.target1_R}R · Target 2: ${payload.strategy.targets.target2_R}R`,
+      `Target 1: ${s.targets.target1_R}R (${s.trade_management?.partial_tp_pct ?? 50}% closed) · Target 2: ${s.targets.target2_R}R`,
     ],
-    ["Risk Per Trade", `${payload.strategy.risk.risk_per_trade_pct}% of equity`],
-    ["Setup TTL Expiry", `${payload.strategy.ttl_bars} bars`],
-    ["Re-Entry Discipline", payload.strategy.reentry.enabled ? "Enabled" : "Disabled"],
-    ["Max Allowed Re-Entries", payload.strategy.reentry.max_reentries],
-    ["Re-Entry Cooldown", `${payload.strategy.reentry.cooldown_bars} bars`],
-    ["Signal Cooldown", `${payload.strategy.signal_cooldown_bars} bars`],
+    ["Breakeven Stop at T1", s.trade_management?.breakeven_stop ? "Enabled (Stop moves to Entry at T1)" : "Disabled"],
+    ["Risk Per Trade", `${s.risk.risk_per_trade_pct}% of equity`],
+    ["Max Daily Loss Halt", `${s.risk.max_daily_loss_pct}% (Circuit Breaker)`],
+    ["Max Open Positions", `${s.risk.max_open_positions} concurrent positions`],
+    ["Setup TTL Expiry", `${s.ttl_bars} bars`],
+    ["Re-Entry Discipline", s.reentry.enabled ? "Enabled" : "Disabled"],
+    ["Max Allowed Re-Entries", s.reentry.max_reentries],
+    ["Re-Entry Cooldown", `${s.reentry.cooldown_bars} bars`],
+    ["Exchange Fee Model", `${s.execution_friction?.fee_pct ?? 0.04}% per side · ${s.execution_friction?.slippage_pct ?? 0.01}% slippage`],
+    ["Session Timing Filter", s.timing_filter?.trading_hours === "all_day" ? "24/7 Global" : s.timing_filter?.trading_hours],
     [
       "HTF Trend Filter",
-      payload.strategy.trend_filter.use_trend_filter
-        ? `${payload.strategy.trend_filter.higher_timeframe} EMA${payload.strategy.trend_filter.fast_ema} > EMA${payload.strategy.trend_filter.slow_ema}`
+      s.trend_filter.use_trend_filter
+        ? `${s.trend_filter.higher_timeframe} EMA${s.trend_filter.fast_ema} > EMA${s.trend_filter.slow_ema}`
         : "Disabled",
     ],
   ];
@@ -1444,7 +1738,7 @@ function StrategyPreview({
         boxShadow: "0 12px 30px rgba(0, 0, 0, 0.25)",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div>
           <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#ffffff" }}>
             Active Strategy Configuration Summary
@@ -1453,11 +1747,28 @@ function StrategyPreview({
             Validated system specifications registered for backtest and live paper trading engines
           </p>
         </div>
-        {strategyId && (
-          <span style={{ fontSize: 11, color: "#a5b4fc", background: "rgba(99, 102, 241, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(99, 102, 241, 0.3)" }}>
-            Database ID: {strategyId.slice(0, 8)}...
-          </span>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {strategyId && (
+            <span style={{ fontSize: 11, color: "#a5b4fc", background: "rgba(99, 102, 241, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(99, 102, 241, 0.3)" }}>
+              Database ID: {strategyId.slice(0, 8)}...
+            </span>
+          )}
+          <Link
+            href={`/paper-trading?strategy_id=${encodeURIComponent(strategyId || payload.user_strategy_id || "PRISM_BREAKOUT_RETEST")}`}
+            style={{
+              background: "rgba(34, 197, 94, 0.15)",
+              color: "#4ade80",
+              border: "1px solid rgba(34, 197, 94, 0.3)",
+              padding: "4px 10px",
+              borderRadius: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
+          >
+            Deploy to Paper Trading →
+          </Link>
+        </div>
       </div>
 
       <div style={{ overflowX: "auto" }}>

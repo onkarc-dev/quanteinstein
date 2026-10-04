@@ -28,8 +28,25 @@ class TrendFilterConfig(BaseModel):
     fast_ema: int = 20
     slow_ema: int = 50
 
+class TradeManagementConfig(BaseModel):
+    breakeven_stop: bool = True
+    partial_tp_pct: float = 50.0
+    trailing_stop: bool = False
+    trailing_atr_multiplier: float = 1.5
+
+class ExecutionFrictionConfig(BaseModel):
+    fee_pct: float = 0.04
+    slippage_pct: float = 0.01
+
+class TimingFilterConfig(BaseModel):
+    trading_hours: str = "all_day"
+    skip_weekends: bool = False
+    rvol_filter: bool = False
+    rvol_threshold: float = 1.5
+
 class StrategyRules(BaseModel):
     name: str = "QuantOS Breakout Retest"
+    direction: str = "both"
     breakout_lookback: int = 20
     retest_tolerance_pct: float = 0.001
     min_setup_score: float = 6.5
@@ -42,6 +59,9 @@ class StrategyRules(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     reentry: ReentryConfig = Field(default_factory=ReentryConfig)
     trend_filter: TrendFilterConfig = Field(default_factory=TrendFilterConfig)
+    trade_management: TradeManagementConfig = Field(default_factory=TradeManagementConfig)
+    execution_friction: ExecutionFrictionConfig = Field(default_factory=ExecutionFrictionConfig)
+    timing_filter: TimingFilterConfig = Field(default_factory=TimingFilterConfig)
 
 class StrategyCreate(BaseModel):
     # User-defined strategy code shown in UI/live session; DB id remains UUID for safety.

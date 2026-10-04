@@ -484,19 +484,32 @@ def _latest_strategy_for_user(user_id: str) -> Dict[str, Any]:
 def _strategy_for_user(user_id: str, strategy_id: str = "") -> Dict[str, Any]:
     """Fetch the requested saved strategy, or fall back to the newest one."""
     if strategy_id:
+        target = str(strategy_id).strip()
         with get_conn() as conn:
-            if settings.is_postgres():
-                row = conn.execute(
-                    "SELECT * FROM strategies WHERE id=%s AND user_id=%s",
-                    (strategy_id, user_id),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    "SELECT * FROM strategies WHERE id=? AND user_id=?",
-                    (strategy_id, user_id),
-                ).fetchone()
-        if row:
-            return row_to_dict(row)
+            p = "%s" if settings.is_postgres() else "?"
+            # 1. Exact UUID match
+            row = conn.execute(
+                f"SELECT * FROM strategies WHERE id={p} AND user_id={p}",
+                (target, user_id),
+            ).fetchone()
+            if row:
+                return row_to_dict(row)
+            # 2. Match by user_strategy_id or ID prefix across user's strategies
+            all_rows = conn.execute(
+                f"SELECT * FROM strategies WHERE user_id={p} ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+            for r in all_rows:
+                rd = row_to_dict(r)
+                if rd.get("id", "").startswith(target):
+                    return rd
+                try:
+                    cfg = json.loads(rd.get("config_json") or "{}")
+                    uid = cfg.get("user_strategy_id") or cfg.get("strategy_id")
+                    if str(uid).strip() == target or str(rd.get("name", "")).strip() == target:
+                        return rd
+                except Exception:
+                    pass
     return _latest_strategy_for_user(user_id)
 
 
