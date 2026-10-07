@@ -384,15 +384,55 @@ export default function LoginForm() {
   // -------------------------------------------------------------
   async function handleRequestPasswordReset(e?: React.FormEvent) {
     if (e) e.preventDefault();
-    if (!email.trim()) {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
       notify('Please enter your account email address.', 'error');
       return;
     }
 
     setBusy(true);
-    notify(resetRequested ? 'Resending recovery code…' : 'Sending recovery instructions…', 'info');
+    notify(resetRequested ? 'Resending recovery code…' : 'Generating recovery instructions…', 'info');
 
-    // 1. Supabase Auth password reset
+    // 1. Primary: Server-side Supabase Admin recovery route (generates OTP without broken external SMTP)
+    try {
+      const res = await fetch('/api/auth/password-reset/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setResetRequested(true);
+        setResendCooldown(45);
+        if (data.otp) {
+          setResetOtp(data.otp);
+          notify(
+            `Recovery code generated: ${data.otp}. It has been entered below for you. Set your new password to proceed.`,
+            'success'
+          );
+        } else {
+          notify(
+            data.message || 'Recovery code generated. Enter the code and your new password below.',
+            'info'
+          );
+        }
+        setBusy(false);
+        return;
+      }
+
+      if (data.error) {
+        if (data.error.includes('No account registered') || res.status === 404) {
+          notify(data.error, 'error');
+          setBusy(false);
+          return;
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Server password reset request failed, trying client fallback:', apiErr);
+    }
+
+    // 2. Client-side Supabase Auth fallback
     if (supabase) {
       try {
         const redirectUrl =
@@ -400,36 +440,28 @@ export default function LoginForm() {
             ? `${window.location.origin}/login`
             : 'https://www.quanteinstein.com/login';
 
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
           redirectTo: redirectUrl,
         });
 
-        if (error) {
-          notify('Password reset failed: ' + error.message, 'error');
+        if (!error) {
+          setResetRequested(true);
+          setResendCooldown(45);
+          notify('Recovery instructions sent to your email. Enter the code and your new password below.', 'info');
           setBusy(false);
           return;
         }
-
-        setResetRequested(true);
-        setResendCooldown(45);
-        notify(
-          'Recovery code sent to your email. Enter the code and your new password below.',
-          'info'
-        );
-        setBusy(false);
-        return;
+        console.warn('Client Supabase reset error:', error.message);
       } catch (err: any) {
-        notify('Reset request error: ' + (err?.message || 'Failed to request reset'), 'error');
-        setBusy(false);
-        return;
+        console.warn('Client Supabase reset exception:', err);
       }
     }
 
-    // 2. Legacy API fallback
+    // 3. Legacy QuantOS API fallback
     try {
       const data = (await api('/auth/password-reset/request-otp', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({ email: cleanEmail }),
       })) as { message?: string; otp?: string };
 
       setResetRequested(true);
@@ -453,7 +485,8 @@ export default function LoginForm() {
   // -------------------------------------------------------------
   async function handleVerifyPasswordReset(e?: React.FormEvent) {
     if (e) e.preventDefault();
-    if (!email.trim() || !resetOtp.trim() || !newPassword) {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !resetOtp.trim() || !newPassword) {
       notify('Email, recovery code, and new password are all required.', 'error');
       return;
     }
@@ -465,48 +498,98 @@ export default function LoginForm() {
     setBusy(true);
     notify('Updating account password…', 'info');
 
-    // 1. Supabase Auth verify OTP + update user password
-    if (supabase) {
-      try {
-        const { error: otpError } = await supabase.auth.verifyOtp({
-          email: email.trim(),
-          token: resetOtp.trim(),
-          type: 'recovery',
-        });
-        if (otpError) {
-          notify('Invalid recovery code: ' + otpError.message, 'error');
-          setBusy(false);
-          return;
-        }
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: newPassword,
-        });
-        if (updateError) {
-          notify('Failed to update password: ' + updateError.message, 'error');
-          setBusy(false);
-          return;
-        }
+    // 1. Primary: Server-side Supabase Admin verify & update
+    try {
+      const res = await fetch('/api/auth/password-reset/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          otp: resetOtp.trim(),
+          new_password: newPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
         setPassword(newPassword);
         setResetRequested(false);
         setNewPassword('');
         setResetOtp('');
-        notify('Password updated successfully! You can now sign in with your new password.', 'success');
+        notify('Password updated successfully! Signing you in…', 'success');
+
+        // Automatically log in with new credentials
+        if (supabase) {
+          try {
+            const { data: loginData } = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password: newPassword,
+            });
+            if (loginData?.session && loginData?.user) {
+              saveAuth({
+                token: loginData.session.access_token,
+                refresh_token: loginData.session.refresh_token,
+                user: {
+                  id: loginData.user.id,
+                  email: loginData.user.email || cleanEmail,
+                  name: (loginData.user.user_metadata?.name as string) || cleanEmail.split('@')[0],
+                  onboarding_completed: true,
+                },
+              });
+              window.location.href = '/dashboard';
+              return;
+            }
+          } catch {}
+        }
+
         setMode('login');
         setBusy(false);
         return;
-      } catch (err: any) {
-        notify('Reset error: ' + (err?.message || 'Failed to update password'), 'error');
+      }
+
+      if (data.error && !data.error.includes('unavailable')) {
+        notify(data.error, 'error');
         setBusy(false);
         return;
       }
+    } catch (apiErr) {
+      console.warn('Server password verify failed, trying client fallback:', apiErr);
     }
 
-    // 2. Legacy API fallback
+    // 2. Client-side Supabase Auth fallback
+    if (supabase) {
+      try {
+        const { error: otpError } = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token: resetOtp.trim(),
+          type: 'recovery',
+        });
+        if (!otpError) {
+          const { error: updateError } = await supabase.auth.updateUser({
+            password: newPassword,
+          });
+          if (!updateError) {
+            setPassword(newPassword);
+            setResetRequested(false);
+            setNewPassword('');
+            setResetOtp('');
+            notify('Password updated successfully! You can now sign in with your new password.', 'success');
+            setMode('login');
+            setBusy(false);
+            return;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Client Supabase verify exception:', err);
+      }
+    }
+
+    // 3. Legacy QuantOS API fallback
     try {
       const data = (await api('/auth/password-reset/verify', {
         method: 'POST',
         body: JSON.stringify({
-          email: email.trim(),
+          email: cleanEmail,
           otp: resetOtp.trim(),
           new_password: newPassword,
         }),
@@ -878,8 +961,28 @@ export default function LoginForm() {
                     fontSize: 12,
                     color: '#c7d2fe',
                     marginBottom: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
                   }}>
-                    Recovery code sent to <strong>{email}</strong>
+                    <div>
+                      Recovery account:<br />
+                      <strong style={{ color: '#ffffff' }}>{email}</strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setResetRequested(false)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#93c5fd',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Change
+                    </button>
                   </div>
 
                   <div style={{ marginBottom: 16 }}>
