@@ -244,11 +244,11 @@ export default function LoginForm() {
 
       setOtpRequested(true);
       setResendCooldown(45);
-      if (data.otp) setOtp(data.otp);
+      setOtp('');
       notify(
-        data.otp
-          ? `Code generated: ${data.otp}. Enter it to finalize registration.`
-          : (otpRequested ? 'Code resent. Please check your inbox.' : data.message || 'Verification code sent to your email.'),
+        otpRequested
+          ? 'Verification code resent. Please check your email inbox.'
+          : 'Verification code sent to your email. Please check your inbox and enter the code below.',
         'info'
       );
     } catch (e) {
@@ -404,19 +404,12 @@ export default function LoginForm() {
 
       if (res.ok && data.success) {
         setResetRequested(true);
+        setResetOtp('');
         setResendCooldown(45);
-        if (data.otp) {
-          setResetOtp(data.otp);
-          notify(
-            `Recovery code generated: ${data.otp}. It has been entered below for you. Set your new password to proceed.`,
-            'success'
-          );
-        } else {
-          notify(
-            data.message || 'Recovery code generated. Enter the code and your new password below.',
-            'info'
-          );
-        }
+        notify(
+          `A verification code has been dispatched to ${cleanEmail}. Please check your inbox (and spam folder) and enter the code below.`,
+          'success'
+        );
         setBusy(false);
         return;
       }
@@ -446,6 +439,7 @@ export default function LoginForm() {
 
         if (!error) {
           setResetRequested(true);
+          setResetOtp('');
           setResendCooldown(45);
           notify('Recovery instructions sent to your email. Enter the code and your new password below.', 'info');
           setBusy(false);
@@ -466,11 +460,11 @@ export default function LoginForm() {
 
       setResetRequested(true);
       setResendCooldown(45);
-      if (data.otp) setResetOtp(data.otp);
+      setResetOtp('');
       notify(
-        data.otp
-          ? `Recovery code generated: ${data.otp}. Enter it with your new password below.`
-          : (resetRequested ? 'Recovery code resent. Check your inbox.' : data.message || 'Recovery instructions sent.'),
+        resetRequested
+          ? 'Recovery code resent. Please check your inbox.'
+          : 'A verification code has been dispatched to your email. Please check your inbox and enter the code below.',
         'info'
       );
     } catch (e) {
@@ -1000,8 +994,9 @@ export default function LoginForm() {
                       value={resetOtp}
                       onChange={e => setResetOtp(e.target.value)}
                       disabled={busy}
-                      placeholder="Enter 6-digit code"
+                      placeholder="Enter 6-digit code from email"
                       autoComplete="one-time-code"
+                      autoFocus
                       required
                       style={{
                         background: '#0a0e1a',
