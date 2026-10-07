@@ -47,6 +47,12 @@ export async function POST(request: Request) {
       const dispatchResult = await sendPasswordResetEmail(email, emailOtp);
       if (!dispatchResult.sent) {
         console.warn(`[PasswordReset] Outbound email not delivered for ${email}:`, dispatchResult.reason);
+        return NextResponse.json(
+          {
+            error: `Email service is not yet configured (${dispatchResult.reason || 'Missing SMTP / RESEND_API_KEY'}). Please configure an email provider in your environment to receive OTP emails.`,
+          },
+          { status: 503 }
+        );
       }
     }
 
