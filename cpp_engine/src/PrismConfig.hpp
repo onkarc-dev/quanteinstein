@@ -35,6 +35,22 @@ struct TrendFilterConfig {
     int slow_ema = 50;
 };
 
+struct RsiFilterConfig {
+    bool enabled = false;
+    int period = 14;
+    double overbought = 70.0;
+    double oversold = 30.0;
+    std::string condition = "filter_extremes";
+};
+
+struct MacdFilterConfig {
+    bool enabled = false;
+    int fast_period = 12;
+    int slow_period = 26;
+    int signal_period = 9;
+    std::string condition = "histogram_momentum";
+};
+
 struct TradeManagementConfig {
     bool breakeven_stop = true;
     double partial_tp_pct = 50.0;
@@ -69,6 +85,8 @@ struct StrategyRulesConfig {
     RiskConfigPrism risk;
     ReentryConfig reentry;
     TrendFilterConfig trend_filter;
+    RsiFilterConfig rsi_filter;
+    MacdFilterConfig macd_filter;
     TradeManagementConfig trade_management;
     ExecutionFrictionConfig execution_friction;
     TimingFilterConfig timing_filter;

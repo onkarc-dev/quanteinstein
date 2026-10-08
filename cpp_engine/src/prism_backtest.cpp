@@ -138,7 +138,174 @@ static std::vector<bool> compute_htf_bullish_filter(const std::vector<Bar>& bars
     return out;
 }
 
-static ScoreRow score_bar(const std::vector<Bar>& bars, size_t i, double breakout_level){
+struct ExtremaPointBt {
+    double price = 0.0;
+    double rsi = 50.0;
+    double macd = 0.0;
+    double hist = 0.0;
+    uint64_t bar_index = 0;
+};
+
+struct ExtremaTrackerBt {
+    ExtremaPointBt peak1, peak2;
+    ExtremaPointBt trough1, trough2;
+    uint64_t peak_count = 0;
+    uint64_t trough_count = 0;
+    double h0=0, h1=0, h2=0;
+    double l0=0, l1=0, l2=0;
+    double rsi0=50, rsi1=50, rsi2=50;
+    double macd0=0, macd1=0, macd2=0;
+    double hist0=0, hist1=0, hist2=0;
+    uint64_t bars = 0;
+
+    void update(double high, double low, double rsi, double macd, double hist, uint64_t bar_idx) {
+        bars++;
+        h0 = h1; h1 = h2; h2 = high;
+        l0 = l1; l1 = l2; l2 = low;
+        rsi0 = rsi1; rsi1 = rsi2; rsi2 = rsi;
+        macd0 = macd1; macd1 = macd2; macd2 = macd;
+        hist0 = hist1; hist1 = hist2; hist2 = hist;
+
+        if (bars >= 3) {
+            uint64_t mid_idx = (bar_idx >= 1 ? bar_idx - 1 : 0);
+            if (h1 >= h0 && h1 >= h2) {
+                peak1 = peak2;
+                peak2 = {h1, rsi1, macd1, hist1, mid_idx};
+                peak_count++;
+            }
+            if (l1 <= l0 && l1 <= l2) {
+                trough1 = trough2;
+                trough2 = {l1, rsi1, macd1, hist1, mid_idx};
+                trough_count++;
+            }
+        }
+    }
+
+    bool has_two_top_bearish_rsi(uint64_t current_bar) const {
+        if (peak_count < 2) return false;
+        if (current_bar - peak2.bar_index > 60) return false;
+        if (peak2.bar_index <= peak1.bar_index || peak2.bar_index - peak1.bar_index < 3) return false;
+        bool price_higher_or_equal = peak2.price >= peak1.price * 0.998;
+        bool rsi_lower = peak2.rsi < peak1.rsi - 1.0;
+        bool overbought = (peak1.rsi >= 60.0 || peak2.rsi >= 60.0);
+        return price_higher_or_equal && rsi_lower && overbought;
+    }
+
+    bool has_two_bottom_bullish_rsi(uint64_t current_bar) const {
+        if (trough_count < 2) return false;
+        if (current_bar - trough2.bar_index > 60) return false;
+        if (trough2.bar_index <= trough1.bar_index || trough2.bar_index - trough1.bar_index < 3) return false;
+        bool price_lower_or_equal = trough2.price <= trough1.price * 1.002;
+        bool rsi_higher = trough2.rsi > trough1.rsi + 1.0;
+        bool oversold = (trough1.rsi <= 40.0 || trough2.rsi <= 40.0);
+        return price_lower_or_equal && rsi_higher && oversold;
+    }
+
+    bool has_two_top_bearish_macd(uint64_t current_bar) const {
+        if (peak_count < 2) return false;
+        if (current_bar - peak2.bar_index > 60) return false;
+        if (peak2.bar_index <= peak1.bar_index || peak2.bar_index - peak1.bar_index < 3) return false;
+        bool price_higher_or_equal = peak2.price >= peak1.price * 0.998;
+        bool macd_lower = (peak2.macd < peak1.macd) || (peak2.hist < peak1.hist);
+        return price_higher_or_equal && macd_lower;
+    }
+
+    bool has_two_bottom_bullish_macd(uint64_t current_bar) const {
+        if (trough_count < 2) return false;
+        if (current_bar - trough2.bar_index > 60) return false;
+        if (trough2.bar_index <= trough1.bar_index || trough2.bar_index - trough1.bar_index < 3) return false;
+        bool price_lower_or_equal = trough2.price <= trough1.price * 1.002;
+        bool macd_higher = (trough2.macd > trough1.macd) || (trough2.hist > trough1.hist);
+        return price_lower_or_equal && macd_higher;
+    }
+};
+
+struct RsiIncrementalStateBt {
+    int period = 14;
+    double prev_close = 0.0;
+    double avg_gain = 0.0;
+    double avg_loss = 0.0;
+    double sum_gain = 0.0;
+    double sum_loss = 0.0;
+    double current_rsi = 50.0;
+    uint64_t count = 0;
+
+    void update(double close) {
+        if (count == 0) {
+            prev_close = close;
+            count = 1;
+            current_rsi = 50.0;
+            return;
+        }
+        double change = close - prev_close;
+        prev_close = close;
+        double gain = change > 0.0 ? change : 0.0;
+        double loss = change < 0.0 ? -change : 0.0;
+        count++;
+
+        if (count <= static_cast<uint64_t>(period + 1)) {
+            sum_gain += gain;
+            sum_loss += loss;
+            if (count == static_cast<uint64_t>(period + 1)) {
+                avg_gain = sum_gain / static_cast<double>(period);
+                avg_loss = sum_loss / static_cast<double>(period);
+            }
+        } else {
+            avg_gain = (avg_gain * (period - 1) + gain) / static_cast<double>(period);
+            avg_loss = (avg_loss * (period - 1) + loss) / static_cast<double>(period);
+        }
+
+        if (count > static_cast<uint64_t>(period)) {
+            if (avg_loss <= 1e-12) {
+                current_rsi = (avg_gain <= 1e-12) ? 50.0 : 100.0;
+            } else {
+                double rs = avg_gain / avg_loss;
+                current_rsi = 100.0 - (100.0 / (1.0 + rs));
+            }
+        }
+    }
+};
+
+struct MacdIncrementalStateBt {
+    int fast_period = 12;
+    int slow_period = 26;
+    int signal_period = 9;
+
+    double fast_ema = 0.0;
+    double slow_ema = 0.0;
+    double macd_line = 0.0;
+    double signal_line = 0.0;
+    double histogram = 0.0;
+    double prev_histogram = 0.0;
+    bool seeded = false;
+
+    void update(double close) {
+        double alpha_fast = 2.0 / (std::max(1, fast_period) + 1.0);
+        double alpha_slow = 2.0 / (std::max(fast_period + 1, slow_period) + 1.0);
+        double alpha_signal = 2.0 / (std::max(1, signal_period) + 1.0);
+
+        if (!seeded) {
+            fast_ema = close;
+            slow_ema = close;
+            macd_line = 0.0;
+            signal_line = 0.0;
+            histogram = 0.0;
+            prev_histogram = 0.0;
+            seeded = true;
+            return;
+        }
+
+        fast_ema = alpha_fast * close + (1.0 - alpha_fast) * fast_ema;
+        slow_ema = alpha_slow * close + (1.0 - alpha_slow) * slow_ema;
+        macd_line = fast_ema - slow_ema;
+
+        prev_histogram = histogram;
+        signal_line = alpha_signal * macd_line + (1.0 - alpha_signal) * signal_line;
+        histogram = macd_line - signal_line;
+    }
+};
+
+static ScoreRow score_bar(const std::vector<Bar>& bars, size_t i, double breakout_level, double rsi = 50.0, double macd_hist = 0.0, bool rsi_enabled = false, bool macd_enabled = false){
     const Bar& b=bars[i]; ScoreRow s; s.timestamp=b.timestamp;
     double close_pos = (b.high>b.low)?(b.close-b.low)/(b.high-b.low):0.0;
     double vol_avg = avg_volume(bars,i,20); double vol_ratio = vol_avg>0 ? b.volume/vol_avg : 1.0;
@@ -148,6 +315,15 @@ static ScoreRow score_bar(const std::vector<Bar>& bars, size_t i, double breakou
     s.microstructure = clamp10(b.liquidity_score*6.0 + (b.spread_pct<=0.50?2.0:0.0) + (b.microstructure_state=="HEALTHY"?2.0:0.0));
     s.interaction = clamp10((vol_ratio>=1.2?4.0:2.0) + (b.ipse_alignment=="ALIGNED"?3.0:1.0) + (b.mps_state!="BLOCK"?3.0:0.0));
     s.setup_score = s.structure*0.25 + s.positioning*0.25 + s.regime*0.15 + s.microstructure*0.15 + s.interaction*0.20;
+    if (rsi_enabled) {
+        if (rsi >= 40.0 && rsi <= 68.0) s.setup_score += 0.3;
+        else if (rsi > 70.0) s.setup_score -= 0.5;
+    }
+    if (macd_enabled) {
+        if (macd_hist > 0.0) s.setup_score += 0.3;
+        else s.setup_score -= 0.3;
+    }
+    s.setup_score = clamp10(s.setup_score);
     s.tier=tier(s.setup_score); return s;
 }
 
@@ -210,16 +386,27 @@ int main(int argc, char** argv){
     );
     std::vector<std::string> audit;
     std::vector<ScoreRow> scores; std::vector<IntentLog> intents; std::vector<TradeLog> trades;
-    int breakouts=0, retests=0, entries=0, reentries=0, rejections=0, invalidations=0, expired=0, t1hits=0, t2hits=0, stops=0, timeexits=0, trend_filter_rejections=0;
+    int breakouts=0, retests=0, entries=0, reentries=0, rejections=0, invalidations=0, expired=0, t1hits=0, t2hits=0, stops=0, timeexits=0, trend_filter_rejections=0, rsi_filter_rejections=0, macd_filter_rejections=0;
     bool prior_breakout=false, trade_open=false, reentry_used=false, can_reentry=false;
     double breakout=0, zone_low=0, zone_high=0, midpoint=0, entry=0, stop=0, t1=0, t2=0, R=0, peak_equity=0, equity=0, max_dd=0;
     size_t breakout_i=0, entry_i=0; int trade_id=0; ScoreRow entry_score; std::string entry_regime;
     const int lookback=run_config.strategy.breakout_lookback, entry_ttl=run_config.strategy.ttl_bars, trade_ttl=std::max(1, run_config.strategy.ttl_bars); const double atr_mult=run_config.strategy.stop_loss.atr_multiplier;
 
+    RsiIncrementalStateBt rsi_st;
+    rsi_st.period = std::max(2, run_config.strategy.rsi_filter.period);
+    MacdIncrementalStateBt macd_st;
+    macd_st.fast_period = std::max(1, run_config.strategy.macd_filter.fast_period);
+    macd_st.slow_period = std::max(macd_st.fast_period + 1, run_config.strategy.macd_filter.slow_period);
+    macd_st.signal_period = std::max(1, run_config.strategy.macd_filter.signal_period);
+    ExtremaTrackerBt extrema_bt;
+
     for(size_t i=0;i<bars.size();++i){
         const Bar& b=bars[i]; double prev_high=0;
+        rsi_st.update(b.close);
+        macd_st.update(b.close);
+        extrema_bt.update(b.high, b.low, rsi_st.current_rsi, macd_st.macd_line, macd_st.histogram, i);
         if(i>=static_cast<size_t>(lookback)) for(size_t j=i-lookback;j<i;++j) prev_high=std::max(prev_high,bars[j].high);
-        ScoreRow sc = score_bar(bars,i, i>=static_cast<size_t>(lookback)?prev_high:b.close); scores.push_back(sc);
+        ScoreRow sc = score_bar(bars,i, i>=static_cast<size_t>(lookback)?prev_high:b.close, rsi_st.current_rsi, macd_st.histogram, run_config.strategy.rsi_filter.enabled, run_config.strategy.macd_filter.enabled); scores.push_back(sc);
 
         if(trade_open){
             std::string exit_reason; double exit_price=0;
@@ -256,6 +443,68 @@ int main(int argc, char** argv){
                     if(!(close_pos>=0.60)) reasons.push_back("CLOSE_POSITION_LT_0_60");
                     if(!(sc.setup_score>=run_config.strategy.min_setup_score)) reasons.push_back("SETUP_SCORE_LT_MIN_CONFIG");
                     if(use_trend_filter && i < htf_bullish.size() && !htf_bullish[i]) { reasons.push_back("HTF_EMA_TREND_NOT_BULLISH"); trend_filter_rejections++; }
+                    if(run_config.strategy.rsi_filter.enabled) {
+                        const std::string& cond = run_config.strategy.rsi_filter.condition;
+                        const double ob = run_config.strategy.rsi_filter.overbought;
+                        const double os = run_config.strategy.rsi_filter.oversold;
+                        bool rsi_ok = true;
+                        std::string rsi_reason;
+                        if (cond == "two_bottom_bull_two_top_bear" || cond == "two_bottom_bull") {
+                            if (!extrema_bt.has_two_bottom_bullish_rsi(i) && rsi_st.current_rsi > os + 10.0) {
+                                rsi_ok = false;
+                                rsi_reason = "RSI_NOT_TWO_BOTTOM_BULLISH";
+                            }
+                        } else if (cond == "momentum") {
+                            if (rsi_st.current_rsi < 50.0) {
+                                rsi_ok = false;
+                                rsi_reason = "RSI_MOMENTUM_BELOW_50";
+                            }
+                        } else if (cond == "mean_reversion") {
+                            if (rsi_st.current_rsi > os) {
+                                rsi_ok = false;
+                                rsi_reason = "RSI_NOT_OVERSOLD";
+                            }
+                        } else {
+                            if (rsi_st.current_rsi > ob) {
+                                rsi_ok = false;
+                                rsi_reason = "RSI_OVERBOUGHT";
+                            }
+                        }
+                        if (!rsi_ok) {
+                            reasons.push_back(rsi_reason);
+                            rsi_filter_rejections++;
+                        }
+                    }
+                    if(run_config.strategy.macd_filter.enabled) {
+                        const std::string& cond = run_config.strategy.macd_filter.condition;
+                        bool macd_ok = true;
+                        std::string macd_reason;
+                        if (cond == "two_top_bear_two_bottom_bull" || cond == "two_bottom_bull") {
+                            if (!extrema_bt.has_two_bottom_bullish_macd(i) && !(macd_st.histogram > macd_st.prev_histogram && macd_st.prev_histogram < 0.0)) {
+                                macd_ok = false;
+                                macd_reason = "MACD_NOT_TWO_BOTTOM_BULLISH";
+                            }
+                        } else if (cond == "signal_crossover") {
+                            if (macd_st.macd_line < macd_st.signal_line) {
+                                macd_ok = false;
+                                macd_reason = "MACD_LINE_BELOW_SIGNAL";
+                            }
+                        } else if (cond == "zero_line") {
+                            if (macd_st.macd_line < 0.0) {
+                                macd_ok = false;
+                                macd_reason = "MACD_BELOW_ZERO_LINE";
+                            }
+                        } else {
+                            if (macd_st.histogram <= 0.0) {
+                                macd_ok = false;
+                                macd_reason = "MACD_HISTOGRAM_NOT_POSITIVE";
+                            }
+                        }
+                        if (!macd_ok) {
+                            reasons.push_back(macd_reason);
+                            macd_filter_rejections++;
+                        }
+                    }
                     if(!(b.liquidity_score>=0.60)) reasons.push_back("LIQUIDITY_LT_0_60");
                     if(!(vol_ratio>=1.20)) reasons.push_back("VOLUME_RATIO_LT_1_20");
                     if(!(b.spread_pct<=0.50)) reasons.push_back("SPREAD_GT_0_50");
@@ -337,6 +586,18 @@ int main(int argc, char** argv){
       <<"  \"trend_filter_higher_timeframe\": \""<<esc(run_config.strategy.trend_filter.higher_timeframe)<<"\",\n"
       <<"  \"trend_filter_fast_ema\": "<<run_config.strategy.trend_filter.fast_ema<<",\n"
       <<"  \"trend_filter_slow_ema\": "<<run_config.strategy.trend_filter.slow_ema<<",\n"
+      <<"  \"rsi_filter_enabled\": "<<(run_config.strategy.rsi_filter.enabled?"true":"false")<<",\n"
+      <<"  \"rsi_filter_rejections\": "<<rsi_filter_rejections<<",\n"
+      <<"  \"rsi_filter_period\": "<<run_config.strategy.rsi_filter.period<<",\n"
+      <<"  \"rsi_filter_overbought\": "<<run_config.strategy.rsi_filter.overbought<<",\n"
+      <<"  \"rsi_filter_oversold\": "<<run_config.strategy.rsi_filter.oversold<<",\n"
+      <<"  \"rsi_filter_condition\": \""<<esc(run_config.strategy.rsi_filter.condition)<<"\",\n"
+      <<"  \"macd_filter_enabled\": "<<(run_config.strategy.macd_filter.enabled?"true":"false")<<",\n"
+      <<"  \"macd_filter_rejections\": "<<macd_filter_rejections<<",\n"
+      <<"  \"macd_filter_fast_period\": "<<run_config.strategy.macd_filter.fast_period<<",\n"
+      <<"  \"macd_filter_slow_period\": "<<run_config.strategy.macd_filter.slow_period<<",\n"
+      <<"  \"macd_filter_signal_period\": "<<run_config.strategy.macd_filter.signal_period<<",\n"
+      <<"  \"macd_filter_condition\": \""<<esc(run_config.strategy.macd_filter.condition)<<"\",\n"
       <<"  \"total_trades\": "<<trades.size()<<",\n"
       <<"  \"wins\": "<<wins<<",\n"
       <<"  \"losses\": "<<losses<<",\n"

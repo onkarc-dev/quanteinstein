@@ -28,6 +28,20 @@ class TrendFilterConfig(BaseModel):
     fast_ema: int = 20
     slow_ema: int = 50
 
+class RsiFilterConfig(BaseModel):
+    enabled: bool = False
+    period: int = 14
+    overbought: float = 70.0
+    oversold: float = 30.0
+    condition: str = "filter_extremes"
+
+class MacdFilterConfig(BaseModel):
+    enabled: bool = False
+    fast_period: int = 12
+    slow_period: int = 26
+    signal_period: int = 9
+    condition: str = "histogram_momentum"
+
 class TradeManagementConfig(BaseModel):
     breakeven_stop: bool = True
     partial_tp_pct: float = 50.0
@@ -59,6 +73,8 @@ class StrategyRules(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     reentry: ReentryConfig = Field(default_factory=ReentryConfig)
     trend_filter: TrendFilterConfig = Field(default_factory=TrendFilterConfig)
+    rsi_filter: RsiFilterConfig = Field(default_factory=RsiFilterConfig)
+    macd_filter: MacdFilterConfig = Field(default_factory=MacdFilterConfig)
     trade_management: TradeManagementConfig = Field(default_factory=TradeManagementConfig)
     execution_friction: ExecutionFrictionConfig = Field(default_factory=ExecutionFrictionConfig)
     timing_filter: TimingFilterConfig = Field(default_factory=TimingFilterConfig)

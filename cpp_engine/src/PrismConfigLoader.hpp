@@ -47,6 +47,13 @@ inline bool get_bool(const std::string& json, const std::string& key, bool fallb
     return fallback;
 }
 
+inline std::string get_object(const std::string& json, const std::string& key) {
+    const std::regex rgx("\\\"" + key + "\\\"\\s*:\\s*\\{([^\\}]*)\\}");
+    std::smatch m;
+    if (std::regex_search(json, m, rgx)) return m[1].str();
+    return "";
+}
+
 inline std::vector<std::string> get_string_array(const std::string& json, const std::string& key, const std::vector<std::string>& fallback) {
     const std::regex rgx("\\\"" + key + "\\\"\\s*:\\s*\\[([^\\]]*)\\]");
     std::smatch m;
@@ -103,6 +110,34 @@ inline PrismConfig load(const std::string& path) {
     c.strategy.trend_filter.higher_timeframe_seconds = get_int(json, "higher_timeframe_seconds", c.strategy.trend_filter.higher_timeframe_seconds);
     c.strategy.trend_filter.fast_ema = get_int(json, "fast_ema", c.strategy.trend_filter.fast_ema);
     c.strategy.trend_filter.slow_ema = get_int(json, "slow_ema", c.strategy.trend_filter.slow_ema);
+
+    const std::string rsi_obj = get_object(json, "rsi_filter");
+    if (!rsi_obj.empty()) {
+        c.strategy.rsi_filter.enabled = get_bool(rsi_obj, "enabled", c.strategy.rsi_filter.enabled);
+        c.strategy.rsi_filter.period = get_int(rsi_obj, "period", c.strategy.rsi_filter.period);
+        c.strategy.rsi_filter.overbought = get_double(rsi_obj, "overbought", c.strategy.rsi_filter.overbought);
+        c.strategy.rsi_filter.oversold = get_double(rsi_obj, "oversold", c.strategy.rsi_filter.oversold);
+        c.strategy.rsi_filter.condition = get_string(rsi_obj, "condition", c.strategy.rsi_filter.condition);
+    }
+    c.strategy.rsi_filter.enabled = get_bool(json, "rsi_enabled", c.strategy.rsi_filter.enabled);
+    c.strategy.rsi_filter.period = get_int(json, "rsi_period", c.strategy.rsi_filter.period);
+    c.strategy.rsi_filter.overbought = get_double(json, "rsi_overbought", c.strategy.rsi_filter.overbought);
+    c.strategy.rsi_filter.oversold = get_double(json, "rsi_oversold", c.strategy.rsi_filter.oversold);
+    c.strategy.rsi_filter.condition = get_string(json, "rsi_condition", c.strategy.rsi_filter.condition);
+
+    const std::string macd_obj = get_object(json, "macd_filter");
+    if (!macd_obj.empty()) {
+        c.strategy.macd_filter.enabled = get_bool(macd_obj, "enabled", c.strategy.macd_filter.enabled);
+        c.strategy.macd_filter.fast_period = get_int(macd_obj, "fast_period", c.strategy.macd_filter.fast_period);
+        c.strategy.macd_filter.slow_period = get_int(macd_obj, "slow_period", c.strategy.macd_filter.slow_period);
+        c.strategy.macd_filter.signal_period = get_int(macd_obj, "signal_period", c.strategy.macd_filter.signal_period);
+        c.strategy.macd_filter.condition = get_string(macd_obj, "condition", c.strategy.macd_filter.condition);
+    }
+    c.strategy.macd_filter.enabled = get_bool(json, "macd_enabled", c.strategy.macd_filter.enabled);
+    c.strategy.macd_filter.fast_period = get_int(json, "macd_fast_period", c.strategy.macd_filter.fast_period);
+    c.strategy.macd_filter.slow_period = get_int(json, "macd_slow_period", c.strategy.macd_filter.slow_period);
+    c.strategy.macd_filter.signal_period = get_int(json, "macd_signal_period", c.strategy.macd_filter.signal_period);
+    c.strategy.macd_filter.condition = get_string(json, "macd_condition", c.strategy.macd_filter.condition);
 
     c.strategy.trade_management.breakeven_stop = get_bool(json, "breakeven_stop", c.strategy.trade_management.breakeven_stop);
     c.strategy.trade_management.partial_tp_pct = get_double(json, "partial_tp_pct", c.strategy.trade_management.partial_tp_pct);

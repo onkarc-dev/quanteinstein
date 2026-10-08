@@ -30,6 +30,18 @@ type Cfg = {
   trendTimeframe: string;
   trendFastEma: number;
   trendSlowEma: number;
+  // RSI Momentum & Two-Top/Two-Bottom Divergence Engine
+  rsiFilter: "enabled" | "disabled";
+  rsiPeriod: number;
+  rsiOverbought: number;
+  rsiOversold: number;
+  rsiCondition: "two_bottom_bull_two_top_bear" | "filter_extremes" | "momentum" | "mean_reversion";
+  // MACD Trend & Two-Top/Two-Bottom Reversal Engine
+  macdFilter: "enabled" | "disabled";
+  macdFastPeriod: number;
+  macdSlowPeriod: number;
+  macdSignalPeriod: number;
+  macdCondition: "two_top_bear_two_bottom_bull" | "histogram_momentum" | "signal_crossover" | "zero_line";
   // Trade Management & Exits
   breakevenStop: boolean;
   partialTpPct: number;
@@ -198,6 +210,18 @@ export default function StrategyBuilderPage() {
     trendTimeframe: "5m",
     trendFastEma: 20,
     trendSlowEma: 50,
+    // RSI Momentum & Two-Top/Two-Bottom Divergence Engine
+    rsiFilter: "disabled",
+    rsiPeriod: 14,
+    rsiOverbought: 70,
+    rsiOversold: 30,
+    rsiCondition: "two_bottom_bull_two_top_bear",
+    // MACD Trend & Two-Top/Two-Bottom Reversal Engine
+    macdFilter: "disabled",
+    macdFastPeriod: 12,
+    macdSlowPeriod: 26,
+    macdSignalPeriod: 9,
+    macdCondition: "two_top_bear_two_bottom_bull",
     // Trade Management
     breakevenStop: true,
     partialTpPct: 50,
@@ -356,6 +380,20 @@ export default function StrategyBuilderPage() {
           higher_timeframe_seconds: timeframeToSeconds(cfg.trendTimeframe),
           fast_ema: cfg.trendFastEma,
           slow_ema: cfg.trendSlowEma,
+        },
+        rsi_filter: {
+          enabled: cfg.rsiFilter === "enabled",
+          period: cfg.rsiPeriod,
+          overbought: cfg.rsiOverbought,
+          oversold: cfg.rsiOversold,
+          condition: cfg.rsiCondition,
+        },
+        macd_filter: {
+          enabled: cfg.macdFilter === "enabled",
+          fast_period: cfg.macdFastPeriod,
+          slow_period: cfg.macdSlowPeriod,
+          signal_period: cfg.macdSignalPeriod,
+          condition: cfg.macdCondition,
         },
         trade_management: {
           breakeven_stop: cfg.breakevenStop,
@@ -1059,7 +1097,259 @@ export default function StrategyBuilderPage() {
             </div>
           </div>
 
-          {/* ─── Section 6: 200+ Cryptocurrency Market Basket Selector (Transfer Box) ─── */}
+          {/* ─── Section 6: RSI Momentum & Two-Top / Two-Bottom Divergence Engine ─── */}
+          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>📊</span>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                    Relative Strength Index (RSI) &amp; Divergence Guard
+                  </h2>
+                </div>
+                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
+                  Ultra-low latency recursive Wilder&apos;s smoothing with systematic two-bottom bullish divergence and two-top bearish divergence filters.
+                </p>
+              </div>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 20,
+                background: cfg.rsiFilter === "enabled" ? "rgba(56, 189, 248, 0.15)" : "rgba(100, 116, 139, 0.15)",
+                border: cfg.rsiFilter === "enabled" ? "1px solid rgba(56, 189, 248, 0.35)" : "1px solid rgba(100, 116, 139, 0.25)",
+                color: cfg.rsiFilter === "enabled" ? "#38bdf8" : "#94a3b8",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.rsiFilter === "enabled" ? "#38bdf8" : "#94a3b8" }} />
+                {cfg.rsiFilter === "enabled" ? "RSI Filter Active (O(1) Streaming)" : "RSI Filter Inactive"}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
+              <label style={labelStyle}>
+                RSI Guard Status
+                <select
+                  style={inputStyle}
+                  value={cfg.rsiFilter}
+                  onChange={(e) => upd("rsiFilter", e.target.value as "enabled" | "disabled")}
+                >
+                  <option value="disabled">Disabled (Trade All Setups)</option>
+                  <option value="enabled">Enabled (Enforce RSI Filter Guard)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Zero-latency recursive smoothing</span>
+              </label>
+
+              <label style={labelStyle}>
+                Systematic RSI Condition
+                <select
+                  style={inputStyle}
+                  value={cfg.rsiCondition}
+                  disabled={cfg.rsiFilter !== "enabled"}
+                  onChange={(e) => upd("rsiCondition", e.target.value as any)}
+                >
+                  <option value="two_bottom_bull_two_top_bear">Two-Bottom Bullish &amp; Two-Top Bearish Divergence</option>
+                  <option value="filter_extremes">Filter Extremes (Block Overbought &gt; {cfg.rsiOverbought})</option>
+                  <option value="momentum">Momentum Regime (Require RSI &gt; 50 Centerline)</option>
+                  <option value="mean_reversion">Mean Reversion (Buy Oversold Dip &lt;= {cfg.rsiOversold})</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Rule applied for entry validation</span>
+              </label>
+
+              <label style={labelStyle}>
+                RSI Period
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="2"
+                  max="100"
+                  step="1"
+                  value={cfg.rsiPeriod}
+                  disabled={cfg.rsiFilter !== "enabled"}
+                  onChange={(e) => upd("rsiPeriod", Math.max(2, +e.target.value))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Standard lookback (default 14)</span>
+              </label>
+
+              <label style={labelStyle}>
+                Overbought Boundary
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="50"
+                  max="95"
+                  step="1"
+                  value={cfg.rsiOverbought}
+                  disabled={cfg.rsiFilter !== "enabled"}
+                  onChange={(e) => upd("rsiOverbought", Math.max(50, Math.min(95, +e.target.value)))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Bearish ceiling (typically 70 or 80)</span>
+              </label>
+
+              <label style={labelStyle}>
+                Oversold Boundary
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="5"
+                  max="50"
+                  step="1"
+                  value={cfg.rsiOversold}
+                  disabled={cfg.rsiFilter !== "enabled"}
+                  onChange={(e) => upd("rsiOversold", Math.max(5, Math.min(50, +e.target.value)))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Bullish floor (typically 30 or 20)</span>
+              </label>
+            </div>
+
+            <div style={{
+              marginTop: 12,
+              padding: "10px 14px",
+              borderRadius: 10,
+              background: "rgba(15, 23, 42, 0.6)",
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+              color: "#94a3b8",
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10
+            }}>
+              <span style={{ color: "#38bdf8", fontSize: 14 }}>💡</span>
+              <span>
+                <strong>Systematic Divergence Execution:</strong> Two-Bottom Bullish confirms when price forms equal/lower bottoms while RSI forms a higher momentum trough. Two-Top Bearish detects exhausted tops to reject buying at cyclical peaks without latency spikes.
+              </span>
+            </div>
+          </div>
+
+          {/* ─── Section 7: MACD Trend & Two-Top / Two-Bottom Reversal Engine ─── */}
+          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>🌊</span>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                    MACD Trend &amp; Reversal Engine
+                  </h2>
+                </div>
+                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
+                  Zero-allocation dual exponential smoothing with two-top bearish roll-over and two-bottom bullish momentum curling.
+                </p>
+              </div>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                borderRadius: 20,
+                background: cfg.macdFilter === "enabled" ? "rgba(168, 85, 247, 0.15)" : "rgba(100, 116, 139, 0.15)",
+                border: cfg.macdFilter === "enabled" ? "1px solid rgba(168, 85, 247, 0.35)" : "1px solid rgba(100, 116, 139, 0.25)",
+                color: cfg.macdFilter === "enabled" ? "#c084fc" : "#94a3b8",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.macdFilter === "enabled" ? "#c084fc" : "#94a3b8" }} />
+                {cfg.macdFilter === "enabled" ? "MACD Engine Active (O(1) Streaming)" : "MACD Engine Inactive"}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
+              <label style={labelStyle}>
+                MACD Guard Status
+                <select
+                  style={inputStyle}
+                  value={cfg.macdFilter}
+                  onChange={(e) => upd("macdFilter", e.target.value as "enabled" | "disabled")}
+                >
+                  <option value="disabled">Disabled (Evaluate All Setups)</option>
+                  <option value="enabled">Enabled (Enforce MACD Systematic Rule)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Zero-allocation EMA registers</span>
+              </label>
+
+              <label style={labelStyle}>
+                Systematic MACD Condition
+                <select
+                  style={inputStyle}
+                  value={cfg.macdCondition}
+                  disabled={cfg.macdFilter !== "enabled"}
+                  onChange={(e) => upd("macdCondition", e.target.value as any)}
+                >
+                  <option value="two_top_bear_two_bottom_bull">Two-Top Bearish &amp; Two-Bottom Bullish Reversal (Divergence / Curl)</option>
+                  <option value="histogram_momentum">Histogram Momentum (Histogram &gt; 0 Expanding)</option>
+                  <option value="signal_crossover">Signal Line Crossover (MACD Line &gt; Signal Line)</option>
+                  <option value="zero_line">Zero-Line Centerline Regime (MACD Line &gt; 0)</option>
+                </select>
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Systematic momentum validation</span>
+              </label>
+
+              <label style={labelStyle}>
+                Fast EMA Period
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="1"
+                  max="50"
+                  step="1"
+                  value={cfg.macdFastPeriod}
+                  disabled={cfg.macdFilter !== "enabled"}
+                  onChange={(e) => upd("macdFastPeriod", Math.max(1, +e.target.value))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Lead momentum (default 12)</span>
+              </label>
+
+              <label style={labelStyle}>
+                Slow EMA Period
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="2"
+                  max="100"
+                  step="1"
+                  value={cfg.macdSlowPeriod}
+                  disabled={cfg.macdFilter !== "enabled"}
+                  onChange={(e) => upd("macdSlowPeriod", Math.max(cfg.macdFastPeriod + 1, +e.target.value))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Baseline EMA (default 26)</span>
+              </label>
+
+              <label style={labelStyle}>
+                Signal Smoothing Period
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="1"
+                  max="50"
+                  step="1"
+                  value={cfg.macdSignalPeriod}
+                  disabled={cfg.macdFilter !== "enabled"}
+                  onChange={(e) => upd("macdSignalPeriod", Math.max(1, +e.target.value))}
+                />
+                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Signal trigger EMA (default 9)</span>
+              </label>
+            </div>
+
+            <div style={{
+              marginTop: 12,
+              padding: "10px 14px",
+              borderRadius: 10,
+              background: "rgba(15, 23, 42, 0.6)",
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+              color: "#94a3b8",
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10
+            }}>
+              <span style={{ color: "#c084fc", fontSize: 14 }}>⚡</span>
+              <span>
+                <strong>Zero-Latency Spikes:</strong> MACD &amp; RSI are updated in $O(1)$ constant time on every bar via primitive streaming registers without rescanning arrays.
+              </span>
+            </div>
+          </div>
+
+          {/* ─── Section 8: 200+ Cryptocurrency Market Basket Selector (Transfer Box) ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
               <div>
@@ -1514,7 +1804,7 @@ export default function StrategyBuilderPage() {
             </div>
           </div>
 
-          {/* ─── Section 7: Historical Range & Execution ─── */}
+          {/* ─── Section 9: Historical Range & Execution ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>📅</span>
@@ -1738,6 +2028,18 @@ export default function StrategyBuilderPage() {
               {cfg.feePct}% taker fee · {cfg.slippagePct}% slippage · {cfg.tradingHours === "all_day" ? "24/7 Hours" : "Session Filtered"}
             </p>
           </div>
+
+          <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              RSI &amp; MACD Indicator Guard
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#38bdf8", marginTop: 6 }}>
+              {cfg.rsiFilter === "enabled" ? `RSI (${cfg.rsiPeriod})` : "RSI Off"} · {cfg.macdFilter === "enabled" ? `MACD (${cfg.macdFastPeriod}/${cfg.macdSlowPeriod})` : "MACD Off"}
+            </div>
+            <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
+              {cfg.rsiFilter === "enabled" ? (cfg.rsiCondition === "two_bottom_bull_two_top_bear" ? "Two-Bottom/Top Divergence" : cfg.rsiCondition) : "RSI inactive"} · {cfg.macdFilter === "enabled" ? (cfg.macdCondition === "two_top_bear_two_bottom_bull" ? "Two-Top/Bottom Reversal" : cfg.macdCondition) : "MACD inactive"}
+            </p>
+          </div>
         </div>
 
         {/* ─── Backtest Results Section ─── */}
@@ -1858,6 +2160,16 @@ function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: a
       "HTF EMA Trend Rejections",
       s.trend_filter_rejections ?? 0,
       "Setups blocked because higher-timeframe EMA was against bias.",
+    ],
+    [
+      "RSI Filter Rejections",
+      s.rsi_filter_rejections ?? 0,
+      "Setups blocked by RSI overbought/oversold boundaries or lack of two-bottom bullish divergence.",
+    ],
+    [
+      "MACD Filter Rejections",
+      s.macd_filter_rejections ?? 0,
+      "Setups blocked by negative MACD momentum or absence of two-bottom bullish curl.",
     ],
     ["Max Drawdown (R)", `${fmt(s.max_drawdown_in_R)} R`, "Worst peak-to-trough equity drawdown."],
     ["Average Holding Duration", `${fmt(s.average_holding_bars)} bars`, "Average bar duration per trade."],
@@ -2072,6 +2384,18 @@ function StrategyPreview({
       "HTF Trend Filter",
       s.trend_filter.use_trend_filter
         ? `${s.trend_filter.higher_timeframe} EMA${s.trend_filter.fast_ema} > EMA${s.trend_filter.slow_ema}`
+        : "Disabled",
+    ],
+    [
+      "RSI Momentum & Divergence",
+      s.rsi_filter?.enabled
+        ? `${s.rsi_filter.condition === "two_bottom_bull_two_top_bear" ? "Two-Bottom/Top Divergence" : s.rsi_filter.condition} (Period ${s.rsi_filter.period}, OB ${s.rsi_filter.overbought}, OS ${s.rsi_filter.oversold})`
+        : "Disabled",
+    ],
+    [
+      "MACD Trend & Reversal",
+      s.macd_filter?.enabled
+        ? `${s.macd_filter.condition === "two_top_bear_two_bottom_bull" ? "Two-Top/Bottom Reversal" : s.macd_filter.condition} (${s.macd_filter.fast_period}/${s.macd_filter.slow_period}/${s.macd_filter.signal_period})`
         : "Disabled",
     ],
   ];
