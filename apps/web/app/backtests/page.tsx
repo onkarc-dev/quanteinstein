@@ -28,7 +28,11 @@ function parseSymbols(j: any): string[] {
 }
 
 function displayStrategy(j: any) {
-  return j?.display_strategy_id || j?.user_strategy_id || j?.strategy_code || j?.strategy_id || 'PRISM_STRATEGY';
+  const candidate = j?.strategy_name || j?.display_strategy_id || j?.user_strategy_id || j?.name;
+  if (candidate && !/^[0-9a-fA-F-]{32,36}$/.test(String(candidate).trim())) {
+    return candidate;
+  }
+  return j?.strategy_code || 'PRISM_BREAKOUT_RETEST';
 }
 
 function formatDateTime(isoString: string) {
@@ -289,7 +293,7 @@ export default function Backtests() {
   }, [selected]);
 
   const deployStrategyId = useMemo(() => {
-    return selected?.display_strategy_id || selected?.user_strategy_id || selected?.strategy_id || 'PRISM';
+    return selected?.strategy_id || selected?.id || displayStrategy(selected);
   }, [selected]);
 
   return (
@@ -612,7 +616,7 @@ export default function Backtests() {
                                   </button>
 
                                   <Link
-                                    href={`/paper-trading?strategy_id=${encodeURIComponent(displayStrategy(j))}`}
+                                    href={`/paper-trading?strategy_id=${encodeURIComponent(j.strategy_id || j.id || displayStrategy(j))}`}
                                     style={{
                                       textDecoration: 'none',
                                       padding: '6px 10px',

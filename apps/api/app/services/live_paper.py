@@ -511,6 +511,39 @@ def _strategy_for_user(user_id: str, strategy_id: str = "") -> Dict[str, Any]:
                         return rd
                 except Exception:
                     pass
+            # 3. Match against jobs table (backtested strategies)
+            job_row = conn.execute(
+                f"SELECT id, strategy_id, output_dir, symbols_json, timeframe FROM jobs WHERE (id={p} OR strategy_id={p}) AND user_id={p} ORDER BY created_at DESC",
+                (target, target, user_id),
+            ).fetchone()
+            if job_row:
+                jd = row_to_dict(job_row)
+                out_dir = Path(jd.get("output_dir") or "")
+                cfg_file = out_dir / "strategy_config.json"
+                if cfg_file.exists():
+                    try:
+                        cf = json.loads(cfg_file.read_text(encoding="utf-8"))
+                        inner_cfg = cf.get("config") if isinstance(cf.get("config"), dict) else cf
+                        strat_name = (
+                            inner_cfg.get("name")
+                            or inner_cfg.get("user_strategy_id")
+                            or cf.get("name")
+                            or cf.get("user_strategy_id")
+                            or cf.get("strategy", {}).get("name")
+                            or "PRISM_BREAKOUT_RETEST"
+                        )
+                        return {
+                            "id": jd.get("strategy_id") or jd["id"],
+                            "user_id": user_id,
+                            "name": strat_name,
+                            "symbols_json": jd.get("symbols_json") or json.dumps(cf.get("symbols", [DEFAULT_SYMBOL])),
+                            "timeframe": jd.get("timeframe") or cf.get("timeframe", "1m"),
+                            "config_json": json.dumps(inner_cfg),
+                            "created_at": now(),
+                            "updated_at": now(),
+                        }
+                    except Exception:
+                        pass
     return _latest_strategy_for_user(user_id)
 
 

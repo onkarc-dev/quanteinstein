@@ -122,22 +122,54 @@ def list_strategies(user=Depends(current_user)):
             f"SELECT * FROM strategies WHERE user_id={p} ORDER BY created_at ASC",
             (user["id"],)
         ).fetchall()
-        tested_rows = conn.execute(
-            f"SELECT DISTINCT strategy_id FROM jobs WHERE user_id={p}",
+        job_rows = conn.execute(
+            f"SELECT id, strategy_id, symbols_json, timeframe, output_dir, created_at FROM jobs WHERE user_id={p} ORDER BY created_at DESC LIMIT 30",
             (user["id"],)
         ).fetchall()
-        tested_ids = {
-            (r[0] if isinstance(r, (list, tuple)) else r["strategy_id"])
-            for r in tested_rows
+
+    tested_ids = set()
+    job_map = {}
+    for jr in job_rows:
+        j_dict = dict(jr) if hasattr(jr, "keys") else {
+            "id": jr[0], "strategy_id": jr[1], "symbols_json": jr[2],
+            "timeframe": jr[3], "output_dir": jr[4], "created_at": jr[5]
         }
+        sid = j_dict.get("strategy_id")
+        jid = j_dict.get("id")
+        if sid:
+            tested_ids.add(sid)
+            job_map.setdefault(sid, j_dict)
+        if jid:
+            tested_ids.add(jid)
+            job_map.setdefault(jid, j_dict)
 
     name_counts: Dict[str, int] = {}
     items = []
+    known_strat_ids = set()
+
     for r in rows:
         d = dict(r)
-        d["symbols"] = json.loads(d.pop("symbols_json"))
-        d["config"] = json.loads(d.pop("config_json"))
-        raw_name = d.get("name") or d["config"].get("name") or d["config"].get("user_strategy_id") or "Strategy"
+        known_strat_ids.add(d["id"])
+        try:
+            d["symbols"] = json.loads(d.pop("symbols_json"))
+        except Exception:
+            d["symbols"] = ["BTCUSDT"]
+        try:
+            d["config"] = json.loads(d.pop("config_json"))
+        except Exception:
+            d["config"] = {}
+
+        raw_name = d.get("name")
+        if not raw_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(raw_name).strip()):
+            raw_name = (
+                d["config"].get("name")
+                or d["config"].get("user_strategy_id")
+                or d["config"].get("strategy", {}).get("name")
+                or "PRISM_BREAKOUT_RETEST"
+            )
+            if re.match(r'^[0-9a-fA-F-]{32,36}$', str(raw_name).strip()):
+                raw_name = "PRISM_BREAKOUT_RETEST"
+
         clean_base = _clean_base_name(raw_name)
         count = name_counts.get(clean_base, 0)
         display_name = clean_base if count == 0 else f"{clean_base} ({count})"
@@ -146,8 +178,70 @@ def list_strategies(user=Depends(current_user)):
         d["display_name"] = display_name
         d["name"] = display_name
         d["user_strategy_id"] = d["config"].get("user_strategy_id") or d["config"].get("strategy_id") or d["id"]
-        d["has_backtest"] = d["id"] in tested_ids or d.get("user_strategy_id") in tested_ids
+        d["has_backtest"] = (
+            d["id"] in tested_ids
+            or d.get("user_strategy_id") in tested_ids
+            or d.get("name") in tested_ids
+        )
+        if d["id"] in job_map:
+            d["backtest_job_id"] = job_map[d["id"]].get("id")
         items.append(d)
+
+    # Include backtested strategies from jobs that aren't already represented in strategies table
+    for jr in job_rows:
+        j_dict = dict(jr) if hasattr(jr, "keys") else {
+            "id": jr[0], "strategy_id": jr[1], "symbols_json": jr[2],
+            "timeframe": jr[3], "output_dir": jr[4], "created_at": jr[5]
+        }
+        strat_id = j_dict.get("strategy_id") or j_dict["id"]
+        if strat_id in known_strat_ids:
+            continue
+        known_strat_ids.add(strat_id)
+
+        strat_name = "PRISM_BREAKOUT_RETEST"
+        strat_cfg = {}
+        out_dir = Path(j_dict.get("output_dir") or "")
+        cfg_file = out_dir / "strategy_config.json"
+        if cfg_file.exists():
+            try:
+                cf = json.loads(cfg_file.read_text(encoding="utf-8"))
+                strat_cfg = cf.get("config", {}) if isinstance(cf.get("config"), dict) else cf
+                found_name = (
+                    strat_cfg.get("name")
+                    or strat_cfg.get("user_strategy_id")
+                    or cf.get("name")
+                    or cf.get("user_strategy_id")
+                    or cf.get("strategy", {}).get("name")
+                )
+                if found_name and not re.match(r'^[0-9a-fA-F-]{32,36}$', str(found_name).strip()):
+                    strat_name = found_name
+            except Exception:
+                pass
+
+        try:
+            syms = json.loads(j_dict.get("symbols_json") or "[]")
+        except Exception:
+            syms = ["BTCUSDT"]
+
+        clean_base = _clean_base_name(strat_name)
+        count = name_counts.get(clean_base, 0)
+        display_name = clean_base if count == 0 else f"{clean_base} ({count})"
+        name_counts[clean_base] = count + 1
+
+        items.append({
+            "id": strat_id,
+            "user_id": user["id"],
+            "name": display_name,
+            "display_name": display_name,
+            "user_strategy_id": strat_cfg.get("user_strategy_id") or strat_name,
+            "symbols": syms or ["BTCUSDT"],
+            "timeframe": j_dict.get("timeframe") or "1m",
+            "config": strat_cfg,
+            "has_backtest": True,
+            "backtest_job_id": j_dict["id"],
+            "created_at": j_dict.get("created_at") or now(),
+            "updated_at": j_dict.get("created_at") or now(),
+        })
 
     items.reverse()
     return items
@@ -169,11 +263,58 @@ def get_strategy(strategy_id: str, user=Depends(current_user)):
                         break
                 except Exception:
                     pass
+        if not r:
+            job_row = conn.execute(
+                f"SELECT * FROM jobs WHERE (id={p} OR strategy_id={p}) AND user_id={p} ORDER BY created_at DESC",
+                (strategy_id, strategy_id, user["id"])
+            ).fetchone()
+            if job_row:
+                jd = dict(job_row)
+                out_dir = Path(jd.get("output_dir") or "")
+                cfg_file = out_dir / "strategy_config.json"
+                strat_cfg = {}
+                strat_name = "PRISM_BREAKOUT_RETEST"
+                if cfg_file.exists():
+                    try:
+                        cf = json.loads(cfg_file.read_text(encoding="utf-8"))
+                        strat_cfg = cf.get("config", {}) if isinstance(cf.get("config"), dict) else cf
+                        found_name = (
+                            strat_cfg.get("name")
+                            or strat_cfg.get("user_strategy_id")
+                            or cf.get("name")
+                            or cf.get("user_strategy_id")
+                        )
+                        if found_name and not re.match(r'^[0-9a-fA-F-]{32,36}$', str(found_name).strip()):
+                            strat_name = found_name
+                    except Exception:
+                        pass
+                try:
+                    syms = json.loads(jd.get("symbols_json") or "[]")
+                except Exception:
+                    syms = ["BTCUSDT"]
+                return {
+                    "id": jd.get("strategy_id") or jd["id"],
+                    "strategy_id": jd.get("strategy_id") or jd["id"],
+                    "user_id": user["id"],
+                    "name": strat_name,
+                    "display_name": strat_name,
+                    "user_strategy_id": strat_cfg.get("user_strategy_id") or strat_name,
+                    "symbols": syms or ["BTCUSDT"],
+                    "timeframe": jd.get("timeframe") or "1m",
+                    "config": strat_cfg,
+                    "has_backtest": True,
+                    "backtest_job_id": jd["id"],
+                }
+
     if not r:
         raise HTTPException(status_code=404, detail="Strategy not found")
     d = dict(r)
     d["symbols"] = json.loads(d.pop("symbols_json"))
     d["config"] = json.loads(d.pop("config_json"))
+    raw_name = d.get("name")
+    if not raw_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(raw_name).strip()):
+        raw_name = d["config"].get("name") or d["config"].get("user_strategy_id") or "PRISM_BREAKOUT_RETEST"
+    d["name"] = raw_name
     d["user_strategy_id"] = d["config"].get("user_strategy_id") or d["config"].get("strategy_id") or d["id"]
-    d["display_name"] = d.get("name") or d["user_strategy_id"]
+    d["display_name"] = raw_name
     return d

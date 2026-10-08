@@ -145,6 +145,59 @@ class StrategyJobsApiTests(unittest.TestCase):
             self.assertEqual(job_status.status_code, 200)
             self.assertEqual(job_status.json()["symbols"], ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
 
+    def test_strategy_name_display_and_backtested_strategy_listing(self):
+        # 1. Create a strategy with custom name
+        custom_name = "ETH_MOMENTUM_SCALP"
+        create_res = self.client.post(
+            "/strategies",
+            json={
+                "name": custom_name,
+                "user_strategy_id": custom_name,
+                "symbols": ["ETHUSDT"],
+                "timeframe": "5m",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(create_res.status_code, 200)
+        strat_id = create_res.json()["id"]
+
+        # 2. Submit backtest with UUID strategy_id
+        fake_result = {
+            "job_id": "test-job-uuid-display",
+            "status": "completed",
+            "output_dir": str(Path(_tmp_dir.name) / "outputs" / "test-job-uuid-display"),
+            "summary": {"total_trades": 0},
+            "trade_count": 0,
+            "trades_available": True,
+        }
+        with patch("app.routes.jobs.run_engine_sync", return_value=fake_result):
+            submitted = self.client.post(
+                "/jobs/submit-backtest",
+                json={
+                    "strategy_id": strat_id,
+                    "symbols": ["ETHUSDT"],
+                    "timeframe": "5m",
+                    "config": {"name": custom_name, "user_strategy_id": custom_name},
+                },
+                headers=self.headers,
+            )
+        self.assertEqual(submitted.status_code, 200)
+
+        # 3. List jobs and verify human-readable strategy name is returned
+        jobs_res = self.client.get("/jobs/", headers=self.headers)
+        self.assertEqual(jobs_res.status_code, 200)
+        jobs = jobs_res.json().get("jobs", [])
+        matched_job = next((j for j in jobs if j.get("strategy_id") == strat_id), None)
+        self.assertIsNotNone(matched_job)
+        self.assertEqual(matched_job.get("strategy_name"), custom_name)
+        self.assertEqual(matched_job.get("display_strategy_id"), custom_name)
+
+        # 4. List strategies and verify backtested flag is True
+        strat_list = self.client.get("/strategies", headers=self.headers).json()
+        strat_item = next((s for s in strat_list if s.get("id") == strat_id), None)
+        self.assertIsNotNone(strat_item)
+        self.assertTrue(strat_item.get("has_backtest"))
+
     def test_strategy_requires_auth(self):
         resp = self.client.get("/strategies")
         self.assertIn(resp.status_code, {401, 403})

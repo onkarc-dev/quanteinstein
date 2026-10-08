@@ -235,10 +235,10 @@ def list_jobs(user=Depends(current_user)):
         _clean_stale_jobs_for_user(conn, user["id"])
         rows = conn.execute(
             f"""
-            SELECT j.*, s.config_json AS strategy_config_json
+            SELECT j.*, s.name AS strategy_name, s.config_json AS strategy_config_json
             FROM jobs j
             LEFT JOIN strategies s
-              ON s.id = j.strategy_id
+              ON (s.id = j.strategy_id OR s.name = j.strategy_id)
              AND s.user_id = j.user_id
             WHERE j.user_id={p}
             ORDER BY j.created_at DESC
@@ -249,14 +249,51 @@ def list_jobs(user=Depends(current_user)):
         jobs = []
         for row in rows:
             j = row_to_dict(row)
+            strategy_name = j.get("strategy_name")
             strategy_config_json = j.pop("strategy_config_json", None)
-            j["display_strategy_id"] = j.get("strategy_id")
+            parsed_cfg = None
             if strategy_config_json:
                 try:
-                    cfg = json.loads(strategy_config_json)
-                    j["display_strategy_id"] = cfg.get("user_strategy_id") or cfg.get("strategy_id") or j.get("strategy_id")
+                    parsed_cfg = json.loads(strategy_config_json)
                 except Exception:
-                    pass
+                    parsed_cfg = None
+
+            # Resolve readable display name
+            display_name = strategy_name
+            if (not display_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(display_name).strip())) and parsed_cfg:
+                display_name = parsed_cfg.get("name") or parsed_cfg.get("user_strategy_id")
+
+            # Check output_dir / strategy_config.json as fallback
+            is_uuid = bool(re.match(r'^[0-9a-fA-F-]{32,36}$', str(display_name or j.get("strategy_id") or "").strip()))
+            out_dir_str = j.get("output_dir")
+            if out_dir_str:
+                cfg_file = Path(out_dir_str) / "strategy_config.json"
+                if cfg_file.exists():
+                    try:
+                        cf = read_json(cfg_file)
+                        inner_cfg = cf.get("config", {}) if isinstance(cf.get("config"), dict) else cf
+                        if not parsed_cfg:
+                            parsed_cfg = inner_cfg
+                        if not display_name or is_uuid:
+                            found_name = (
+                                inner_cfg.get("name")
+                                or inner_cfg.get("user_strategy_id")
+                                or cf.get("name")
+                                or cf.get("user_strategy_id")
+                                or cf.get("strategy", {}).get("name")
+                            )
+                            if found_name and not re.match(r'^[0-9a-fA-F-]{32,36}$', str(found_name).strip()):
+                                display_name = found_name
+                    except Exception:
+                        pass
+
+            if not display_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(display_name).strip()):
+                display_name = "PRISM_BREAKOUT_RETEST"
+
+            j["strategy_name"] = display_name
+            j["display_strategy_id"] = display_name
+            if parsed_cfg:
+                j["config"] = parsed_cfg
             jobs.append(j)
     return {"jobs": jobs}
 
@@ -270,13 +307,32 @@ def get_job(job_id: str, user=Depends(current_user)):
             f"SELECT * FROM jobs WHERE id={p} AND user_id={p}",
             (job_id, user["id"])
         ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Job not found")
-    data = row_to_dict(row)
+        if not row:
+            raise HTTPException(status_code=404, detail="Job not found")
+        data = row_to_dict(row)
+        s_row = conn.execute(
+            f"SELECT name, config_json FROM strategies WHERE (id={p} OR name={p}) AND user_id={p}",
+            (data.get("strategy_id"), data.get("strategy_id"), user["id"])
+        ).fetchone()
+
+    strat_name = None
+    parsed_cfg = None
+    if s_row:
+        sd = row_to_dict(s_row)
+        strat_name = sd.get("name")
+        if sd.get("config_json"):
+            try:
+                parsed_cfg = json.loads(sd["config_json"])
+                if not strat_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(strat_name).strip()):
+                    strat_name = parsed_cfg.get("name") or parsed_cfg.get("user_strategy_id")
+            except Exception:
+                pass
+
     try:
         data["symbols"] = json.loads(data.get("symbols_json") or "[]")
     except Exception:
         data["symbols"] = []
+
     out_dir_str = data.get("output_dir")
     if out_dir_str:
         out_path = Path(out_dir_str)
@@ -291,12 +347,33 @@ def get_job(job_id: str, user=Depends(current_user)):
             if cfg_path.exists():
                 try:
                     cfg = read_json(cfg_path)
+                    inner_cfg = cfg.get("config", {}) if isinstance(cfg.get("config"), dict) else cfg
+                    if not parsed_cfg:
+                        parsed_cfg = inner_cfg
+                    if not strat_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(strat_name).strip()):
+                        found_name = (
+                            inner_cfg.get("name")
+                            or inner_cfg.get("user_strategy_id")
+                            or cfg.get("name")
+                            or cfg.get("user_strategy_id")
+                            or cfg.get("strategy", {}).get("name")
+                        )
+                        if found_name and not re.match(r'^[0-9a-fA-F-]{32,36}$', str(found_name).strip()):
+                            strat_name = found_name
                     if "market_data" in cfg:
                         data["market_data"] = cfg["market_data"]
                     if "real_binance_data_used" in cfg:
                         data["real_binance_data_used"] = cfg["real_binance_data_used"]
                 except Exception:
                     pass
+
+    if not strat_name or re.match(r'^[0-9a-fA-F-]{32,36}$', str(strat_name).strip()):
+        strat_name = "PRISM_BREAKOUT_RETEST"
+
+    data["strategy_name"] = strat_name
+    data["display_strategy_id"] = strat_name
+    if parsed_cfg:
+        data["config"] = parsed_cfg
     return data
 
 

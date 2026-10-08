@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { api, formatApiError } from "../../lib/api";
 import {
   appendTelemetryCandle,
@@ -22,6 +23,8 @@ type StrategyRow = {
   created_at?: string;
   user_strategy_id?: string;
   has_backtest?: boolean;
+  job_id?: string;
+  backtest_job_id?: string;
 };
 
 function timeframeToSeconds(tf: string): number {
@@ -484,8 +487,86 @@ export default function PaperTradingPage() {
 
   async function loadStrategies() {
     try {
-      const rows: any = await api("/strategies");
-      const list = Array.isArray(rows) ? rows : [];
+      const [stratRes, jobsRes]: any = await Promise.allSettled([
+        api("/strategies"),
+        api("/jobs"),
+      ]).then(([s, j]) => [
+        s.status === "fulfilled" && Array.isArray(s.value) ? s.value : [],
+        j.status === "fulfilled" && Array.isArray(j.value?.jobs) ? j.value.jobs : [],
+      ]);
+
+      const list: StrategyRow[] = [];
+      const knownIds = new Set<string>();
+
+      // 1. Add saved strategies from /strategies
+      for (const s of stratRes) {
+        knownIds.add(s.id);
+        const hasJob = jobsRes.some(
+          (j: any) =>
+            j.strategy_id === s.id ||
+            j.strategy_name === s.name ||
+            j.display_strategy_id === s.name ||
+            j.strategy_name === s.display_name
+        );
+        list.push({
+          ...s,
+          has_backtest: s.has_backtest || hasJob,
+        });
+      }
+
+      // 2. Add backtested strategies from /jobs that aren't already listed
+      for (const j of jobsRes) {
+        const stratId = j.strategy_id || j.id;
+        if (!knownIds.has(stratId)) {
+          knownIds.add(stratId);
+          let syms: string[] = [];
+          try {
+            syms = JSON.parse(j.symbols_json || "[]");
+          } catch {
+            syms = ["BTCUSDT"];
+          }
+          const sName =
+            j.strategy_name ||
+            j.display_strategy_id ||
+            (j.name && !/^[0-9a-fA-F-]{32,36}$/.test(j.name) ? j.name : `Strategy (Run ${j.id.slice(0, 8)})`);
+          list.push({
+            id: stratId,
+            name: sName,
+            display_name: sName,
+            user_strategy_id: j.display_strategy_id || sName,
+            timeframe: j.timeframe || "1m",
+            symbols: syms.length ? syms : ["BTCUSDT"],
+            config: j.config || {},
+            has_backtest: true,
+            job_id: j.id,
+            created_at: j.created_at,
+          });
+        }
+      }
+
+      // 3. Fallback default strategy if list is completely empty
+      if (list.length === 0) {
+        list.push({
+          id: "default_prism",
+          name: "PRISM_BREAKOUT_RETEST",
+          display_name: "PRISM Breakout Retest (Default)",
+          user_strategy_id: "PRISM_BREAKOUT_RETEST",
+          timeframe: "1m",
+          symbols: ["BTCUSDT"],
+          has_backtest: false,
+          config: {
+            name: "PRISM_BREAKOUT_RETEST",
+            direction: "both",
+            breakout_lookback: 20,
+            min_setup_score: 6.5,
+            risk: { risk_per_trade_pct: 1.0, max_daily_loss_pct: 3.0, max_open_positions: 5 },
+            targets: { target1_R: 1.5, target2_R: 2.5 },
+            trade_management: { breakeven_stop: true },
+            execution_friction: { fee_pct: 0.04, slippage_pct: 0.01 },
+          },
+        });
+      }
+
       setStrategies(list);
 
       let matched: any = null;
@@ -497,6 +578,9 @@ export default function PaperTradingPage() {
           matched = list.find(
             (s) =>
               s.id === q ||
+              s.job_id === q ||
+              (s.id && s.id.startsWith(q)) ||
+              (s.job_id && s.job_id.startsWith(q)) ||
               s.user_strategy_id === q ||
               s.config?.user_strategy_id === q ||
               s.display_name === q ||
@@ -510,7 +594,7 @@ export default function PaperTradingPage() {
         if (matched.symbols?.length) setSelectedSymbols(matched.symbols);
         if (matched.symbols?.[0]) setChartSymbol(matched.symbols[0]);
         setMessage(
-          `Loaded strategy "${matched.display_name || matched.name || matched.user_strategy_id || matched.id}" from Strategy Builder.`
+          `Loaded strategy "${matched.display_name || matched.name || matched.user_strategy_id || matched.id}". Live engine parameters updated.`
         );
       } else if (!selectedStrategyId && list.length) {
         setSelectedStrategyId(list[0].id);
@@ -519,7 +603,7 @@ export default function PaperTradingPage() {
       }
     } catch (err) {
       setMessage(
-        `Could not load Strategy Builder configs: ${formatApiError(err)}`,
+        `Could not load strategies: ${formatApiError(err)}`,
       );
       setStrategies([]);
     }
@@ -721,11 +805,12 @@ export default function PaperTradingPage() {
     "-";
 
   const activeStrategyName =
-    status.selected_strategy_name ||
-    liveConfig.name ||
+    (status.status === "running" || status.status === "starting" ? status.selected_strategy_name : null) ||
     selectedStrategy?.display_name ||
     selectedStrategy?.name ||
     selectedRules.name ||
+    status.selected_strategy_name ||
+    liveConfig.name ||
     "PRISM";
 
   const activeStrategyId =
@@ -1110,19 +1195,25 @@ export default function PaperTradingPage() {
 
       <section style={{ ...panelStyle, marginBottom: 16 }}>
         <h2 style={h2Style}>Live Strategy Builder Config</h2>
+        {/* Dedicated Strategy Deployment Selector Bar */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns:
-              "minmax(240px, 1fr) repeat(auto-fit, minmax(110px, 1fr))",
-            gap: 10,
-            alignItems: "end",
+            background: "rgba(15, 23, 42, 0.7)",
+            border: "1px solid #243044",
+            borderRadius: 8,
+            padding: "12px 14px",
+            marginBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
           }}
         >
-          <label
-            style={{ display: "grid", gap: 6, color: "#94a3b8", fontSize: 13 }}
-          >
-            Strategy used by live C++ engine
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 340px" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", whiteSpace: "nowrap" }}>
+              🎯 Deploy Strategy:
+            </span>
             <select
               value={selectedStrategyId}
               onChange={(e) => {
@@ -1134,24 +1225,112 @@ export default function PaperTradingPage() {
                   if (st.symbols[0]) setChartSymbol(st.symbols[0]);
                 }
                 if (st) {
-                  setMessage(`Selected "${st.display_name || st.name || st.user_strategy_id}". Live engine parameters updated.`);
+                  setMessage(`Selected "${st.display_name || st.name || st.user_strategy_id}". Live parameters and symbols updated.`);
                 }
               }}
               disabled={!canStart}
-              style={inputStyle}
+              style={{
+                ...inputStyle,
+                flex: 1,
+                minWidth: 260,
+                fontSize: 13,
+                fontWeight: 600,
+                background: "#0f172a",
+                borderColor: "#334155",
+                color: "#f8fafc",
+                padding: "8px 12px",
+              }}
             >
-              {strategies.length === 0 ? (
-                <option value="">Default QuantOS Strategy</option>
-              ) : (
-                strategies.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.display_name || s.name || s.user_strategy_id || "Strategy"} {s.has_backtest ? "· Tested" : "· Saved"} ({s.timeframe || "1m"})
-                  </option>
-                ))
+              {strategies.filter((s) => s.has_backtest).length > 0 && (
+                <optgroup label="── 📊 Backtested Strategies (Verified Edge) ──">
+                  {strategies
+                    .filter((s) => s.has_backtest)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        ✓ {s.display_name || s.name || s.user_strategy_id || "Strategy"} · Tested ({s.timeframe || "1m"}{s.symbols?.length ? ` · ${s.symbols.slice(0, 2).join(", ")}${s.symbols.length > 2 ? "..." : ""}` : ""})
+                      </option>
+                    ))}
+                </optgroup>
               )}
+              {strategies.filter((s) => !s.has_backtest && s.id !== "default_prism").length > 0 && (
+                <optgroup label="── 📁 Saved Strategies ──">
+                  {strategies
+                    .filter((s) => !s.has_backtest && s.id !== "default_prism")
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        📁 {s.display_name || s.name || s.user_strategy_id || "Strategy"} · Saved ({s.timeframe || "1m"})
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+              <optgroup label="── ⚡ Default QuantOS Engines ──">
+                <option value="default_prism">
+                  ⚡ PRISM Breakout Retest (Default QuantOS) · 1m (BTCUSDT)
+                </option>
+              </optgroup>
             </select>
-          </label>
-          <Mini label="Active" value={activeStrategyName} />
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {selectedStrategy?.has_backtest ? (
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#34d399",
+                  background: "rgba(52, 211, 153, 0.12)",
+                  border: "1px solid rgba(52, 211, 153, 0.3)",
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                <span>✓</span> Backtested &amp; Verified
+              </span>
+            ) : (
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#94a3b8",
+                  background: "rgba(30, 41, 59, 0.6)",
+                  border: "1px solid #334155",
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                }}
+              >
+                📁 Saved Config
+              </span>
+            )}
+            <Link
+              href="/backtests"
+              style={{
+                fontSize: 12,
+                color: "#38bdf8",
+                textDecoration: "none",
+                background: "rgba(56, 189, 248, 0.1)",
+                padding: "4px 8px",
+                borderRadius: 4,
+                border: "1px solid rgba(56, 189, 248, 0.2)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              📊 Backtests →
+            </Link>
+          </div>
+        </div>
+
+        {/* Live Config Summary Badges */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <Mini label="Active Strategy" value={activeStrategyName} />
           <Mini label="Direction" value={cfgDirection === "both" ? "Long & Short" : cfgDirection === "long_only" ? "Long Only" : "Short Only"} />
           <Mini label="Exits / BE" value={cfgBreakeven} />
           <Mini label="Daily Loss Limit" value={cfgDailyLoss} />
