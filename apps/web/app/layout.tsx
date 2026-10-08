@@ -5,8 +5,8 @@ import AuthProvider from '../components/AuthProvider';
 import ProfileMenu from '../components/ProfileMenu';
 
 export const metadata: Metadata = {
-  title: 'Quanteinstein — Trade Daily, Trade Safely',
-  description: 'Quanteinstein paper trading platform. Trade Daily, Trade Safely. Not financial advice.',
+  title: 'Quanteinstein — Trade Daily, Trade Smartly',
+  description: 'Quanteinstein paper trading platform. Trade Daily, Trade Smartly. Not financial advice.',
 };
 
 const NAV = [

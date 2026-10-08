@@ -58,7 +58,7 @@ export default function Home() {
         <div style={s.badge}>BTC-only · Paper trading · Research analytics</div>
         <h1 style={s.h1}>Quanteinstein</h1>
         <p style={s.sub}>
-          <b style={{ color: '#6366f1' }}>Trade Daily, Trade Safely</b><br />
+          <b style={{ color: '#6366f1' }}>Trade Daily, Trade Smartly</b><br />
           Quanteinstein helps traders behave like disciplined quants using backtesting,
           paper trading, risk analytics, journaling, and Quant Coach insights.<br />
           <b style={{ color: '#6366f1' }}>No real money. No broker. Pure systematic discipline.</b>
@@ -108,7 +108,7 @@ export default function Home() {
       <div style={s.footer}>
         Quanteinstein is research/analytics software only. Paper trading and backtests are hypothetical and do not represent real trading results.
         Not financial advice. No real-money execution. No broker integration.<br />
-        © Quanteinstein — Trade Daily, Trade Safely
+        © Quanteinstein — Trade Daily, Trade Smartly
       </div>
     </div>
   );
