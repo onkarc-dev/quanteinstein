@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, getUser, getToken } from "../../lib/api";
 import BacktestAnalytics from "../../components/BacktestAnalytics";
@@ -184,6 +184,81 @@ const labelStyle = {
   textTransform: "uppercase" as const,
 };
 
+function buildPayload(c: Cfg) {
+  return {
+    user_strategy_id: c.strategyCode.trim() || "PRISM",
+    name: c.strategyCode.trim() || "PRISM",
+    symbols: c.symbols.map((s) => s.toUpperCase()),
+    timeframe: c.timeframe,
+    bar_seconds: timeframeToSeconds(c.timeframe),
+    strategy: {
+      name: c.strategyCode.trim() || "PRISM",
+      direction: c.direction,
+      breakout_lookback: c.lookback,
+      retest_tolerance_pct: Number(c.retest),
+      min_setup_score: c.score,
+      max_retest_bars: c.maxRetest,
+      signal_cooldown_bars: c.cooldown,
+      ttl_bars: c.ttl,
+      min_close_position: 0.5,
+      stop_loss: {
+        type: c.stop,
+        atr_multiplier: c.atr,
+        structure_buffer_pct: 0.25,
+      },
+      targets: { target1_R: c.t1, target2_R: c.t2 },
+      risk: {
+        risk_per_trade_pct: c.risk,
+        max_daily_loss_pct: c.maxDailyLoss,
+        max_open_positions: c.maxOpen,
+        max_symbol_notional: 10000,
+      },
+      reentry: {
+        enabled: c.reentry === "enabled",
+        max_reentries: c.maxReentries,
+        cooldown_bars: c.reentryCooldown,
+      },
+      trend_filter: {
+        use_trend_filter: c.trendFilter === "enabled",
+        higher_timeframe: c.trendTimeframe,
+        higher_timeframe_seconds: timeframeToSeconds(c.trendTimeframe),
+        fast_ema: c.trendFastEma,
+        slow_ema: c.trendSlowEma,
+      },
+      rsi_filter: {
+        enabled: c.rsiFilter === "enabled",
+        period: c.rsiPeriod,
+        overbought: c.rsiOverbought,
+        oversold: c.rsiOversold,
+        condition: c.rsiCondition,
+      },
+      macd_filter: {
+        enabled: c.macdFilter === "enabled",
+        fast_period: c.macdFastPeriod,
+        slow_period: c.macdSlowPeriod,
+        signal_period: c.macdSignalPeriod,
+        condition: c.macdCondition,
+      },
+      trade_management: {
+        breakeven_stop: c.breakevenStop,
+        partial_tp_pct: c.partialTpPct,
+        trailing_stop: c.trailingStop,
+        trailing_atr_multiplier: c.trailingAtrMultiplier,
+      },
+      execution_friction: {
+        fee_pct: c.feePct,
+        slippage_pct: c.slippagePct,
+      },
+      timing_filter: {
+        trading_hours: c.tradingHours,
+        skip_weekends: c.skipWeekends,
+        rvol_filter: c.rvolFilter,
+        rvol_threshold: c.rvolThreshold,
+      },
+    },
+  };
+}
+
 export default function StrategyBuilderPage() {
   const [cfg, setCfg] = useState<Cfg>({
     strategyCode: "PRISM_BREAKOUT_RETEST",
@@ -252,6 +327,7 @@ export default function StrategyBuilderPage() {
   const [runProgress, setRunProgress] = useState("");
   const [startDate, setStartDate] = useState(startIso());
   const [endDate, setEndDate] = useState(yesterdayIso());
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const heavyLowTimeframe = cfg.symbols.length > 3 && timeframeToSeconds(cfg.timeframe) <= 5;
 
@@ -340,81 +416,16 @@ export default function StrategyBuilderPage() {
     return cfg.symbols.filter((s) => s.includes(q));
   }, [cfg.symbols, selectedSearchQuery]);
 
-  const payload = useMemo(
-    () => ({
-      user_strategy_id: cfg.strategyCode.trim() || "PRISM",
-      name: cfg.strategyCode.trim() || "PRISM",
-      symbols: cfg.symbols.map((s) => s.toUpperCase()),
-      timeframe: cfg.timeframe,
-      bar_seconds: timeframeToSeconds(cfg.timeframe),
-      strategy: {
-        name: cfg.strategyCode.trim() || "PRISM",
-        direction: cfg.direction,
-        breakout_lookback: cfg.lookback,
-        retest_tolerance_pct: Number(cfg.retest),
-        min_setup_score: cfg.score,
-        max_retest_bars: cfg.maxRetest,
-        signal_cooldown_bars: cfg.cooldown,
-        ttl_bars: cfg.ttl,
-        min_close_position: 0.5,
-        stop_loss: {
-          type: cfg.stop,
-          atr_multiplier: cfg.atr,
-          structure_buffer_pct: 0.25,
-        },
-        targets: { target1_R: cfg.t1, target2_R: cfg.t2 },
-        risk: {
-          risk_per_trade_pct: cfg.risk,
-          max_daily_loss_pct: cfg.maxDailyLoss,
-          max_open_positions: cfg.maxOpen,
-          max_symbol_notional: 10000,
-        },
-        reentry: {
-          enabled: cfg.reentry === "enabled",
-          max_reentries: cfg.maxReentries,
-          cooldown_bars: cfg.reentryCooldown,
-        },
-        trend_filter: {
-          use_trend_filter: cfg.trendFilter === "enabled",
-          higher_timeframe: cfg.trendTimeframe,
-          higher_timeframe_seconds: timeframeToSeconds(cfg.trendTimeframe),
-          fast_ema: cfg.trendFastEma,
-          slow_ema: cfg.trendSlowEma,
-        },
-        rsi_filter: {
-          enabled: cfg.rsiFilter === "enabled",
-          period: cfg.rsiPeriod,
-          overbought: cfg.rsiOverbought,
-          oversold: cfg.rsiOversold,
-          condition: cfg.rsiCondition,
-        },
-        macd_filter: {
-          enabled: cfg.macdFilter === "enabled",
-          fast_period: cfg.macdFastPeriod,
-          slow_period: cfg.macdSlowPeriod,
-          signal_period: cfg.macdSignalPeriod,
-          condition: cfg.macdCondition,
-        },
-        trade_management: {
-          breakeven_stop: cfg.breakevenStop,
-          partial_tp_pct: cfg.partialTpPct,
-          trailing_stop: cfg.trailingStop,
-          trailing_atr_multiplier: cfg.trailingAtrMultiplier,
-        },
-        execution_friction: {
-          fee_pct: cfg.feePct,
-          slippage_pct: cfg.slippagePct,
-        },
-        timing_filter: {
-          trading_hours: cfg.tradingHours,
-          skip_weekends: cfg.skipWeekends,
-          rvol_filter: cfg.rvolFilter,
-          rvol_threshold: cfg.rvolThreshold,
-        },
-      },
-    }),
-    [cfg],
-  );
+  const payload = useMemo(() => buildPayload(cfg), [cfg]);
+
+  // Smoothly scroll to Backtest Execution Performance as soon as backtest finishes
+  useEffect(() => {
+    if (job?.status === "completed") {
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    }
+  }, [job?.id, job?.status]);
 
   async function save() {
     try {
@@ -435,14 +446,14 @@ export default function StrategyBuilderPage() {
     }
   }
 
-  async function poll(jobId: string) {
+  async function poll(jobId: string, symbolCount?: number) {
     const maxPolls = 80;
+    const total = symbolCount ?? payload.symbols.length;
     for (let i = 0; i < maxPolls; i++) {
       try {
         const j: any = await api(`/jobs/${jobId}`);
         setPollJob(j);
         setJob(j);
-        const total = payload.symbols.length;
         const currentStatus = (j.status || "processing").toUpperCase();
         if (total > 1) {
           setRunProgress(
@@ -451,7 +462,14 @@ export default function StrategyBuilderPage() {
         } else {
           setRunProgress(`Processing market data and generating backtest report [${currentStatus}]...`);
         }
-        if (j.status === "completed" || j.status === "failed") return j;
+        if (j.status === "completed" || j.status === "failed") {
+          if (j.status === "completed") {
+            setTimeout(() => {
+              resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+          }
+          return j;
+        }
       } catch (err: any) {
         console.warn(`[poll] Transient polling issue on attempt ${i + 1}:`, err);
       }
@@ -461,7 +479,7 @@ export default function StrategyBuilderPage() {
     return null;
   }
 
-  async function run() {
+  async function run(overrideCfg?: Cfg) {
     if (running) return;
     const token = getToken();
     if (!token) {
@@ -469,7 +487,9 @@ export default function StrategyBuilderPage() {
       setRunProgress("Authentication required.");
       return;
     }
-    const selectedSymbols = payload.symbols;
+    const activeCfg = overrideCfg || cfg;
+    const activePayload = overrideCfg ? buildPayload(overrideCfg) : payload;
+    const selectedSymbols = activePayload.symbols;
     try {
       setRunning(true);
       setRunProgress(
@@ -485,22 +505,22 @@ export default function StrategyBuilderPage() {
         try {
           const s: any = await api("/strategies", {
             method: "POST",
-            body: JSON.stringify(payload),
+            body: JSON.stringify(activePayload),
           });
           sid = s.strategy_id || s.id;
-          const sName = s.display_name || s.name || payload.name;
+          const sName = s.display_name || s.name || activePayload.name;
           setStrategyId(sid);
           setStrategyDisplayName(sName);
         } catch (stratErr: any) {
           try {
             const strats: any = await api("/strategies");
             const found = Array.isArray(strats) && strats.find((st: any) =>
-              st.user_strategy_id === payload.user_strategy_id || st.name === payload.name || st.display_name === payload.name
+              st.user_strategy_id === activePayload.user_strategy_id || st.name === activePayload.name || st.display_name === activePayload.name
             );
             if (found) {
               sid = found.id;
               setStrategyId(sid);
-              setStrategyDisplayName(found.display_name || found.name || payload.name);
+              setStrategyDisplayName(found.display_name || found.name || activePayload.name);
             }
           } catch (_) {}
         }
@@ -510,24 +530,30 @@ export default function StrategyBuilderPage() {
         body: JSON.stringify({
           strategy_id: sid || "PRISM_BREAKOUT_RETEST",
           symbols: selectedSymbols,
-          timeframe: payload.timeframe,
+          timeframe: activePayload.timeframe,
           start_date: startDate || undefined,
           end_date: endDate || undefined,
-          config: payload,
+          config: activePayload,
         }),
       });
       setJob(r);
       if (r.status === "completed") {
         setMsg("Backtest completed successfully.");
-        setRunProgress("Backtest completed.");
+        setRunProgress("Backtest completed successfully.");
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 120);
       } else if ((r.status === "queued" || r.status === "running") && r.job_id) {
         setMsg(`Backtest queued (Job ID: ${r.job_id.slice(0, 8)}...). Polling results...`);
-        const finalJob = await poll(r.job_id);
+        const finalJob = await poll(r.job_id, selectedSymbols.length);
         if (finalJob) {
           setJob(finalJob);
           if (finalJob.status === "completed") {
             setMsg("Backtest completed successfully.");
             setRunProgress("Backtest completed successfully.");
+            setTimeout(() => {
+              resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
           } else if (finalJob.status === "failed") {
             setMsg("Backtest failed: " + (finalJob.error || finalJob.error_message || "Unknown error"));
           }
@@ -1882,7 +1908,7 @@ export default function StrategyBuilderPage() {
             <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={run}
+                onClick={() => run()}
                 disabled={running}
                 style={{
                   background: running
@@ -1956,16 +1982,45 @@ export default function StrategyBuilderPage() {
             {runProgress && (
               <div
                 style={{
-                  background: "rgba(59, 130, 246, 0.1)",
-                  border: "1px solid rgba(59, 130, 246, 0.3)",
+                  background: job?.status === "completed" ? "rgba(16, 185, 129, 0.12)" : "rgba(59, 130, 246, 0.1)",
+                  border: job?.status === "completed" ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid rgba(59, 130, 246, 0.3)",
                   borderRadius: 10,
                   padding: "12px 18px",
                   marginTop: 16,
-                  color: "#93c5fd",
+                  color: job?.status === "completed" ? "#6ee7b7" : "#93c5fd",
                   fontSize: 13,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 12,
                 }}
               >
-                <strong>Execution Status:</strong> {runProgress}
+                <div>
+                  <strong>Execution Status:</strong> {runProgress}
+                </div>
+                {job?.status === "completed" && (
+                  <button
+                    type="button"
+                    onClick={() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    style={{
+                      background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                      color: "#ffffff",
+                      border: "none",
+                      padding: "6px 14px",
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      boxShadow: "0 2px 10px rgba(16, 185, 129, 0.35)",
+                    }}
+                  >
+                    <span>↓</span> View Results &amp; Quant Coach Auto-Tuner
+                  </button>
+                )}
               </div>
             )}
 
@@ -2043,7 +2098,19 @@ export default function StrategyBuilderPage() {
         </div>
 
         {/* ─── Backtest Results Section ─── */}
-        {job && <BacktestResult job={job} pollJob={pollJob} deployTargetId={deployTargetId} />}
+        <div ref={resultsRef} id="backtest-results" style={{ scrollMarginTop: 80 }}>
+          {job && (
+            <BacktestResult
+              job={job}
+              pollJob={pollJob}
+              deployTargetId={deployTargetId}
+              cfg={cfg}
+              setCfg={setCfg}
+              onReRun={run}
+              running={running}
+            />
+          )}
+        </div>
 
         {/* ─── Strategy Configuration Summary ─── */}
         <StrategyPreview payload={payload} strategyId={strategyId} strategyDisplayName={strategyDisplayName} />
@@ -2084,7 +2151,692 @@ function Kpi({
 const td = { borderBottom: "1px solid rgba(255, 255, 255, 0.05)", padding: "10px 12px", color: "#cbd5e1", fontSize: 13 };
 const tdStrong = { ...td, color: "#94a3b8", fontWeight: 700, width: 260 };
 
-function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: any; deployTargetId: string }) {
+type CoachSuggestion = {
+  id: string;
+  category: "Setup Quality" | "Trend Confluence" | "Payoff & Targets" | "Risk Buffer" | "Retest Precision" | "Momentum Filters";
+  title: string;
+  paramKey: string;
+  currentDisplay: string;
+  recommendedDisplay: string;
+  explanation: string;
+  impactBadge: string;
+  applyPatch: Partial<Cfg>;
+};
+
+function QuantCoachOptimizer({
+  job,
+  cfg,
+  setCfg,
+  onReRun,
+  running,
+}: {
+  job: any;
+  cfg: Cfg;
+  setCfg: React.Dispatch<React.SetStateAction<Cfg>>;
+  onReRun: (overrideCfg?: Cfg) => void;
+  running: boolean;
+}) {
+  const [previousCfg, setPreviousCfg] = useState<Cfg | null>(null);
+  const [appliedNotice, setAppliedNotice] = useState<string | null>(null);
+  const [appliedPatchesSummary, setAppliedPatchesSummary] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [initializedSelection, setInitializedSelection] = useState(false);
+
+  const s = job.summary || {};
+  const pr = s.performance_and_robustness || job.performance_and_robustness || {};
+  const fric = pr.friction || {};
+  const netR = fric.net_R_after_friction != null ? Number(fric.net_R_after_friction) : Number(s.gross_R ?? 0);
+  const grossR = Number(s.gross_R ?? 0);
+  const totalTrades = Number(s.total_trades ?? (job.trades?.length ?? 0));
+  const winRate = Number(s.win_rate ?? 0);
+  const wins = Number(s.wins ?? 0);
+  const losses = Number(s.losses ?? 0);
+  const rejections = Number(s.rejections ?? 0);
+
+  // Generate intelligent suggestions based on backtest metrics and current configuration
+  const suggestions = useMemo<CoachSuggestion[]>(() => {
+    const list: CoachSuggestion[] = [];
+
+    // 1. Setup Score Starvation Check
+    if (cfg.score > 7.0 && (totalTrades < 15 || rejections > 5 || grossR <= 0)) {
+      list.push({
+        id: "score",
+        category: "Setup Quality",
+        title: "Lower Minimum Setup Score to 7.0",
+        paramKey: "score",
+        currentDisplay: `${cfg.score} / 10`,
+        recommendedDisplay: "7.0 / 10",
+        explanation: `Threshold of ${cfg.score}/10 is overly strict, causing setup starvation (${totalTrades} trades executed across ${s.bars_processed ?? "all"} bars). Lowering to 7.0 unlocks authentic institutional breakout confirmations.`,
+        impactBadge: "+Trade Frequency & Setup Flow",
+        applyPatch: { score: 7.0 },
+      });
+    }
+
+    // 2. Higher Timeframe Confluence (Fix Inversion & Noise)
+    if (cfg.timeframe === "15m") {
+      if (cfg.trendTimeframe !== "1h" || cfg.trendFilter !== "enabled") {
+        list.push({
+          id: "trend_timeframe",
+          category: "Trend Confluence",
+          title: "Align Higher Timeframe Filter to 1h EMA",
+          paramKey: "trendTimeframe",
+          currentDisplay: cfg.trendFilter === "enabled" ? `${cfg.trendTimeframe} EMA` : "Filter Disabled",
+          recommendedDisplay: "1h EMA20 > EMA50",
+          explanation: `Trend filter was ${cfg.trendFilter === "enabled" ? `set to ${cfg.trendTimeframe} (inverted/too low for 15m execution)` : "disabled"}. Aligning to 1h EMA20/50 guarantees trade bias matches the macro trend.`,
+          impactBadge: "Macro Confluence",
+          applyPatch: {
+            trendFilter: "enabled",
+            trendTimeframe: "1h",
+            trendFastEma: 20,
+            trendSlowEma: 50,
+          },
+        });
+      }
+    } else if (cfg.timeframe === "1m") {
+      if (cfg.trendTimeframe !== "5m" || cfg.trendFilter !== "enabled") {
+        list.push({
+          id: "trend_timeframe",
+          category: "Trend Confluence",
+          title: "Align Higher Timeframe Filter to 5m EMA",
+          paramKey: "trendTimeframe",
+          currentDisplay: `${cfg.trendTimeframe} EMA`,
+          recommendedDisplay: "5m EMA20 > EMA50",
+          explanation: "Aligning 1m execution with 5m trend filter avoids counter-trend whipsaws.",
+          impactBadge: "Macro Confluence",
+          applyPatch: {
+            trendFilter: "enabled",
+            trendTimeframe: "5m",
+            trendFastEma: 20,
+            trendSlowEma: 50,
+          },
+        });
+      }
+    } else if (cfg.timeframe === "5m") {
+      if (cfg.trendTimeframe !== "15m" || cfg.trendFilter !== "enabled") {
+        list.push({
+          id: "trend_timeframe",
+          category: "Trend Confluence",
+          title: "Align Higher Timeframe Filter to 15m EMA",
+          paramKey: "trendTimeframe",
+          currentDisplay: `${cfg.trendTimeframe} EMA`,
+          recommendedDisplay: "15m EMA20 > EMA50",
+          explanation: "Aligning 5m execution with 15m trend filter guarantees confluence.",
+          impactBadge: "Macro Confluence",
+          applyPatch: {
+            trendFilter: "enabled",
+            trendTimeframe: "15m",
+            trendFastEma: 20,
+            trendSlowEma: 50,
+          },
+        });
+      }
+    }
+
+    // 3. Asymmetric Payoff Architecture (Targets)
+    if (cfg.t1 < 1.5 || cfg.t2 < 2.5 || netR <= 0) {
+      list.push({
+        id: "targets",
+        category: "Payoff & Targets",
+        title: "Widen Profit Targets to 1.5R (T1) and 2.5R (T2)",
+        paramKey: "targets",
+        currentDisplay: `T1 ${cfg.t1}R · T2 ${cfg.t2}R`,
+        recommendedDisplay: "T1 1.5R · T2 2.5R",
+        explanation: `Tight targets (${cfg.t1}R / ${cfg.t2}R) don't provide sufficient asymmetry to overcome exchange taker fees (0.08% round-trip) and slippage. Targeting 1.5R (50% close + breakeven lock) and 2.5R runner achieves positive expectancy.`,
+        impactBadge: "+Asymmetric Expectancy",
+        applyPatch: {
+          t1: 1.5,
+          t2: 2.5,
+          partialTpPct: 50,
+          breakevenStop: true,
+        },
+      });
+    }
+
+    // 4. Stop-Loss ATR Volatility Buffer
+    if (cfg.atr <= 0.85 || (losses > wins && cfg.atr < 1.25)) {
+      list.push({
+        id: "atr",
+        category: "Risk Buffer",
+        title: "Calibrate ATR Stop Multiplier to 1.25",
+        paramKey: "atr",
+        currentDisplay: `ATR × ${cfg.atr}`,
+        recommendedDisplay: "ATR × 1.25 (or Structure)",
+        explanation: `Current ${cfg.atr} ATR stop is too tight for Binance crypto volatility and gets clipped on normal candle wicks. 1.25 ATR gives the trade necessary breathing room without increasing total equity risk.`,
+        impactBadge: "Avoid Premature Stop-Outs",
+        applyPatch: {
+          atr: 1.25,
+          stop: "atr_or_structure",
+        },
+      });
+    }
+
+    // 5. Retest Tolerance Calibration
+    if (cfg.retest <= 0.001) {
+      list.push({
+        id: "retest",
+        category: "Retest Precision",
+        title: "Broaden Retest Tolerance to 0.25% (0.0025)",
+        paramKey: "retest",
+        currentDisplay: `${(cfg.retest * 100).toFixed(2)}%`,
+        recommendedDisplay: "0.25%",
+        explanation: "A strict 0.1% tolerance misses valid pullback retests due to order book spreads on crypto pairs. 0.25% captures high-probability fills.",
+        impactBadge: "+Retest Entry Capture Rate",
+        applyPatch: { retest: 0.0025 },
+      });
+    }
+
+    // 6. RSI Momentum & Two-Bottom/Top Divergence Engine
+    if (cfg.rsiFilter !== "enabled" || cfg.rsiCondition !== "two_bottom_bull_two_top_bear") {
+      list.push({
+        id: "rsi_filter",
+        category: "Momentum Filters",
+        title: "Activate RSI Two-Bottom/Top Divergence Engine",
+        paramKey: "rsiFilter",
+        currentDisplay: cfg.rsiFilter === "enabled" ? "Active" : "Disabled",
+        recommendedDisplay: "Two-Bottom Bull / Two-Top Bear (14)",
+        explanation: "Enforces dual-bottom swing divergence for longs and dual-top swing divergence for shorts, eliminating low-conviction counter-trend fakeouts.",
+        impactBadge: "Divergence Confirmation",
+        applyPatch: {
+          rsiFilter: "enabled",
+          rsiPeriod: 14,
+          rsiOverbought: 70,
+          rsiOversold: 30,
+          rsiCondition: "two_bottom_bull_two_top_bear",
+        },
+      });
+    }
+
+    // 7. MACD Momentum & Two-Top/Bottom Reversal Engine
+    if (cfg.macdFilter !== "enabled" || cfg.macdCondition !== "two_top_bear_two_bottom_bull") {
+      list.push({
+        id: "macd_filter",
+        category: "Momentum Filters",
+        title: "Activate MACD Two-Top/Bottom Reversal Engine",
+        paramKey: "macdFilter",
+        currentDisplay: cfg.macdFilter === "enabled" ? "Active" : "Disabled",
+        recommendedDisplay: "Two-Top Bear / Two-Bottom Bull (12/26/9)",
+        explanation: "Confirms MACD dual swing inflection and histogram expansion before entering, protecting capital during sideways chop.",
+        impactBadge: "Momentum Acceleration Guard",
+        applyPatch: {
+          macdFilter: "enabled",
+          macdFastPeriod: 12,
+          macdSlowPeriod: 26,
+          macdSignalPeriod: 9,
+          macdCondition: "two_top_bear_two_bottom_bull",
+        },
+      });
+    }
+
+    // 8. Breakeven Stop Check
+    if (!cfg.breakevenStop) {
+      list.push({
+        id: "breakeven",
+        category: "Risk Buffer",
+        title: "Enable Breakeven Stop on Target 1 Fill",
+        paramKey: "breakevenStop",
+        currentDisplay: "Disabled",
+        recommendedDisplay: "Enabled (Move Stop to Entry)",
+        explanation: "Automatically moves stop to entry price once Target 1 is hit, securing a risk-free runner position for Target 2.",
+        impactBadge: "Tail Risk Elimination",
+        applyPatch: { breakevenStop: true },
+      });
+    }
+
+    // 9. Circuit Breaker Discipline
+    if (cfg.maxDailyLoss > 3) {
+      list.push({
+        id: "daily_loss",
+        category: "Risk Buffer",
+        title: "Cap Daily Loss Limit at 3.0%",
+        paramKey: "maxDailyLoss",
+        currentDisplay: `${cfg.maxDailyLoss}%`,
+        recommendedDisplay: "3.0% Halt",
+        explanation: "Strict institutional circuit breaker stops automated trading for the day if drawdown reaches 3%, protecting portfolio equity.",
+        impactBadge: "Circuit Breaker Protection",
+        applyPatch: { maxDailyLoss: 3 },
+      });
+    }
+
+    return list;
+  }, [cfg, totalTrades, rejections, grossR, netR, losses, wins, s.bars_processed]);
+
+  // Default all suggestions to selected
+  useEffect(() => {
+    if (!initializedSelection && suggestions.length > 0) {
+      setSelectedIds(new Set(suggestions.map((s) => s.id)));
+      setInitializedSelection(true);
+    }
+  }, [suggestions, initializedSelection]);
+
+  function toggleSuggestion(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelectedIds(new Set(suggestions.map((s) => s.id)));
+  }
+
+  function applySuggestions(andReRun = false) {
+    const toApply = suggestions.filter((s) => selectedIds.has(s.id));
+    if (!toApply.length) return;
+
+    let patch: Partial<Cfg> = {};
+    const summaryPills: string[] = [];
+    for (const item of toApply) {
+      patch = { ...patch, ...item.applyPatch };
+      summaryPills.push(`${item.title.split(" to ")[0].replace("Lower ", "").replace("Align ", "").replace("Widen ", "").replace("Calibrate ", "").replace("Broaden ", "").replace("Activate ", "").replace("Enable ", "").replace("Cap ", "")}: ${item.recommendedDisplay}`);
+    }
+
+    setPreviousCfg({ ...cfg });
+    const updatedCfg: Cfg = { ...cfg, ...patch };
+    setCfg(updatedCfg);
+    setAppliedNotice(`Applied ${toApply.length} Quant Coach optimization${toApply.length > 1 ? "s" : ""} to your Strategy Builder configuration!`);
+    setAppliedPatchesSummary(summaryPills);
+
+    if (andReRun) {
+      onReRun(updatedCfg);
+    }
+  }
+
+  function revert() {
+    if (previousCfg) {
+      setCfg(previousCfg);
+      setPreviousCfg(null);
+      setAppliedNotice("Reverted strategy configuration to previous parameters.");
+      setAppliedPatchesSummary([]);
+    }
+  }
+
+  const isLoss = netR <= 0;
+  const selectedCount = suggestions.filter((s) => selectedIds.has(s.id)).length;
+
+  const diagnosticSummary = totalTrades === 0
+    ? `Zero trades executed across ${s.bars_processed ?? 14400} bars. Strict setup score (${cfg.score}/10) and inverted higher-timeframe trend checks starved candidate setups.`
+    : totalTrades < 5
+      ? `Severe Sample Starvation & Negative Drift: Only ${totalTrades} trades executed (${fmt(netR)} R Net). Strict setup score (${cfg.score}/10) and inverted ${cfg.trendTimeframe} HTF filter on 15m execution starved valid setups, while tight ${cfg.atr} ATR stops caused premature invalidation.`
+      : isLoss
+        ? `Negative Expectancy Drag (${fmt(netR)} R Net · ${pct(winRate)} Win Rate): Trades are taking too much friction relative to payoff. Widen targets to 1.5R/2.5R, give stops breathing room with 1.25 ATR, and align HTF trend confluence.`
+        : `Alpha Edge Verified (+${fmt(netR)} R Net · ${totalTrades} Trades · ${pct(winRate)} Win Rate): Quant Coach recommends fine-tuning trailing breakeven stops and divergence momentum filters to optimize drawdown recovery.`;
+
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(10, 15, 30, 0.98) 100%)",
+        border: "1px solid rgba(99, 102, 241, 0.35)",
+        borderRadius: 16,
+        padding: "24px 26px",
+        marginBottom: 26,
+        boxShadow: "0 10px 30px -10px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08)",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg, #6366f1 0%, #38bdf8 50%, #10b981 100%)" }} />
+
+      {/* Header Row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14, marginBottom: 16 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span style={{
+              background: "linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(56, 189, 248, 0.25) 100%)",
+              color: "#818cf8",
+              border: "1px solid rgba(99, 102, 241, 0.4)",
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: "0.08em",
+              padding: "3px 10px",
+              borderRadius: 6,
+              textTransform: "uppercase",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#4ade80", boxShadow: "0 0 6px #4ade80" }} />
+              AI Quant Coach · Strategy Auto-Tuner
+            </span>
+            <span style={{ fontSize: 12, color: "#64748b" }}>•</span>
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>
+              1-Click Edge Repair &amp; Optimization
+            </span>
+          </div>
+          <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
+            Institutional Parameter Optimization Device
+          </h3>
+          <p style={{ margin: "5px 0 0", color: "#94a3b8", fontSize: 12, lineHeight: 1.5 }}>
+            Diagnoses execution bottlenecks, resolves setup starvation, corrects inverted trend filters, and widens asymmetric payoff. Apply all suggestions with one click and re-test immediately.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => applySuggestions(true)}
+            disabled={running || suggestions.length === 0}
+            style={{
+              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: 8,
+              padding: "9px 18px",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: running || suggestions.length === 0 ? "not-allowed" : "pointer",
+              boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {running ? "Running..." : "⚡ Apply & Re-Run Backtest Now"}
+          </button>
+        </div>
+      </div>
+
+      {/* Diagnostic Alert Box */}
+      <div
+        style={{
+          background: isLoss ? "rgba(239, 68, 68, 0.08)" : "rgba(16, 185, 129, 0.08)",
+          border: isLoss ? "1px solid rgba(239, 68, 68, 0.25)" : "1px solid rgba(16, 185, 129, 0.25)",
+          borderRadius: 10,
+          padding: "12px 16px",
+          marginBottom: 18,
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+        }}
+      >
+        <span style={{ fontSize: 20 }}>{isLoss ? "⚠️" : "🎯"}</span>
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, color: isLoss ? "#fca5a5" : "#6ee7b7", marginBottom: 3 }}>
+            {isLoss
+              ? `Bottlenecks Detected (${fmt(netR)} R Net · ${totalTrades} Trades · ${pct(winRate)} Win Rate)`
+              : `Alpha Edge Detected (+${fmt(netR)} R Net · ${totalTrades} Trades · ${pct(winRate)} Win Rate)`}
+          </div>
+          <div style={{ color: "#cbd5e1" }}>
+            {diagnosticSummary}
+          </div>
+        </div>
+      </div>
+
+      {/* Suggestion Cards Grid */}
+      {suggestions.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "20px 0" }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🏆</div>
+          <strong style={{ fontSize: 14, color: "#4ade80" }}>
+            All Quant Coach Institutional Parameters Are Fully Applied!
+          </strong>
+          <p style={{ color: "#94a3b8", fontSize: 12, margin: "6px auto 16px", maxWidth: 500 }}>
+            Strategy is configured with optimal setup scores, 1h macro trend confluence, calibrated ATR stops, and asymmetric targets.
+          </p>
+          <button
+            type="button"
+            onClick={() => onReRun()}
+            disabled={running}
+            style={{
+              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 22px",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: running ? "not-allowed" : "pointer",
+            }}
+          >
+            {running ? "Running Backtest..." : "▶ Re-Run Backtest with Current Parameters"}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 18 }}>
+          {suggestions.map((item) => {
+            const isSelected = selectedIds.has(item.id);
+            return (
+              <div
+                key={item.id}
+                onClick={() => toggleSuggestion(item.id)}
+                style={{
+                  background: isSelected ? "rgba(30, 41, 59, 0.7)" : "rgba(15, 23, 42, 0.5)",
+                  border: isSelected ? "1px solid rgba(99, 102, 241, 0.5)" : "1px solid rgba(255, 255, 255, 0.06)",
+                  borderRadius: 12,
+                  padding: "14px 16px",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{
+                      background: "rgba(99, 102, 241, 0.15)",
+                      color: "#a5b4fc",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}>
+                      {item.category}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {}}
+                      style={{ cursor: "pointer", accentColor: "#6366f1" }}
+                    />
+                  </div>
+                  <strong style={{ fontSize: 13, color: "#f8fafc", display: "block", marginBottom: 4 }}>
+                    {item.title}
+                  </strong>
+                  <p style={{ margin: 0, color: "#94a3b8", fontSize: 11, lineHeight: 1.45 }}>
+                    {item.explanation}
+                  </p>
+                </div>
+
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "rgba(11, 16, 28, 0.7)",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255, 255, 255, 0.05)",
+                  marginTop: 4,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                    <span style={{ color: "#94a3b8" }}>Current:</span>
+                    <span style={{ color: "#f87171", fontWeight: 700 }}>{item.currentDisplay}</span>
+                    <span style={{ color: "#64748b" }}>→</span>
+                    <span style={{ color: "#4ade80", fontWeight: 800 }}>{item.recommendedDisplay}</span>
+                  </div>
+                  <span style={{
+                    background: "rgba(34, 197, 94, 0.12)",
+                    color: "#4ade80",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                  }}>
+                    {item.impactBadge}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Applied Notice Banner */}
+      {appliedNotice && (
+        <div style={{
+          background: "rgba(16, 185, 129, 0.12)",
+          border: "1px solid rgba(16, 185, 129, 0.35)",
+          borderRadius: 8,
+          padding: "12px 16px",
+          marginBottom: 16,
+          color: "#6ee7b7",
+          fontSize: 12,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, marginBottom: appliedPatchesSummary.length ? 6 : 0 }}>
+            <span>✅</span>
+            <span>{appliedNotice}</span>
+          </div>
+          {appliedPatchesSummary.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+              {appliedPatchesSummary.map((pill, idx) => (
+                <span
+                  key={idx}
+                  style={{
+                    background: "rgba(16, 185, 129, 0.2)",
+                    color: "#a7f3d0",
+                    border: "1px solid rgba(16, 185, 129, 0.4)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: "2px 8px",
+                    borderRadius: 6,
+                  }}
+                >
+                  ✓ {pill}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bottom Controls Bar */}
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 12,
+        borderTop: "1px solid rgba(255, 255, 255, 0.06)",
+        paddingTop: 16,
+      }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {suggestions.length > 0 && (
+            <button
+              type="button"
+              onClick={selectAll}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#94a3b8",
+                fontSize: 11,
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Select All ({suggestions.length})
+            </button>
+          )}
+          {previousCfg && (
+            <button
+              type="button"
+              onClick={revert}
+              style={{
+                background: "rgba(239, 68, 68, 0.1)",
+                color: "#fca5a5",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                borderRadius: 6,
+                padding: "5px 12px",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ↺ Revert to Previous Config
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {suggestions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => applySuggestions(false)}
+              disabled={selectedCount === 0}
+              style={{
+                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 20px",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: selectedCount === 0 ? "not-allowed" : "pointer",
+                boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span>⚡</span> Apply {selectedCount} Suggestion{selectedCount > 1 ? "s" : ""} (1-Click)
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onReRun()}
+            disabled={running}
+            style={{
+              background: running ? "rgba(16, 185, 129, 0.4)" : "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 20px",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: running ? "not-allowed" : "pointer",
+              boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {running ? (
+              <>
+                <span style={{ width: 13, height: 13, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                Running Backtest...
+              </>
+            ) : (
+              <>
+                <span>▶</span> Re-Run Optimized Backtest
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BacktestResult({
+  job,
+  pollJob,
+  deployTargetId,
+  cfg,
+  setCfg,
+  onReRun,
+  running,
+}: {
+  job: any;
+  pollJob: any;
+  deployTargetId: string;
+  cfg: Cfg;
+  setCfg: React.Dispatch<React.SetStateAction<Cfg>>;
+  onReRun: (overrideCfg?: Cfg) => void;
+  running: boolean;
+}) {
   const [loadedTrades, setLoadedTrades] = useState<any[]>(job.trades || []);
 
   useEffect(() => {
@@ -2242,6 +2994,15 @@ function BacktestResult({ job, pollJob, deployTargetId }: { job: any; pollJob: a
         <Kpi label="Win Rate" value={pct(s.win_rate)} color="#4ade80" />
         <Kpi label="Profit Factor" value={fmt(s.profit_factor)} />
       </div>
+
+      {/* ─── 🧠 AI Quant Coach 1-Click Strategy Auto-Tuner & Optimization Device ─── */}
+      <QuantCoachOptimizer
+        job={job}
+        cfg={cfg}
+        setCfg={setCfg}
+        onReRun={onReRun}
+        running={running}
+      />
 
       {/* ─── Institutional Backtest Analytics: Equity Curve, Per-Symbol Breakdown & Trade Log ─── */}
       <BacktestAnalytics
