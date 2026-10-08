@@ -51,9 +51,12 @@ Sent from ${smtpUser || DEFAULT_SENDER_EMAIL}`;
   const htmlContent = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #e2e8f0; padding: 40px 20px; text-align: center;">
       <div style="max-width: 520px; margin: 0 auto; background-color: #111827; border: 1px solid #243044; border-radius: 16px; padding: 36px 28px; text-align: left;">
-        <div style="margin-bottom: 24px;">
-          <h2 style="color: #6366f1; margin: 0; font-size: 22px; font-weight: 800; display: inline-block;">Quanteinstein</h2>
-          <span style="font-size: 11px; color: #64748b; border: 1px solid #1e293b; padding: 3px 8px; border-radius: 999px; margin-left: 10px;">Institutional Quant Lab</span>
+        <div style="margin-bottom: 24px; display: flex; align-items: center;">
+          <img src="https://www.quanteinstein.com/logo.jpg" alt="Quanteinstein" width="40" height="40" style="vertical-align: middle; border-radius: 50%; margin-right: 12px; border: 1px solid #d4af37;" />
+          <div>
+            <h2 style="color: #6366f1; margin: 0; font-size: 22px; font-weight: 800; display: inline-block;">Quanteinstein</h2>
+            <span style="font-size: 11px; color: #64748b; border: 1px solid #1e293b; padding: 3px 8px; border-radius: 999px; margin-left: 10px;">Institutional Quant Lab</span>
+          </div>
         </div>
         
         <h3 style="color: #ffffff; margin-top: 0; font-size: 18px;">Password Reset Request</h3>
@@ -76,7 +79,7 @@ Sent from ${smtpUser || DEFAULT_SENDER_EMAIL}`;
         
         <div style="color: #64748b; font-size: 11px; text-align: center; line-height: 1.5;">
           Sent by <strong>${smtpUser || DEFAULT_SENDER_EMAIL}</strong> for Quanteinstein Platform<br />
-          Paper Trading & Simulation Only · Zero Capital Risk
+          Paper Trading & Simulation Only · Trade Daily, Trade Smartly
         </div>
       </div>
     </div>

@@ -7,6 +7,10 @@ import ProfileMenu from '../components/ProfileMenu';
 export const metadata: Metadata = {
   title: 'Quanteinstein — Trade Daily, Trade Smartly',
   description: 'Quanteinstein paper trading platform. Trade Daily, Trade Smartly. Not financial advice.',
+  icons: {
+    icon: '/logo.jpg',
+    apple: '/logo.jpg',
+  },
 };
 
 const NAV = [
@@ -38,14 +42,33 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           zIndex: 100,
         }}>
           <Link href="/" style={{
-            fontWeight: 800,
-            fontSize: 18,
-            color: '#6366f1',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
             textDecoration: 'none',
-            marginRight: 32,
-            letterSpacing: -0.5,
+            marginRight: 28,
+            flexShrink: 0,
           }}>
-            Quanteinstein
+            <img
+              src="/logo.jpg"
+              alt="Quanteinstein"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '1.5px solid rgba(212, 175, 55, 0.5)',
+                boxShadow: '0 0 10px rgba(212, 175, 55, 0.25)',
+              }}
+            />
+            <span style={{
+              fontWeight: 800,
+              fontSize: 18,
+              color: '#f8fafc',
+              letterSpacing: -0.5,
+            }}>
+              Quanteinstein
+            </span>
           </Link>
           <div style={{ display: 'flex', gap: 4, flex: 1, overflowX: 'auto' as const }}>
             {NAV.map(({ href, label }) => (

@@ -639,31 +639,45 @@ export default function LoginForm() {
         {/* LEFT COLUMN: Institutional Platform Overview & Highlights      */}
         {/* ------------------------------------------------------------- */}
         <div style={{ padding: '12px 16px' }}>
-          {/* Top Badge */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            background: 'rgba(99, 102, 241, 0.12)',
-            border: '1px solid rgba(99, 102, 241, 0.3)',
-            borderRadius: 999,
-            padding: '5px 14px',
-            fontSize: 12,
-            fontWeight: 700,
-            color: '#a5b4fc',
-            marginBottom: 20,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-          }}>
-            <span style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: '#10b981',
-              boxShadow: '0 0 10px #10b981',
-              display: 'inline-block',
-            }} />
-            Institutional Quant & Paper Trading Lab
+          {/* Logo & Top Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+            <img
+              src="/logo.jpg"
+              alt="Quanteinstein Logo"
+              style={{
+                width: 58,
+                height: 58,
+                borderRadius: '50%',
+                border: '2px solid rgba(212, 175, 55, 0.55)',
+                boxShadow: '0 0 20px rgba(212, 175, 55, 0.3)',
+                objectFit: 'cover',
+                flexShrink: 0,
+              }}
+            />
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              borderRadius: 999,
+              padding: '6px 14px',
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#a5b4fc',
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}>
+              <span style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#10b981',
+                boxShadow: '0 0 10px #10b981',
+                display: 'inline-block',
+              }} />
+              Institutional Quant & Paper Trading Lab
+            </div>
           </div>
 
           <h1 style={{
@@ -820,6 +834,38 @@ export default function LoginForm() {
           padding: '32px 30px',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05)',
         }}>
+
+          {/* Card Brand Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            marginBottom: 24,
+            paddingBottom: 16,
+            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+          }}>
+            <img
+              src="/logo.jpg"
+              alt="Quanteinstein Logo"
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: '50%',
+                border: '1.5px solid rgba(212, 175, 55, 0.5)',
+                boxShadow: '0 0 12px rgba(212, 175, 55, 0.25)',
+                objectFit: 'cover',
+                flexShrink: 0,
+              }}
+            />
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.01em' }}>
+                Quanteinstein Terminal
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                Trade Daily, Trade Smartly
+              </div>
+            </div>
+          </div>
 
           {/* Status / Alert Banner */}
           {statusMsg && (

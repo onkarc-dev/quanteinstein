@@ -55,6 +55,20 @@ export default function Home() {
   return (
     <div style={s.page}>
       <div style={s.hero}>
+        <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
+          <img
+            src="/logo.jpg"
+            alt="Quanteinstein Logo"
+            style={{
+              width: 104,
+              height: 104,
+              borderRadius: '50%',
+              border: '2.5px solid rgba(212, 175, 55, 0.55)',
+              boxShadow: '0 0 35px rgba(212, 175, 55, 0.28), 0 8px 24px rgba(0, 0, 0, 0.6)',
+              objectFit: 'cover',
+            }}
+          />
+        </div>
         <div style={s.badge}>BTC-only · Paper trading · Research analytics</div>
         <h1 style={s.h1}>Quanteinstein</h1>
         <p style={s.sub}>
@@ -106,6 +120,20 @@ export default function Home() {
       </div>
 
       <div style={s.footer}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14 }}>
+          <img
+            src="/logo.jpg"
+            alt="Quanteinstein Logo"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: '50%',
+              border: '1px solid rgba(212, 175, 55, 0.45)',
+              objectFit: 'cover',
+            }}
+          />
+          <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>Quanteinstein</span>
+        </div>
         Quanteinstein is research/analytics software only. Paper trading and backtests are hypothetical and do not represent real trading results.
         Not financial advice. No real-money execution. No broker integration.<br />
         © Quanteinstein — Trade Daily, Trade Smartly
