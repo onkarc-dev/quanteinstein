@@ -57,15 +57,17 @@ export default function Home() {
       <div style={s.hero}>
         <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'center' }}>
           <img
-            src="/logo.jpg"
+            src="/logo.png"
             alt="Quanteinstein Logo"
             style={{
               width: 104,
               height: 104,
               borderRadius: '50%',
-              border: '2.5px solid rgba(212, 175, 55, 0.55)',
-              boxShadow: '0 0 35px rgba(212, 175, 55, 0.28), 0 8px 24px rgba(0, 0, 0, 0.6)',
+              border: '2.5px solid rgba(212, 175, 55, 0.6)',
+              boxShadow: '0 0 38px rgba(212, 175, 55, 0.32), 0 10px 25px rgba(0, 0, 0, 0.6)',
               objectFit: 'cover',
+              aspectRatio: '1 / 1',
+              imageRendering: '-webkit-optimize-contrast',
             }}
           />
         </div>
@@ -122,14 +124,16 @@ export default function Home() {
       <div style={s.footer}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14 }}>
           <img
-            src="/logo.jpg"
+            src="/logo.png"
             alt="Quanteinstein Logo"
             style={{
               width: 28,
               height: 28,
               borderRadius: '50%',
-              border: '1px solid rgba(212, 175, 55, 0.45)',
+              border: '1px solid rgba(212, 175, 55, 0.5)',
               objectFit: 'cover',
+              aspectRatio: '1 / 1',
+              imageRendering: '-webkit-optimize-contrast',
             }}
           />
           <span style={{ fontWeight: 700, color: '#e2e8f0', fontSize: 14 }}>Quanteinstein</span>

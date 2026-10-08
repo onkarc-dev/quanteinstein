@@ -95,6 +95,31 @@ const POPULAR_SYMBOLS = [
   "LTCUSDT",
 ];
 
+const CATEGORY_MAP: Record<string, string[]> = {
+  "TOP 10": [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "TRXUSDT", "LINKUSDT"
+  ],
+  "LAYER 1": [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ADAUSDT",
+    "AVAXUSDT", "NEARUSDT", "SUIUSDT", "DOTUSDT", "APTUSDT",
+    "SEIUSDT", "FTMUSDT", "ATOMUSDT", "ICPUSDT", "KASUSDT"
+  ],
+  "DEFI": [
+    "UNIUSDT", "AAVEUSDT", "MKRUSDT", "LINKUSDT", "LDOUSDT",
+    "CRVUSDT", "SNXUSDT", "PENDLEUSDT", "DYDXUSDT", "JUPUSDT",
+    "INJUSDT", "RUNEUSDT"
+  ],
+  "MEME": [
+    "DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "WIFUSDT", "BONKUSDT",
+    "FLOKIUSDT", "BOMEUSDT", "MEMEUSDT"
+  ],
+  "AI & DATA": [
+    "FETUSDT", "RENDERUSDT", "NEARUSDT", "WLDUSDT", "TAOUSDT",
+    "GRTUSDT", "ARKMUSDT", "AIUSDT"
+  ],
+};
+
 const TIMEFRAMES = ["1s", "5s", "10s", "15s", "30s", "1m", "5m", "15m", "1h"];
 
 function timeframeToSeconds(tf: string) {
@@ -191,6 +216,8 @@ export default function StrategyBuilderPage() {
 
   const [allAvailableSymbols, setAllAvailableSymbols] = useState<string[]>(POPULAR_SYMBOLS);
   const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
+  const [selectedSearchQuery, setSelectedSearchQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string>("ALL");
   const [customSymbolInput, setCustomSymbolInput] = useState("");
   const [strategyId, setStrategyId] = useState("");
   const [strategyDisplayName, setStrategyDisplayName] = useState("");
@@ -222,19 +249,30 @@ export default function StrategyBuilderPage() {
     setCfg((prev) => ({ ...prev, [k]: v }));
   }
 
-  function toggleSymbol(sym: string) {
+  function addSymbol(sym: string) {
     const s = sym.toUpperCase().trim();
-    const set = new Set(cfg.symbols);
-    set.has(s) ? set.delete(s) : set.add(s);
-    const next = [...set];
+    if (!cfg.symbols.includes(s)) {
+      upd("symbols", [...cfg.symbols, s]);
+    }
+  }
+
+  function removeSymbol(sym: string) {
+    const s = sym.toUpperCase().trim();
+    const next = cfg.symbols.filter((x) => x !== s);
     upd("symbols", next.length ? next : ["BTCUSDT"]);
+  }
+
+  function addAllAvailable() {
+    if (!availableList.length) return;
+    const combined = Array.from(new Set([...cfg.symbols, ...availableList]));
+    upd("symbols", combined);
   }
 
   function selectPopularSymbols() {
     upd("symbols", [...POPULAR_SYMBOLS]);
   }
 
-  function selectAllSymbols() {
+  function selectTop50Symbols() {
     const top50 = allAvailableSymbols.slice(0, 50);
     upd("symbols", top50);
   }
@@ -258,18 +296,25 @@ export default function StrategyBuilderPage() {
     setCustomSymbolInput("");
   }
 
-  const visibleSymbols = useMemo(() => {
+  const availableList = useMemo(() => {
     const q = symbolSearchQuery.trim().toUpperCase();
-    const combinedSet = new Set([...POPULAR_SYMBOLS, ...cfg.symbols]);
-    if (!q) {
-      return Array.from(combinedSet);
+    const cat = activeCategory.toUpperCase();
+    let list = allAvailableSymbols.filter((s) => !cfg.symbols.includes(s));
+    if (cat !== "ALL" && CATEGORY_MAP[cat]) {
+      const allowed = new Set(CATEGORY_MAP[cat]);
+      list = list.filter((s) => allowed.has(s));
     }
-    const matched = allAvailableSymbols.filter((s) => s.includes(q));
-    cfg.symbols.forEach((s) => {
-      if (!matched.includes(s)) matched.unshift(s);
-    });
-    return matched.slice(0, 40);
-  }, [symbolSearchQuery, allAvailableSymbols, cfg.symbols]);
+    if (q) {
+      list = list.filter((s) => s.includes(q));
+    }
+    return list;
+  }, [allAvailableSymbols, cfg.symbols, symbolSearchQuery, activeCategory]);
+
+  const selectedList = useMemo(() => {
+    const q = selectedSearchQuery.trim().toUpperCase();
+    if (!q) return cfg.symbols;
+    return cfg.symbols.filter((s) => s.includes(q));
+  }, [cfg.symbols, selectedSearchQuery]);
 
   const payload = useMemo(
     () => ({
@@ -632,185 +677,7 @@ export default function StrategyBuilderPage() {
             </label>
           </div>
 
-          {/* ─── Section 2: 200+ Cryptocurrency Market Basket Selector ─── */}
-          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>🪙</span>
-                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                    Cryptocurrency Markets for Backtest & Paper Trading
-                  </h2>
-                </div>
-                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-                  Select one, several, or popular cryptocurrency markets from all 200+ Binance USDT pairs.
-                </p>
-              </div>
-
-              {/* Fast presets buttons */}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={selectPopularSymbols}
-                  style={{
-                    background: "rgba(99, 102, 241, 0.15)",
-                    color: "#a5b4fc",
-                    border: "1px solid rgba(99, 102, 241, 0.35)",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Select Popular (16)
-                </button>
-                <button
-                  type="button"
-                  onClick={selectAllSymbols}
-                  style={{
-                    background: "rgba(30, 41, 59, 0.7)",
-                    color: "#cbd5e1",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Top 50 Pairs
-                </button>
-                <button
-                  type="button"
-                  onClick={clearSymbols}
-                  style={{
-                    background: "transparent",
-                    color: "#94a3b8",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  BTC Only
-                </button>
-              </div>
-            </div>
-
-            {/* Search & Custom Symbol input row */}
-            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 260 }}>
-                <input
-                  type="text"
-                  placeholder="Search any crypto pair (e.g. PEPE, SUI, DOGE, SOL, INJ, TIA)..."
-                  value={symbolSearchQuery}
-                  onChange={(e) => setSymbolSearchQuery(e.target.value)}
-                  style={{ ...inputStyle, width: "100%" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="text"
-                  placeholder="Add custom pair (e.g. RENDER)..."
-                  value={customSymbolInput}
-                  onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addCustomSymbol();
-                    }
-                  }}
-                  style={{ ...inputStyle, width: 220, textTransform: "uppercase" }}
-                />
-                <button
-                  type="button"
-                  onClick={addCustomSymbol}
-                  disabled={!customSymbolInput.trim()}
-                  style={{
-                    background: "rgba(99, 102, 241, 0.2)",
-                    color: "#a5b4fc",
-                    border: "1px solid rgba(99, 102, 241, 0.4)",
-                    padding: "9px 14px",
-                    borderRadius: 8,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: customSymbolInput.trim() ? "pointer" : "not-allowed",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  + Add Pair
-                </button>
-              </div>
-            </div>
-
-            {/* Interactive Symbol Chips Grid */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
-                gap: 8,
-                maxHeight: 200,
-                overflowY: "auto",
-                background: "rgba(11, 16, 28, 0.6)",
-                border: "1px solid rgba(255, 255, 255, 0.05)",
-                borderRadius: 12,
-                padding: 12,
-              }}
-            >
-              {visibleSymbols.map((sym) => {
-                const isSelected = cfg.symbols.includes(sym);
-                return (
-                  <button
-                    type="button"
-                    key={sym}
-                    onClick={() => toggleSymbol(sym)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      background: isSelected ? "rgba(99, 102, 241, 0.25)" : "rgba(15, 23, 42, 0.7)",
-                      border: `1px solid ${isSelected ? "rgba(99, 102, 241, 0.6)" : "rgba(255, 255, 255, 0.08)"}`,
-                      color: isSelected ? "#ffffff" : "#94a3b8",
-                      fontSize: 12,
-                      fontWeight: isSelected ? 700 : 500,
-                      cursor: "pointer",
-                      textAlign: "left",
-                      transition: "all 0.1s ease",
-                    }}
-                  >
-                    <span>{sym}</span>
-                    <span style={{ fontSize: 13, color: isSelected ? "#a5b4fc" : "#475569" }}>
-                      {isSelected ? "✓" : "+"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, flexWrap: "wrap", gap: 8 }}>
-              <div style={{ fontSize: 12, color: "#94a3b8" }}>
-                Selected active basket ({cfg.symbols.length}):{" "}
-                <strong style={{ color: "#38bdf8" }}>{cfg.symbols.join(", ")}</strong>
-              </div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>
-                {allAvailableSymbols.length} total Binance cryptocurrency pairs available
-              </div>
-            </div>
-
-            {heavyLowTimeframe && (
-              <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 8, padding: "8px 14px", marginTop: 10, color: "#fbbf24", fontSize: 12 }}>
-                ⚠️ Notice: Backtesting {cfg.symbols.length} symbols on sub-5s timeframes requires significant candle throughput. Consider testing BTC first or local engine mode.
-              </div>
-            )}
-          </div>
-
-          {/* ─── Section 3: Dynamic Exits & Trade Management Architecture ─── */}
+          {/* ─── Section 2: Dynamic Exits & Trade Management Architecture ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>🎯</span>
@@ -916,7 +783,7 @@ export default function StrategyBuilderPage() {
             </div>
           </div>
 
-          {/* ─── Section 4: Prop Firm & Portfolio Risk Controls ─── */}
+          {/* ─── Section 3: Prop Firm & Portfolio Risk Controls ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>🛡</span>
@@ -1032,7 +899,7 @@ export default function StrategyBuilderPage() {
             </div>
           </div>
 
-          {/* ─── Section 5: Execution Friction & Session Timing ─── */}
+          {/* ─── Section 4: Execution Friction & Session Timing ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>⚡</span>
@@ -1124,7 +991,7 @@ export default function StrategyBuilderPage() {
             </div>
           </div>
 
-          {/* ─── Section 6: Higher-Timeframe Trend Filter ─── */}
+          {/* ─── Section 5: Higher-Timeframe Trend Filter ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>📈</span>
@@ -1189,6 +1056,461 @@ export default function StrategyBuilderPage() {
                 />
                 <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Typically 50 or 200</span>
               </label>
+            </div>
+          </div>
+
+          {/* ─── Section 6: 200+ Cryptocurrency Market Basket Selector (Transfer Box) ─── */}
+          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>🪙</span>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                    Cryptocurrency Markets for Backtest & Paper Trading
+                  </h2>
+                </div>
+                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
+                  Search and transfer cryptocurrency markets between available Binance pairs and your active strategy basket.
+                </p>
+              </div>
+
+              {/* Fast presets buttons */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={selectPopularSymbols}
+                  style={{
+                    background: "rgba(99, 102, 241, 0.15)",
+                    color: "#a5b4fc",
+                    border: "1px solid rgba(99, 102, 241, 0.35)",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Popular (16)
+                </button>
+                <button
+                  type="button"
+                  onClick={selectTop50Symbols}
+                  style={{
+                    background: "rgba(30, 41, 59, 0.7)",
+                    color: "#cbd5e1",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Top 50 Pairs
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSymbols}
+                  style={{
+                    background: "rgba(239, 68, 68, 0.1)",
+                    color: "#fca5a5",
+                    border: "1px solid rgba(239, 68, 68, 0.25)",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  BTC Only
+                </button>
+              </div>
+            </div>
+
+            {/* DUAL BLOCKS CONTAINER */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+              gap: 20,
+              alignItems: "stretch",
+            }}>
+
+              {/* ─── BLOCK 1: AVAILABLE MARKETS ─── */}
+              <div style={{
+                background: "rgba(11, 16, 28, 0.8)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 14,
+                padding: "16px 18px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255, 255, 255, 0.06)", paddingBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>🌐</span>
+                    <strong style={{ fontSize: 13, color: "#f1f5f9" }}>Available Binance Pairs</strong>
+                    <span style={{
+                      background: "rgba(99, 102, 241, 0.2)",
+                      color: "#a5b4fc",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 10,
+                    }}>
+                      {availableList.length}
+                    </span>
+                  </div>
+
+                  {availableList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={addAllAvailable}
+                      style={{
+                        background: "rgba(99, 102, 241, 0.18)",
+                        color: "#a5b4fc",
+                        border: "1px solid rgba(99, 102, 241, 0.35)",
+                        borderRadius: 6,
+                        padding: "4px 10px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      + Add All ({availableList.length}) →
+                    </button>
+                  )}
+                </div>
+
+                {/* Category Filter Pills */}
+                <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
+                  {["ALL", "TOP 10", "LAYER 1", "DEFI", "MEME", "AI & DATA"].map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setActiveCategory(cat)}
+                      style={{
+                        background: activeCategory === cat ? "#6366f1" : "rgba(30, 41, 59, 0.6)",
+                        color: activeCategory === cat ? "#ffffff" : "#94a3b8",
+                        border: `1px solid ${activeCategory === cat ? "#818cf8" : "rgba(255, 255, 255, 0.06)"}`,
+                        borderRadius: 6,
+                        padding: "3px 9px",
+                        fontSize: 11,
+                        fontWeight: activeCategory === cat ? 700 : 500,
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Bar in Available */}
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    placeholder="Search available pairs (e.g. SOL, PEPE, SUI)..."
+                    value={symbolSearchQuery}
+                    onChange={(e) => setSymbolSearchQuery(e.target.value)}
+                    style={{
+                      ...inputStyle,
+                      paddingLeft: 30,
+                      fontSize: 12,
+                      paddingTop: 8,
+                      paddingBottom: 8,
+                    }}
+                  />
+                  <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#64748b", fontSize: 12 }}>
+                    🔍
+                  </span>
+                  {symbolSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSymbolSearchQuery("")}
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "transparent",
+                        border: "none",
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Custom Pair Adder */}
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="text"
+                    placeholder="Add custom pair (e.g. RENDER)..."
+                    value={customSymbolInput}
+                    onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addCustomSymbol();
+                      }
+                    }}
+                    style={{ ...inputStyle, flex: 1, fontSize: 12, padding: "6px 10px", textTransform: "uppercase" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addCustomSymbol}
+                    disabled={!customSymbolInput.trim()}
+                    style={{
+                      background: "rgba(99, 102, 241, 0.2)",
+                      color: "#a5b4fc",
+                      border: "1px solid rgba(99, 102, 241, 0.4)",
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: customSymbolInput.trim() ? "pointer" : "not-allowed",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    + Add
+                  </button>
+                </div>
+
+                {/* Available Pairs Scrollable List */}
+                <div style={{
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+                  gap: 8,
+                  padding: "4px 2px",
+                }}>
+                  {availableList.length === 0 ? (
+                    <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "30px 10px", color: "#64748b", fontSize: 13 }}>
+                      ✓ All matching pairs have been transferred to your selected basket!
+                    </div>
+                  ) : (
+                    availableList.map((sym) => (
+                      <button
+                        type="button"
+                        key={sym}
+                        onClick={() => addSymbol(sym)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          background: "rgba(15, 23, 42, 0.7)",
+                          border: "1px solid rgba(255, 255, 255, 0.07)",
+                          color: "#cbd5e1",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textAlign: "left",
+                          transition: "all 0.12s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.6)";
+                          e.currentTarget.style.background = "rgba(99, 102, 241, 0.12)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.07)";
+                          e.currentTarget.style.background = "rgba(15, 23, 42, 0.7)";
+                        }}
+                      >
+                        <span>{sym}</span>
+                        <span style={{ fontSize: 13, color: "#818cf8", fontWeight: 800 }}>+</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* ─── BLOCK 2: SELECTED ACTIVE BASKET ─── */}
+              <div style={{
+                background: "linear-gradient(180deg, rgba(17, 24, 39, 0.85) 0%, rgba(13, 18, 31, 0.95) 100%)",
+                border: "1px solid rgba(99, 102, 241, 0.3)",
+                borderRadius: 14,
+                padding: "16px 18px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                boxShadow: "0 10px 30px -10px rgba(0, 0, 0, 0.5)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255, 255, 255, 0.06)", paddingBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>🎯</span>
+                    <strong style={{ fontSize: 13, color: "#f8fafc" }}>Selected Active Basket</strong>
+                    <span style={{
+                      background: "rgba(16, 185, 129, 0.2)",
+                      color: "#6ee7b7",
+                      border: "1px solid rgba(16, 185, 129, 0.35)",
+                      fontSize: 11,
+                      fontWeight: 800,
+                      padding: "2px 8px",
+                      borderRadius: 10,
+                    }}>
+                      {cfg.symbols.length} pairs
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={clearSymbols}
+                      style={{
+                        background: "rgba(239, 68, 68, 0.12)",
+                        color: "#fca5a5",
+                        border: "1px solid rgba(239, 68, 68, 0.25)",
+                        borderRadius: 6,
+                        padding: "4px 8px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Clear to BTC
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter within Selected Basket */}
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="text"
+                    placeholder={`Filter within ${cfg.symbols.length} selected pairs...`}
+                    value={selectedSearchQuery}
+                    onChange={(e) => setSelectedSearchQuery(e.target.value)}
+                    style={{
+                      ...inputStyle,
+                      paddingLeft: 30,
+                      fontSize: 12,
+                      paddingTop: 8,
+                      paddingBottom: 8,
+                      background: "rgba(10, 14, 26, 0.8)",
+                    }}
+                  />
+                  <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#64748b", fontSize: 12 }}>
+                    🎯
+                  </span>
+                  {selectedSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSearchQuery("")}
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "transparent",
+                        border: "none",
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Selected Basket Chips Scrollable List */}
+                <div style={{
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+                  gap: 8,
+                  padding: "4px 2px",
+                }}>
+                  {selectedList.length === 0 ? (
+                    <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "30px 10px", color: "#94a3b8", fontSize: 13 }}>
+                      No pairs matching filter.
+                    </div>
+                  ) : (
+                    selectedList.map((sym) => (
+                      <div
+                        key={sym}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          background: "rgba(99, 102, 241, 0.22)",
+                          border: "1px solid rgba(99, 102, 241, 0.5)",
+                          color: "#ffffff",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          transition: "all 0.12s ease",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ color: "#4ade80", fontSize: 11 }}>✓</span>
+                          <span>{sym}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeSymbol(sym)}
+                          title={`Remove ${sym}`}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#f87171",
+                            cursor: "pointer",
+                            fontSize: 13,
+                            fontWeight: 700,
+                            padding: "0 2px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = "#f87171")}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Summary / Active Allocation Bar */}
+                <div style={{
+                  background: "rgba(15, 23, 42, 0.6)",
+                  border: "1px solid rgba(255, 255, 255, 0.05)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  fontSize: 12,
+                  color: "#94a3b8",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}>
+                  <div>
+                    Active Basket: <strong style={{ color: "#38bdf8" }}>{cfg.symbols.length} pair{cfg.symbols.length > 1 ? "s" : ""}</strong>
+                    <span style={{ color: "#64748b", marginLeft: 6 }}>
+                      ({(100 / Math.max(1, cfg.symbols.length)).toFixed(1)}% equal weight)
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>
+                    Click ✕ on any pair to return to available
+                  </div>
+                </div>
+
+                {heavyLowTimeframe && (
+                  <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 8, padding: "8px 12px", color: "#fbbf24", fontSize: 11 }}>
+                    ⚠️ Notice: Multi-symbol ({cfg.symbols.length}) execution on sub-5s timeframes requires high candle throughput.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

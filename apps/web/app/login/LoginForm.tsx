@@ -642,15 +642,17 @@ export default function LoginForm() {
           {/* Logo & Top Badge */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
             <img
-              src="/logo.jpg"
+              src="/logo.png"
               alt="Quanteinstein Logo"
               style={{
                 width: 58,
                 height: 58,
                 borderRadius: '50%',
-                border: '2px solid rgba(212, 175, 55, 0.55)',
-                boxShadow: '0 0 20px rgba(212, 175, 55, 0.3)',
+                border: '2px solid rgba(212, 175, 55, 0.6)',
+                boxShadow: '0 0 24px rgba(212, 175, 55, 0.35)',
                 objectFit: 'cover',
+                aspectRatio: '1 / 1',
+                imageRendering: '-webkit-optimize-contrast',
                 flexShrink: 0,
               }}
             />
@@ -845,15 +847,17 @@ export default function LoginForm() {
             borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
           }}>
             <img
-              src="/logo.jpg"
+              src="/logo.png"
               alt="Quanteinstein Logo"
               style={{
                 width: 38,
                 height: 38,
                 borderRadius: '50%',
-                border: '1.5px solid rgba(212, 175, 55, 0.5)',
-                boxShadow: '0 0 12px rgba(212, 175, 55, 0.25)',
+                border: '1.5px solid rgba(212, 175, 55, 0.55)',
+                boxShadow: '0 0 14px rgba(212, 175, 55, 0.28)',
                 objectFit: 'cover',
+                aspectRatio: '1 / 1',
+                imageRendering: '-webkit-optimize-contrast',
                 flexShrink: 0,
               }}
             />

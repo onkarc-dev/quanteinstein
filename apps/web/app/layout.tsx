@@ -3,27 +3,16 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import AuthProvider from '../components/AuthProvider';
 import ProfileMenu from '../components/ProfileMenu';
+import NavLinks from '../components/NavLinks';
 
 export const metadata: Metadata = {
   title: 'Quanteinstein — Trade Daily, Trade Smartly',
   description: 'Quanteinstein paper trading platform. Trade Daily, Trade Smartly. Not financial advice.',
   icons: {
-    icon: '/logo.jpg',
-    apple: '/logo.jpg',
+    icon: '/logo.png',
+    apple: '/logo.png',
   },
 };
-
-const NAV = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/strategy-builder', label: 'Strategy Builder' },
-  { href: '/backtests', label: 'Backtests' },
-  { href: '/quant-coach', label: 'Quant Coach' },
-  { href: '/paper-trading', label: 'Paper Trading' },
-  { href: '/charting', label: 'Charting' },
-  { href: '/beta-status', label: 'Beta Status' },
-  { href: '/trade-journal', label: 'Journal' },
-  { href: '/analytics', label: 'Analytics' },
-];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -46,19 +35,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             alignItems: 'center',
             gap: 10,
             textDecoration: 'none',
-            marginRight: 28,
+            marginRight: 24,
             flexShrink: 0,
           }}>
             <img
-              src="/logo.jpg"
+              src="/logo.png"
               alt="Quanteinstein"
               style={{
                 width: 32,
                 height: 32,
                 borderRadius: '50%',
                 objectFit: 'cover',
-                border: '1.5px solid rgba(212, 175, 55, 0.5)',
-                boxShadow: '0 0 10px rgba(212, 175, 55, 0.25)',
+                aspectRatio: '1 / 1',
+                imageRendering: '-webkit-optimize-contrast',
+                border: '1.5px solid rgba(212, 175, 55, 0.6)',
+                boxShadow: '0 0 12px rgba(212, 175, 55, 0.3)',
               }}
             />
             <span style={{
@@ -70,21 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               Quanteinstein
             </span>
           </Link>
-          <div style={{ display: 'flex', gap: 4, flex: 1, overflowX: 'auto' as const }}>
-            {NAV.map(({ href, label }) => (
-              <Link key={href} href={href} style={{
-                color: '#94a3b8',
-                textDecoration: 'none',
-                padding: '6px 14px',
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 500,
-                whiteSpace: 'nowrap' as const,
-              }}>
-                {label}
-              </Link>
-            ))}
-          </div>
+          <NavLinks />
           <div style={{
             fontSize: 11,
             color: '#555',
