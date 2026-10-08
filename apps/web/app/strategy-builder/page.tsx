@@ -2151,6 +2151,195 @@ function Kpi({
 const td = { borderBottom: "1px solid rgba(255, 255, 255, 0.05)", padding: "10px 12px", color: "#cbd5e1", fontSize: 13 };
 const tdStrong = { ...td, color: "#94a3b8", fontWeight: 700, width: 260 };
 
+function quantGrade(score: any) {
+  const x = Number(score);
+  if (!Number.isFinite(x)) return "N/A";
+  if (x >= 95) return "A+";
+  if (x >= 90) return "A";
+  if (x >= 80) return "B";
+  if (x >= 70) return "C";
+  if (x >= 60) return "D";
+  return "F";
+}
+
+function quantGradeColor(letterGrade: string) {
+  if (letterGrade.startsWith("A")) return "#22c55e";
+  if (letterGrade.startsWith("B")) return "#38bdf8";
+  if (letterGrade.startsWith("C")) return "#f59e0b";
+  if (letterGrade.startsWith("D")) return "#f97316";
+  return "#ef4444";
+}
+
+function quantRecommendation(pr: any, score: any) {
+  const risk = pr?.robustness?.overfitting_risk_label;
+  const gross = Number(pr?.summary?.gross_R ?? pr?.net_R ?? 0);
+  const health = Number(score);
+  if (risk === "HIGH") return "High overfitting risk detected — refine parameters in Strategy Builder";
+  if (risk === "MEDIUM" && gross > 0) return "Solid alpha edge — paper trade before scaling real capital";
+  if (health >= 80) return "Exceptional alpha candidate — deploy directly to Live Paper Trading";
+  if (health >= 65) return "Viable strategy — monitor friction and out-of-sample stability";
+  return "Needs further parameter optimization and walk-forward validation";
+}
+
+function ExecutiveStrategyHealthCard({ job }: { job: any }) {
+  const [healthData, setHealthData] = useState<any>(null);
+  const [coachData, setCoachData] = useState<any>(null);
+
+  useEffect(() => {
+    const jid = job.id || job.job_id;
+    if (!jid) return;
+    let cancelled = false;
+
+    Promise.all([
+      api(`/coach/${jid}/strategy-health`).catch(() => null),
+      api(`/coach/${jid}/coach-report`).catch(() => null),
+    ]).then(([h, c]) => {
+      if (!cancelled) {
+        if (h) setHealthData(h);
+        if (c) setCoachData(c);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [job.id, job.job_id]);
+
+  const s = job.summary || {};
+  const pr = healthData?.performance_and_robustness || s.performance_and_robustness || job.performance_and_robustness || {};
+  const trades = Number(s.total_trades ?? (job.trades?.length ?? 0));
+  const grossR = Number(s.gross_R ?? 0);
+
+  // Fallback calculation matching backend formula if API hasn't written to disk yet
+  const fallbackSubScores = useMemo(() => {
+    const maxDd = Math.abs(Number(s.max_drawdown_in_R ?? 1.0));
+    const samplePenalty = trades < 10 ? 0.45 : trades < 30 ? 0.7 : 1.0;
+    const oneDayPenalty = 0.65;
+    const rawPerf = Math.max(0, Math.min(100, ((grossR + 5) / 25) * 100));
+    const perfScore = Math.round(rawPerf * samplePenalty * oneDayPenalty);
+    const riskScore = Math.round(Math.max(20, Math.min(100, 100 - (maxDd * 10))));
+    const execScore = 100;
+    const robustScore = trades < 10 ? 18 : trades < 30 ? 45 : 75;
+    const disciplineScore = 100;
+    const overall = Math.round((0.30 * perfScore + 0.25 * riskScore + 0.15 * execScore + 0.20 * robustScore + 0.10 * disciplineScore) * 10) / 10;
+    return {
+      overall,
+      performance: perfScore,
+      risk: riskScore,
+      execution: execScore,
+      robustness: robustScore,
+    };
+  }, [trades, grossR, s.max_drawdown_in_R]);
+
+  const healthScore = healthData?.overall_strategy_health_score != null
+    ? Number(healthData.overall_strategy_health_score)
+    : fallbackSubScores.overall;
+
+  const letterGrade = quantGrade(healthScore);
+  const color = quantGradeColor(letterGrade);
+
+  const subScores = healthData?.sub_scores || {
+    performance: fallbackSubScores.performance,
+    risk: fallbackSubScores.risk,
+    execution: fallbackSubScores.execution,
+    robustness: fallbackSubScores.robustness,
+  };
+
+  const finalVerdict = coachData?.final_verdict || (trades < 30 ? "NEEDS_MORE_DATA" : grossR > 0 ? "PROMISING_PAPER_SYSTEM" : "DO_NOT_SCALE_YET");
+  const finalRec = quantRecommendation(pr, healthScore);
+
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.7) 100%)",
+        border: "1px solid rgba(37, 99, 235, 0.35)",
+        borderRadius: 14,
+        padding: "18px 22px",
+        marginBottom: 20,
+        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.25)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          {/* Big Letter Grade Badge */}
+          <div
+            style={{
+              width: 76,
+              height: 76,
+              borderRadius: 16,
+              background: `rgba(${letterGrade.startsWith("A") ? "34, 197, 94" : letterGrade.startsWith("B") ? "56, 189, 248" : letterGrade.startsWith("C") || letterGrade.startsWith("D") ? "245, 158, 11" : "239, 68, 68"}, 0.15)`,
+              border: `2px solid ${color}`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: `0 0 20px ${color}33`,
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 32, fontWeight: 900, color, lineHeight: 1 }}>
+              {letterGrade}
+            </span>
+            <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700, marginTop: 2 }}>GRADE</span>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 24, fontWeight: 800, color: "#f8fafc" }}>
+                {healthScore.toFixed(1)} / 100
+              </span>
+              <span
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  background: finalVerdict === "PROMISING_PAPER_SYSTEM" ? "rgba(34, 197, 94, 0.18)" : finalVerdict === "NEEDS_MORE_DATA" ? "rgba(245, 158, 11, 0.18)" : "rgba(56, 189, 248, 0.18)",
+                  color: finalVerdict === "PROMISING_PAPER_SYSTEM" ? "#4ade80" : finalVerdict === "NEEDS_MORE_DATA" ? "#fbbf24" : "#38bdf8",
+                  border: "1px solid currentColor",
+                }}
+              >
+                {finalVerdict}
+              </span>
+            </div>
+            <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4, fontWeight: 500 }}>
+              {finalRec}
+            </div>
+          </div>
+        </div>
+
+        {/* 4 Pillar Sub-scores breakdown */}
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ textAlign: "center", minWidth: 70 }}>
+            <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: "0.05em" }}>PERFORMANCE</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#38bdf8", marginTop: 2 }}>
+              {Math.round(Number(subScores.performance ?? 0))}%
+            </div>
+          </div>
+          <div style={{ textAlign: "center", minWidth: 70 }}>
+            <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: "0.05em" }}>RISK CONTROL</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e", marginTop: 2 }}>
+              {Math.round(Number(subScores.risk ?? 0))}%
+            </div>
+          </div>
+          <div style={{ textAlign: "center", minWidth: 70 }}>
+            <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: "0.05em" }}>EXECUTION</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b", marginTop: 2 }}>
+              {Math.round(Number(subScores.execution ?? 0))}%
+            </div>
+          </div>
+          <div style={{ textAlign: "center", minWidth: 70 }}>
+            <div style={{ color: "#94a3b8", fontSize: 10, fontWeight: 700, letterSpacing: "0.05em" }}>ROBUSTNESS</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#a855f7", marginTop: 2 }}>
+              {Math.round(Number(subScores.robustness ?? 0))}%
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type CoachSuggestion = {
   id: string;
   category: "Setup Quality" | "Trend Confluence" | "Payoff & Targets" | "Risk Buffer" | "Retest Precision" | "Momentum Filters";
@@ -2994,6 +3183,9 @@ function BacktestResult({
         <Kpi label="Win Rate" value={pct(s.win_rate)} color="#4ade80" />
         <Kpi label="Profit Factor" value={fmt(s.profit_factor)} />
       </div>
+
+      {/* ─── 🛡️ Executive Strategy Health & Quant Grade Card ─── */}
+      <ExecutiveStrategyHealthCard job={job} />
 
       {/* ─── 🧠 AI Quant Coach 1-Click Strategy Auto-Tuner & Optimization Device ─── */}
       <QuantCoachOptimizer
