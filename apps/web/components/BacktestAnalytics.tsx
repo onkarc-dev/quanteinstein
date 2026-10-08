@@ -103,8 +103,21 @@ export default function BacktestAnalytics({
       const s = String(t.symbol || "").trim().toUpperCase();
       if (s) set.add(s);
     });
+    // Fallback to tested basket symbols when zero trades executed so all markets remain visible
+    if (set.size === 0) {
+      if (Array.isArray(summary?.symbols)) {
+        summary.symbols.forEach((s: any) => {
+          if (s && typeof s === "string") set.add(s.trim().toUpperCase());
+        });
+      }
+      if (summary?.per_symbol_breakdown && typeof summary.per_symbol_breakdown === "object") {
+        Object.keys(summary.per_symbol_breakdown).forEach((s) => {
+          if (s) set.add(String(s).trim().toUpperCase());
+        });
+      }
+    }
     return Array.from(set).sort();
-  }, [trades]);
+  }, [trades, summary]);
 
   // Filtered trades based on top symbol filter
   const activeTrades = useMemo(() => {

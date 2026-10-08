@@ -481,6 +481,9 @@ export default function StrategyBuilderPage() {
 
   async function run(overrideCfg?: Cfg) {
     if (running) return;
+    if (overrideCfg) {
+      setCfg(overrideCfg);
+    }
     const token = getToken();
     if (!token) {
       setMsg("Please sign in first to run backtests.");
@@ -2371,6 +2374,11 @@ function QuantCoachOptimizer({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [initializedSelection, setInitializedSelection] = useState(false);
 
+  const activeCfgRef = useRef<Cfg>(cfg);
+  useEffect(() => {
+    activeCfgRef.current = cfg;
+  }, [cfg]);
+
   const s = job.summary || {};
   const pr = s.performance_and_robustness || job.performance_and_robustness || {};
   const fric = pr.friction || {};
@@ -2387,42 +2395,80 @@ function QuantCoachOptimizer({
     const list: CoachSuggestion[] = [];
 
     // 1. Setup Score Starvation Check
-    if (cfg.score > 7.0 && (totalTrades < 15 || rejections > 5 || grossR <= 0)) {
+    if (totalTrades === 0) {
+      if (cfg.score > 5.0) {
+        list.push({
+          id: "score",
+          category: "Setup Quality",
+          title: "Lower Minimum Setup Score to 5.0",
+          paramKey: "score",
+          currentDisplay: `${cfg.score} / 10`,
+          recommendedDisplay: "5.0 / 10",
+          explanation: `Threshold of ${cfg.score}/10 starved candidate setups across ${s.bars_processed ?? 14400} bars. Lowering to 5.0 unlocks authentic institutional breakout confirmations on real crypto market data.`,
+          impactBadge: "+Setup Flow & Immediate Execution",
+          applyPatch: { score: 5.0 },
+        });
+      }
+    } else if (cfg.score > 6.0 && (totalTrades < 15 || rejections > 5 || grossR <= 0)) {
       list.push({
         id: "score",
         category: "Setup Quality",
-        title: "Lower Minimum Setup Score to 7.0",
+        title: "Lower Minimum Setup Score to 6.0",
         paramKey: "score",
         currentDisplay: `${cfg.score} / 10`,
-        recommendedDisplay: "7.0 / 10",
-        explanation: `Threshold of ${cfg.score}/10 is overly strict, causing setup starvation (${totalTrades} trades executed across ${s.bars_processed ?? "all"} bars). Lowering to 7.0 unlocks authentic institutional breakout confirmations.`,
-        impactBadge: "+Trade Frequency & Setup Flow",
-        applyPatch: { score: 7.0 },
+        recommendedDisplay: "6.0 / 10",
+        explanation: `Threshold of ${cfg.score}/10 restricts sample size (${totalTrades} trades executed). Lowering to 6.0 balances quality while allowing healthy trade sample flow.`,
+        impactBadge: "+Trade Frequency & Flow",
+        applyPatch: { score: 6.0 },
       });
     }
 
-    // 2. Higher Timeframe Confluence (Fix Inversion & Noise)
-    if (cfg.timeframe === "15m") {
-      if (cfg.trendTimeframe !== "1h" || cfg.trendFilter !== "enabled") {
+    // 2. Breakout Lookback Calibration on Zero Trades
+    if (totalTrades === 0 && cfg.lookback > 12) {
+      list.push({
+        id: "lookback",
+        category: "Setup Quality",
+        title: "Calibrate Breakout Lookback to 12 Bars",
+        paramKey: "lookback",
+        currentDisplay: `${cfg.lookback} Bars`,
+        recommendedDisplay: "12 Bars",
+        explanation: `A ${cfg.lookback}-bar lookback requires extreme price displacement before recognizing breakouts. A 12-bar window detects agile swing breaks while preserving market structure.`,
+        impactBadge: "+Breakout Detection Frequency",
+        applyPatch: { lookback: 12 },
+      });
+    }
+
+    // 3. Macro Trend Filter (Relax if 0 trades, else Align Timeframe)
+    if (totalTrades === 0 && cfg.trendFilter === "enabled") {
+      list.push({
+        id: "trend_relax",
+        category: "Trend Confluence",
+        title: "Relax Macro Trend Filter (Trade All Breakouts)",
+        paramKey: "trendFilter",
+        currentDisplay: "Enabled (Strict Macro Trend)",
+        recommendedDisplay: "Disabled (Capture All Breakouts)",
+        explanation: `Strict macro EMA trend check blocked candidate breakouts during pullbacks or range expansion. Disabling allows authentic setups in both directions across the tested period.`,
+        impactBadge: "Unblock Filtered Breakouts",
+        applyPatch: { trendFilter: "disabled" },
+      });
+    } else if (cfg.trendFilter === "enabled") {
+      if (cfg.timeframe === "15m" && cfg.trendTimeframe !== "1h") {
         list.push({
           id: "trend_timeframe",
           category: "Trend Confluence",
           title: "Align Higher Timeframe Filter to 1h EMA",
           paramKey: "trendTimeframe",
-          currentDisplay: cfg.trendFilter === "enabled" ? `${cfg.trendTimeframe} EMA` : "Filter Disabled",
+          currentDisplay: `${cfg.trendTimeframe} EMA`,
           recommendedDisplay: "1h EMA20 > EMA50",
-          explanation: `Trend filter was ${cfg.trendFilter === "enabled" ? `set to ${cfg.trendTimeframe} (inverted/too low for 15m execution)` : "disabled"}. Aligning to 1h EMA20/50 guarantees trade bias matches the macro trend.`,
+          explanation: `Aligning 15m execution with 1h EMA20/50 guarantees trade bias matches the macro trend.`,
           impactBadge: "Macro Confluence",
           applyPatch: {
-            trendFilter: "enabled",
             trendTimeframe: "1h",
             trendFastEma: 20,
             trendSlowEma: 50,
           },
         });
-      }
-    } else if (cfg.timeframe === "1m") {
-      if (cfg.trendTimeframe !== "5m" || cfg.trendFilter !== "enabled") {
+      } else if (cfg.timeframe === "1m" && cfg.trendTimeframe !== "5m") {
         list.push({
           id: "trend_timeframe",
           category: "Trend Confluence",
@@ -2433,15 +2479,12 @@ function QuantCoachOptimizer({
           explanation: "Aligning 1m execution with 5m trend filter avoids counter-trend whipsaws.",
           impactBadge: "Macro Confluence",
           applyPatch: {
-            trendFilter: "enabled",
             trendTimeframe: "5m",
             trendFastEma: 20,
             trendSlowEma: 50,
           },
         });
-      }
-    } else if (cfg.timeframe === "5m") {
-      if (cfg.trendTimeframe !== "15m" || cfg.trendFilter !== "enabled") {
+      } else if (cfg.timeframe === "5m" && cfg.trendTimeframe !== "15m") {
         list.push({
           id: "trend_timeframe",
           category: "Trend Confluence",
@@ -2452,7 +2495,6 @@ function QuantCoachOptimizer({
           explanation: "Aligning 5m execution with 15m trend filter guarantees confluence.",
           impactBadge: "Macro Confluence",
           applyPatch: {
-            trendFilter: "enabled",
             trendTimeframe: "15m",
             trendFastEma: 20,
             trendSlowEma: 50,
@@ -2461,28 +2503,62 @@ function QuantCoachOptimizer({
       }
     }
 
-    // 3. Asymmetric Payoff Architecture (Targets)
-    if (cfg.t1 < 1.5 || cfg.t2 < 2.5 || netR <= 0) {
+    // 4. Retest Tolerance Calibration
+    if (cfg.retest <= 0.002 || (totalTrades === 0 && cfg.retest < 0.0025)) {
       list.push({
-        id: "targets",
-        category: "Payoff & Targets",
-        title: "Widen Profit Targets to 1.5R (T1) and 2.5R (T2)",
-        paramKey: "targets",
-        currentDisplay: `T1 ${cfg.t1}R · T2 ${cfg.t2}R`,
-        recommendedDisplay: "T1 1.5R · T2 2.5R",
-        explanation: `Tight targets (${cfg.t1}R / ${cfg.t2}R) don't provide sufficient asymmetry to overcome exchange taker fees (0.08% round-trip) and slippage. Targeting 1.5R (50% close + breakeven lock) and 2.5R runner achieves positive expectancy.`,
-        impactBadge: "+Asymmetric Expectancy",
-        applyPatch: {
-          t1: 1.5,
-          t2: 2.5,
-          partialTpPct: 50,
-          breakevenStop: true,
-        },
+        id: "retest",
+        category: "Retest Precision",
+        title: "Broaden Retest Tolerance to 0.25% (0.0025)",
+        paramKey: "retest",
+        currentDisplay: `${(cfg.retest * 100).toFixed(2)}%`,
+        recommendedDisplay: "0.25%",
+        explanation: "A strict 0.1% tolerance misses valid pullback touches on crypto pairs due to spread and depth. 0.25% captures high-probability fills.",
+        impactBadge: "+Retest Entry Capture Rate",
+        applyPatch: { retest: 0.0025 },
       });
     }
 
-    // 4. Stop-Loss ATR Volatility Buffer
-    if (cfg.atr <= 0.85 || (losses > wins && cfg.atr < 1.25)) {
+    // 5. Asymmetric Payoff Architecture (Targets) - Only when trades > 0
+    if (totalTrades > 0) {
+      if (cfg.t1 < 1.5 || cfg.t2 < 2.5) {
+        list.push({
+          id: "targets",
+          category: "Payoff & Targets",
+          title: "Widen Profit Targets to 1.5R (T1) and 2.5R (T2)",
+          paramKey: "targets",
+          currentDisplay: `T1 ${cfg.t1}R · T2 ${cfg.t2}R`,
+          recommendedDisplay: "T1 1.5R · T2 2.5R",
+          explanation: `Tight targets (${cfg.t1}R / ${cfg.t2}R) don't provide sufficient asymmetry to overcome exchange taker fees. Targeting 1.5R (50% close + breakeven lock) and 2.5R runner achieves positive expectancy.`,
+          impactBadge: "+Asymmetric Expectancy",
+          applyPatch: {
+            t1: 1.5,
+            t2: 2.5,
+            partialTpPct: 50,
+            breakevenStop: true,
+          },
+        });
+      } else if (totalTrades >= 5 && netR < 0 && (cfg.t1 < 2.0 || cfg.t2 < 3.5)) {
+        list.push({
+          id: "targets_expand",
+          category: "Payoff & Targets",
+          title: "Expand Runner Targets to 2.0R (T1) and 3.5R (T2)",
+          paramKey: "targets",
+          currentDisplay: `T1 ${cfg.t1}R · T2 ${cfg.t2}R`,
+          recommendedDisplay: "T1 2.0R · T2 3.5R",
+          explanation: `Under low win-rate regimes, expand runner target to 3.5R to dramatically boost mathematical expectancy.`,
+          impactBadge: "+High Asymmetry Edge",
+          applyPatch: {
+            t1: 2.0,
+            t2: 3.5,
+            partialTpPct: 50,
+            breakevenStop: true,
+          },
+        });
+      }
+    }
+
+    // 6. Stop-Loss ATR Volatility Buffer
+    if (cfg.atr <= 0.85 || (totalTrades > 0 && losses > wins && cfg.atr < 1.25)) {
       list.push({
         id: "atr",
         category: "Risk Buffer",
@@ -2490,7 +2566,7 @@ function QuantCoachOptimizer({
         paramKey: "atr",
         currentDisplay: `ATR × ${cfg.atr}`,
         recommendedDisplay: "ATR × 1.25 (or Structure)",
-        explanation: `Current ${cfg.atr} ATR stop is too tight for Binance crypto volatility and gets clipped on normal candle wicks. 1.25 ATR gives the trade necessary breathing room without increasing total equity risk.`,
+        explanation: `Current ${cfg.atr} ATR stop gets clipped on normal candle wicks. 1.25 ATR gives the trade necessary breathing room without increasing total equity risk.`,
         impactBadge: "Avoid Premature Stop-Outs",
         applyPatch: {
           atr: 1.25,
@@ -2499,65 +2575,38 @@ function QuantCoachOptimizer({
       });
     }
 
-    // 5. Retest Tolerance Calibration
-    if (cfg.retest <= 0.001) {
-      list.push({
-        id: "retest",
-        category: "Retest Precision",
-        title: "Broaden Retest Tolerance to 0.25% (0.0025)",
-        paramKey: "retest",
-        currentDisplay: `${(cfg.retest * 100).toFixed(2)}%`,
-        recommendedDisplay: "0.25%",
-        explanation: "A strict 0.1% tolerance misses valid pullback retests due to order book spreads on crypto pairs. 0.25% captures high-probability fills.",
-        impactBadge: "+Retest Entry Capture Rate",
-        applyPatch: { retest: 0.0025 },
-      });
-    }
-
-    // 6. RSI Momentum & Two-Bottom/Top Divergence Engine
-    if (cfg.rsiFilter !== "enabled" || cfg.rsiCondition !== "two_bottom_bull_two_top_bear") {
-      list.push({
-        id: "rsi_filter",
-        category: "Momentum Filters",
-        title: "Activate RSI Two-Bottom/Top Divergence Engine",
-        paramKey: "rsiFilter",
-        currentDisplay: cfg.rsiFilter === "enabled" ? "Active" : "Disabled",
-        recommendedDisplay: "Two-Bottom Bull / Two-Top Bear (14)",
-        explanation: "Enforces dual-bottom swing divergence for longs and dual-top swing divergence for shorts, eliminating low-conviction counter-trend fakeouts.",
-        impactBadge: "Divergence Confirmation",
-        applyPatch: {
-          rsiFilter: "enabled",
-          rsiPeriod: 14,
-          rsiOverbought: 70,
-          rsiOversold: 30,
-          rsiCondition: "two_bottom_bull_two_top_bear",
-        },
-      });
-    }
-
-    // 7. MACD Momentum & Two-Top/Bottom Reversal Engine
-    if (cfg.macdFilter !== "enabled" || cfg.macdCondition !== "two_top_bear_two_bottom_bull") {
-      list.push({
-        id: "macd_filter",
-        category: "Momentum Filters",
-        title: "Activate MACD Two-Top/Bottom Reversal Engine",
-        paramKey: "macdFilter",
-        currentDisplay: cfg.macdFilter === "enabled" ? "Active" : "Disabled",
-        recommendedDisplay: "Two-Top Bear / Two-Bottom Bull (12/26/9)",
-        explanation: "Confirms MACD dual swing inflection and histogram expansion before entering, protecting capital during sideways chop.",
-        impactBadge: "Momentum Acceleration Guard",
-        applyPatch: {
-          macdFilter: "enabled",
-          macdFastPeriod: 12,
-          macdSlowPeriod: 26,
-          macdSignalPeriod: 9,
-          macdCondition: "two_top_bear_two_bottom_bull",
-        },
-      });
+    // 7. RSI / MACD Momentum Filter Calibration
+    if (totalTrades < 5) {
+      if (cfg.rsiFilter === "enabled" && cfg.rsiCondition === "two_bottom_bull_two_top_bear") {
+        list.push({
+          id: "rsi_condition",
+          category: "Momentum Filters",
+          title: "Calibrate RSI to Standard Momentum (>50)",
+          paramKey: "rsiCondition",
+          currentDisplay: "Two-Bottom Bull / Two-Top Bear",
+          recommendedDisplay: "Momentum Confirmation (>50)",
+          explanation: "Dual-bottom/top swing divergence is very restrictive and blocked valid setups. Standard momentum confirms direction without starving entries.",
+          impactBadge: "+Unblock RSI Filter",
+          applyPatch: { rsiCondition: "momentum" },
+        });
+      }
+      if (cfg.macdFilter === "enabled" && cfg.macdCondition === "two_top_bear_two_bottom_bull") {
+        list.push({
+          id: "macd_condition",
+          category: "Momentum Filters",
+          title: "Calibrate MACD to Signal Line Crossover",
+          paramKey: "macdCondition",
+          currentDisplay: "Two-Top Bear / Two-Bottom Bull",
+          recommendedDisplay: "Signal Crossover",
+          explanation: "MACD two-peak reversal divergence is very strict. Signal line crossover confirms momentum acceleration without starving trade flow.",
+          impactBadge: "+Unblock MACD Filter",
+          applyPatch: { macdCondition: "signal_crossover" },
+        });
+      }
     }
 
     // 8. Breakeven Stop Check
-    if (!cfg.breakevenStop) {
+    if (!cfg.breakevenStop && totalTrades > 0) {
       list.push({
         id: "breakeven",
         category: "Risk Buffer",
@@ -2623,6 +2672,7 @@ function QuantCoachOptimizer({
 
     setPreviousCfg({ ...cfg });
     const updatedCfg: Cfg = { ...cfg, ...patch };
+    activeCfgRef.current = updatedCfg;
     setCfg(updatedCfg);
     setAppliedNotice(`Applied ${toApply.length} Quant Coach optimization${toApply.length > 1 ? "s" : ""} to your Strategy Builder configuration!`);
     setAppliedPatchesSummary(summaryPills);
@@ -2764,7 +2814,7 @@ function QuantCoachOptimizer({
           </p>
           <button
             type="button"
-            onClick={() => onReRun()}
+            onClick={() => onReRun(activeCfgRef.current)}
             disabled={running}
             style={{
               background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
@@ -2975,7 +3025,7 @@ function QuantCoachOptimizer({
 
           <button
             type="button"
-            onClick={() => onReRun()}
+            onClick={() => onReRun(activeCfgRef.current)}
             disabled={running}
             style={{
               background: running ? "rgba(16, 185, 129, 0.4)" : "linear-gradient(135deg, #10b981 0%, #059669 100%)",

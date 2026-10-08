@@ -432,15 +432,19 @@ int main(int argc, char** argv){
             if(prior_breakout && static_cast<int>(i-breakout_i)>entry_ttl){ prior_breakout=false; expired++; audit.push_back("{\"timestamp\":\""+esc(b.timestamp)+"\",\"event\":\"ENTRY_EXPIRED\",\"reason_code\":\"TTL_EXPIRED\"}"); }
             bool eligible_window = prior_breakout || (can_reentry && !reentry_used && static_cast<int>(i-breakout_i)<=entry_ttl+10);
             if(eligible_window){
-                zone_low=breakout-0.10*b.atr14; zone_high=breakout+0.10*b.atr14; midpoint=(zone_low+zone_high)/2.0;
+                double retest_tol = std::max(breakout * (run_config.strategy.retest_tolerance_pct > 0 ? run_config.strategy.retest_tolerance_pct : 0.001), 0.10 * b.atr14);
+                zone_low = breakout - retest_tol;
+                zone_high = breakout + retest_tol;
+                midpoint = (zone_low + zone_high) / 2.0;
                 bool retest = b.low<=zone_high && b.high>=zone_low;
                 if(retest){
                     retests++;
                     double close_pos=(b.high>b.low)?(b.close-b.low)/(b.high-b.low):0.0; double avgv=avg_volume(bars,i,20); double vol_ratio=avgv>0?b.volume/avgv:1.0;
                     std::vector<std::string> reasons;
-                    if(!(b.close>midpoint)) reasons.push_back("CLOSE_BELOW_RETEST_MIDPOINT");
+                    if(!(b.close>=zone_low)) reasons.push_back("CLOSE_BELOW_RETEST_ZONE");
                     if(!(b.close>b.vwap)) reasons.push_back("CLOSE_BELOW_VWAP");
-                    if(!(close_pos>=0.60)) reasons.push_back("CLOSE_POSITION_LT_0_60");
+                    double min_close_pos = run_config.strategy.min_close_position > 0 ? run_config.strategy.min_close_position : 0.50;
+                    if(!(close_pos>=min_close_pos)) reasons.push_back("CLOSE_POSITION_LT_MIN_CONFIG");
                     if(!(sc.setup_score>=run_config.strategy.min_setup_score)) reasons.push_back("SETUP_SCORE_LT_MIN_CONFIG");
                     if(use_trend_filter && i < htf_bullish.size() && !htf_bullish[i]) { reasons.push_back("HTF_EMA_TREND_NOT_BULLISH"); trend_filter_rejections++; }
                     if(run_config.strategy.rsi_filter.enabled) {
@@ -506,11 +510,11 @@ int main(int argc, char** argv){
                         }
                     }
                     if(!(b.liquidity_score>=0.60)) reasons.push_back("LIQUIDITY_LT_0_60");
-                    if(!(vol_ratio>=1.20)) reasons.push_back("VOLUME_RATIO_LT_1_20");
+                    if(run_config.strategy.timing_filter.rvol_filter && !(vol_ratio>=run_config.strategy.timing_filter.rvol_threshold)) reasons.push_back("VOLUME_RATIO_LT_RVOL_THRESHOLD");
                     if(!(b.spread_pct<=0.50)) reasons.push_back("SPREAD_GT_0_50");
                     if(b.mps_state=="BLOCK") reasons.push_back("MPS_BLOCK");
                     if(b.regime=="SHOCK") reasons.push_back("REGIME_SHOCK");
-                    if(b.mse_state=="TREND_DOWN") reasons.push_back("MSE_TREND_DOWN");
+                    if(b.mse_state=="TREND_DOWN" && b.close < zone_low) reasons.push_back("MSE_TREND_DOWN");
                     entry=b.close; double atr_stop=entry-b.atr14*atr_mult; stop=std::min(atr_stop,zone_low); R=entry-stop; t1=entry+run_config.strategy.targets.target1_R*R; t2=entry+run_config.strategy.targets.target2_R*R; if(R<=0) reasons.push_back("RISK_NOT_POSITIVE");
                     std::string reason_join; for(size_t k=0;k<reasons.size();++k){ if(k) reason_join+='|'; reason_join+=reasons[k]; }
                     if(reason_join.empty()) reason_join="ACCEPTED";

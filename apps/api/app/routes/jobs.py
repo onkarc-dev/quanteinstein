@@ -115,6 +115,23 @@ def submit_backtest(
             raise HTTPException(status_code=422, detail=reason)
 
     job_id = str(uuid.uuid4())
+    cfg_data = payload.config
+    if not cfg_data and payload.strategy_id:
+        p = _p()
+        with get_conn() as conn:
+            row = conn.execute(
+                f"SELECT config_json FROM strategies WHERE (id={p} OR user_strategy_id={p})",
+                (payload.strategy_id, payload.strategy_id),
+            ).fetchone()
+            if row:
+                try:
+                    row_dict = row_to_dict(row)
+                    raw_cfg = row_dict.get("config_json")
+                    if raw_cfg:
+                        cfg_data = json.loads(raw_cfg) if isinstance(raw_cfg, str) else raw_cfg
+                except Exception:
+                    pass
+
     job_payload = {
         "job_id": job_id,
         "user_id": user["id"],
@@ -124,7 +141,7 @@ def submit_backtest(
         "timeframe": payload.timeframe,
         "start_date": payload.start_date,
         "end_date": payload.end_date,
-        "config": payload.config,
+        "config": cfg_data,
     }
 
     _insert_queued_job(job_id, user["id"], payload)

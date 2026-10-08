@@ -162,6 +162,18 @@ def create_job_folder(user_id: str, job_id: str) -> Path:
 
 def write_config(job_payload: Dict[str, Any], job_id: str, output_dir: Path) -> Path:
     payload = dict(job_payload)
+    cfg = payload.get("config") or {}
+    if isinstance(cfg, dict):
+        strat = cfg.get("strategy") or {}
+        if isinstance(strat, dict):
+            if "strategy" not in payload:
+                payload["strategy"] = strat
+            for k, v in strat.items():
+                if k not in payload:
+                    payload[k] = v
+        for k, v in cfg.items():
+            if k != "strategy" and k not in payload:
+                payload[k] = v
     payload["job_id"] = job_id
     payload["output_dir"] = str(output_dir)
     payload["paths"] = {
