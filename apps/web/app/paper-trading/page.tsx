@@ -570,9 +570,17 @@ export default function PaperTradingPage() {
       setStrategies(list);
 
       let matched: any = null;
+      let querySymbolsList: string[] = [];
       if (typeof window !== "undefined") {
         const urlParams = new URLSearchParams(window.location.search);
         const queryStrat = urlParams.get("strategy_id");
+        const querySymbols = urlParams.get("symbols") || urlParams.get("symbol");
+        if (querySymbols) {
+          querySymbolsList = querySymbols
+            .split(",")
+            .map((s) => s.trim().toUpperCase())
+            .filter(Boolean);
+        }
         if (queryStrat) {
           const q = queryStrat.trim();
           matched = list.find(
@@ -589,17 +597,34 @@ export default function PaperTradingPage() {
         }
       }
 
+      if (querySymbolsList.length > 0) {
+        setAllSymbols((prev) => Array.from(new Set([...querySymbolsList, ...prev])));
+      }
+
       if (matched) {
         setSelectedStrategyId(matched.id);
-        if (matched.symbols?.length) setSelectedSymbols(matched.symbols);
-        if (matched.symbols?.[0]) setChartSymbol(matched.symbols[0]);
+        const targetSymbols = querySymbolsList.length
+          ? querySymbolsList
+          : matched.symbols?.length
+          ? matched.symbols
+          : ["BTCUSDT"];
+        setSelectedSymbols(targetSymbols);
+        if (targetSymbols[0]) setChartSymbol(targetSymbols[0]);
         setMessage(
-          `Loaded strategy "${matched.display_name || matched.name || matched.user_strategy_id || matched.id}". Live engine parameters updated.`
+          `Loaded strategy "${matched.display_name || matched.name || matched.user_strategy_id || matched.id}" with ${targetSymbols.length} active market${targetSymbols.length > 1 ? "s" : ""}. Live engine parameters updated.`
         );
       } else if (!selectedStrategyId && list.length) {
         setSelectedStrategyId(list[0].id);
-        if (list[0].symbols?.length) setSelectedSymbols(list[0].symbols);
-        if (list[0].symbols?.[0]) setChartSymbol(list[0].symbols[0]);
+        const targetSymbols = querySymbolsList.length
+          ? querySymbolsList
+          : list[0].symbols?.length
+          ? list[0].symbols
+          : ["BTCUSDT"];
+        setSelectedSymbols(targetSymbols);
+        if (targetSymbols[0]) setChartSymbol(targetSymbols[0]);
+      } else if (querySymbolsList.length > 0) {
+        setSelectedSymbols(querySymbolsList);
+        if (querySymbolsList[0]) setChartSymbol(querySymbolsList[0]);
       }
     } catch (err) {
       setMessage(

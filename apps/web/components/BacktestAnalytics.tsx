@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { classifyTradeResultFromR, cleanupExitReason } from "../lib/tradeClassification";
 
 export interface TradeRecord {
@@ -38,10 +39,23 @@ export interface SymbolStat {
   worst_R: number;
 }
 
+export type SortKey =
+  | "win_rate"
+  | "symbol"
+  | "trades"
+  | "gross_R"
+  | "net_R"
+  | "profit_factor"
+  | "max_drawdown_in_R"
+  | "avg_R"
+  | "best_R";
+export type SortDirection = "asc" | "desc";
+
 interface BacktestAnalyticsProps {
   trades: TradeRecord[];
   summary?: any;
   strategyName?: string;
+  strategyId?: string;
   feePct?: number;
   slippagePct?: number;
   riskPct?: number;
@@ -84,6 +98,7 @@ export default function BacktestAnalytics({
   trades = [],
   summary,
   strategyName = "PRISM_STRATEGY",
+  strategyId,
   feePct = 0.04,
   slippagePct = 0.01,
   riskPct = 1.0,
@@ -96,28 +111,39 @@ export default function BacktestAnalytics({
   const [logPageSize, setLogPageSize] = useState<number>(15);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  // Available unique symbols
+  // Sorting state for Basket Breakdown table: defaults to Win Rate descending (100% -> 0%)
+  const [sortKey, setSortKey] = useState<SortKey>("win_rate");
+  const [sortDir, setSortDir] = useState<SortDirection>("desc");
+
+  // Selection state for deploying specific symbols to Live Paper Trading
+  const [selectedPaperSymbols, setSelectedPaperSymbols] = useState<Set<string>>(new Set());
+
+  // Available unique symbols (merges trades, tested basket symbols, and per-symbol summary breakdown)
   const uniqueSymbols = useMemo(() => {
     const set = new Set<string>();
+    if (Array.isArray(summary?.symbols)) {
+      summary.symbols.forEach((s: any) => {
+        if (s && typeof s === "string") set.add(s.trim().toUpperCase());
+      });
+    }
+    if (summary?.per_symbol_breakdown && typeof summary.per_symbol_breakdown === "object") {
+      Object.keys(summary.per_symbol_breakdown).forEach((s) => {
+        if (s) set.add(String(s).trim().toUpperCase());
+      });
+    }
     trades.forEach((t) => {
       const s = String(t.symbol || "").trim().toUpperCase();
       if (s) set.add(s);
     });
-    // Fallback to tested basket symbols when zero trades executed so all markets remain visible
-    if (set.size === 0) {
-      if (Array.isArray(summary?.symbols)) {
-        summary.symbols.forEach((s: any) => {
-          if (s && typeof s === "string") set.add(s.trim().toUpperCase());
-        });
-      }
-      if (summary?.per_symbol_breakdown && typeof summary.per_symbol_breakdown === "object") {
-        Object.keys(summary.per_symbol_breakdown).forEach((s) => {
-          if (s) set.add(String(s).trim().toUpperCase());
-        });
-      }
-    }
     return Array.from(set).sort();
   }, [trades, summary]);
+
+  // Synchronize paper trading symbol selection when uniqueSymbols updates
+  useEffect(() => {
+    if (uniqueSymbols.length > 0) {
+      setSelectedPaperSymbols(new Set(uniqueSymbols));
+    }
+  }, [uniqueSymbols, strategyId]);
 
   // Filtered trades based on top symbol filter
   const activeTrades = useMemo(() => {
@@ -297,6 +323,93 @@ export default function BacktestAnalytics({
       worst_R: Math.min(0, ...symbolBreakdown.map((s) => s.worst_R)),
     };
   }, [symbolBreakdown, summary, curveStats]);
+
+  // Strategy ID resolution for paper trading deployment
+  const effectiveStrategyId = useMemo(() => {
+    return (
+      strategyId ||
+      summary?.strategy_id ||
+      summary?.job_id ||
+      summary?.id ||
+      (strategyName && strategyName !== "PRISM_STRATEGY" ? strategyName : null) ||
+      "PRISM_BREAKOUT_RETEST"
+    );
+  }, [strategyId, summary, strategyName]);
+
+  // Sorted breakdown rows based on user-selected column or default Win Rate (descending: 100% -> 0%)
+  const sortedBreakdown = useMemo(() => {
+    return [...symbolBreakdown].sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "win_rate") {
+        cmp = b.win_rate - a.win_rate;
+        if (cmp === 0) cmp = b.net_R - a.net_R;
+        if (cmp === 0) cmp = b.gross_R - a.gross_R;
+        if (cmp === 0) cmp = a.symbol.localeCompare(b.symbol);
+        return sortDir === "desc" ? cmp : -cmp;
+      }
+      if (sortKey === "symbol") {
+        cmp = a.symbol.localeCompare(b.symbol);
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      if (sortKey === "profit_factor") {
+        const pfa = a.profit_factor != null ? a.profit_factor : -1;
+        const pfb = b.profit_factor != null ? b.profit_factor : -1;
+        cmp = pfa - pfb;
+        if (cmp === 0) cmp = b.net_R - a.net_R;
+        return sortDir === "desc" ? -cmp : cmp;
+      }
+      const valA = (a as any)[sortKey] ?? 0;
+      const valB = (b as any)[sortKey] ?? 0;
+      cmp = valA - valB;
+      if (cmp === 0) cmp = b.net_R - a.net_R;
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+  }, [symbolBreakdown, sortKey, sortDir]);
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "symbol" ? "asc" : "desc");
+    }
+  }
+
+  // Winning symbols: positive net return or gross positive with >=50% win rate
+  const winningSymbols = useMemo(() => {
+    return symbolBreakdown
+      .filter((s) => s.net_R > 0 || (s.gross_R > 0 && s.win_rate >= 0.5))
+      .map((s) => s.symbol);
+  }, [symbolBreakdown]);
+
+  function togglePaperSymbol(sym: string) {
+    setSelectedPaperSymbols((prev) => {
+      const next = new Set(prev);
+      if (next.has(sym)) next.delete(sym);
+      else next.add(sym);
+      return next;
+    });
+  }
+
+  function selectAllSymbols() {
+    setSelectedPaperSymbols(new Set(symbolBreakdown.map((s) => s.symbol)));
+  }
+
+  function selectWinnersOnly() {
+    const list = winningSymbols.length > 0
+      ? winningSymbols
+      : symbolBreakdown.filter((s) => s.win_rate > 0).map((s) => s.symbol);
+    setSelectedPaperSymbols(new Set(list));
+  }
+
+  function clearSymbolSelection() {
+    setSelectedPaperSymbols(new Set());
+  }
+
+  const allSelected = sortedBreakdown.length > 0 && sortedBreakdown.every((s) => selectedPaperSymbols.has(s.symbol));
+  const selectedSymbolsList = Array.from(selectedPaperSymbols);
+  const paperDeployUrl = `/paper-trading?strategy_id=${encodeURIComponent(effectiveStrategyId)}${selectedSymbolsList.length ? `&symbols=${encodeURIComponent(selectedSymbolsList.join(","))}` : ""}`;
+
 
   // Filtered trades for Inspection Log Table
   const filteredLogTrades = useMemo(() => {
@@ -876,20 +989,142 @@ export default function BacktestAnalytics({
           boxShadow: "0 10px 25px rgba(0, 0, 0, 0.25)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 14 }}>
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 16 }}>🪙</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 18 }}>🪙</span>
               <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
                 Multi-Market Basket Performance Breakdown
               </h3>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 12,
+                  background: "rgba(56, 189, 248, 0.15)",
+                  color: "#38bdf8",
+                  border: "1px solid rgba(56, 189, 248, 0.3)",
+                }}
+              >
+                Sorted by {sortKey === "win_rate" ? "Win Rate (100% → 0%)" : sortKey} {sortDir === "desc" ? "↓" : "↑"}
+              </span>
             </div>
             <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-              Independent performance attribution per tested cryptocurrency pair ({symbolBreakdown.length} markets)
+              Independent performance attribution across {symbolBreakdown.length} tested cryptocurrency markets.
+              Select top performers to deploy directly to Live Paper Trading.
             </p>
           </div>
-          <div style={{ fontSize: 11, color: "#94a3b8" }}>
-            Click any row to filter trade log and equity curve
+
+          {/* Action CTA: Deploy to Paper Trading */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <Link
+              href={selectedSymbolsList.length > 0 ? paperDeployUrl : "#"}
+              onClick={(e) => {
+                if (selectedSymbolsList.length === 0) {
+                  e.preventDefault();
+                }
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 16px",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 700,
+                textDecoration: "none",
+                color: selectedSymbolsList.length > 0 ? "#0f172a" : "#64748b",
+                background: selectedSymbolsList.length > 0
+                  ? "linear-gradient(135deg, #38bdf8 0%, #34d399 100%)"
+                  : "rgba(30, 41, 59, 0.6)",
+                border: selectedSymbolsList.length > 0 ? "none" : "1px solid #334155",
+                cursor: selectedSymbolsList.length > 0 ? "pointer" : "not-allowed",
+                boxShadow: selectedSymbolsList.length > 0 ? "0 4px 14px rgba(56, 189, 248, 0.3)" : "none",
+                transition: "all 0.15s ease",
+              }}
+              title={selectedSymbolsList.length > 0 ? `Deploy ${effectiveStrategyId} with ${selectedSymbolsList.length} market(s) to Paper Trading` : "Select at least 1 market to deploy"}
+            >
+              <span style={{ fontSize: 14 }}>🚀</span>
+              <span>Deploy Selected ({selectedSymbolsList.length}) to Paper Trading →</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* Quick Market Selection Toolbar */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+            background: "rgba(15, 23, 42, 0.6)",
+            border: "1px solid rgba(255, 255, 255, 0.06)",
+            borderRadius: 10,
+            padding: "8px 14px",
+            marginBottom: 14,
+            fontSize: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ color: "#94a3b8", fontWeight: 600 }}>Quick Select for Paper Trading:</span>
+            <button
+              onClick={selectAllSymbols}
+              style={{
+                background: allSelected ? "rgba(56, 189, 248, 0.2)" : "rgba(30, 41, 59, 0.8)",
+                border: allSelected ? "1px solid #38bdf8" : "1px solid #334155",
+                color: allSelected ? "#38bdf8" : "#cbd5e1",
+                padding: "3px 10px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Select All ({symbolBreakdown.length})
+            </button>
+            <button
+              onClick={selectWinnersOnly}
+              style={{
+                background: "rgba(34, 197, 94, 0.12)",
+                border: "1px solid rgba(34, 197, 94, 0.3)",
+                color: "#4ade80",
+                padding: "3px 10px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              🏆 Select Winners Only ({winningSymbols.length})
+            </button>
+            <button
+              onClick={clearSymbolSelection}
+              style={{
+                background: "rgba(30, 41, 59, 0.6)",
+                border: "1px solid #334155",
+                color: "#94a3b8",
+                padding: "3px 10px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Clear
+            </button>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, color: "#94a3b8", fontSize: 11 }}>
+            <span>
+              <strong style={{ color: selectedSymbolsList.length > 0 ? "#38bdf8" : "#94a3b8" }}>
+                {selectedSymbolsList.length}
+              </strong>{" "}
+              of {symbolBreakdown.length} markets selected
+            </span>
+            <span style={{ color: "#475569" }}>•</span>
+            <span>💡 Click row to isolate chart & trade log</span>
           </div>
         </div>
 
@@ -897,45 +1132,254 @@ export default function BacktestAnalytics({
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.1)", color: "#94a3b8" }}>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Market</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Trades</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>W / L / BE</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Win Rate</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Gross Return</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Net Return (Fric)</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Profit Factor</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Max DD (R)</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Avg R / Trade</th>
-                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>Best / Worst</th>
+                {/* Select All Checkbox + Market Column */}
+                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() => {
+                        if (allSelected) clearSymbolSelection();
+                        else selectAllSymbols();
+                      }}
+                      style={{ cursor: "pointer", accentColor: "#38bdf8", width: 14, height: 14 }}
+                      title="Select / Deselect all markets for Paper Trading"
+                    />
+                    <div
+                      onClick={() => handleSort("symbol")}
+                      style={{
+                        cursor: "pointer",
+                        userSelect: "none",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        color: sortKey === "symbol" ? "#38bdf8" : "#94a3b8",
+                      }}
+                      title="Sort by Market symbol"
+                    >
+                      <span>Market</span>
+                      <span style={{ fontSize: 10, color: sortKey === "symbol" ? "#38bdf8" : "#64748b" }}>
+                        {sortKey === "symbol" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                      </span>
+                    </div>
+                  </div>
+                </th>
+
+                {/* Sortable Metrics */}
+                <th
+                  onClick={() => handleSort("trades")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "trades" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by total trades executed"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Trades</span>
+                    <span style={{ fontSize: 10, color: sortKey === "trades" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "trades" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th style={{ padding: "10px 12px", textTransform: "uppercase", fontSize: 11, color: "#94a3b8" }}>
+                  W / L / BE
+                </th>
+
+                <th
+                  onClick={() => handleSort("win_rate")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "win_rate" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Win Rate (100% to 0%)"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Win Rate</span>
+                    <span style={{ fontSize: 10, color: sortKey === "win_rate" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "win_rate" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort("gross_R")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "gross_R" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Gross Realized R"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Gross Return</span>
+                    <span style={{ fontSize: 10, color: sortKey === "gross_R" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "gross_R" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort("net_R")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "net_R" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Net Return (after fees & slippage friction)"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Net Return (Fric)</span>
+                    <span style={{ fontSize: 10, color: sortKey === "net_R" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "net_R" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort("profit_factor")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "profit_factor" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Profit Factor"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Profit Factor</span>
+                    <span style={{ fontSize: 10, color: sortKey === "profit_factor" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "profit_factor" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort("max_drawdown_in_R")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "max_drawdown_in_R" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Maximum Drawdown in R"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Max DD (R)</span>
+                    <span style={{ fontSize: 10, color: sortKey === "max_drawdown_in_R" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "max_drawdown_in_R" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort("avg_R")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "avg_R" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Average R per trade"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Avg R / Trade</span>
+                    <span style={{ fontSize: 10, color: sortKey === "avg_R" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "avg_R" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
+
+                <th
+                  onClick={() => handleSort("best_R")}
+                  style={{
+                    padding: "10px 12px",
+                    textTransform: "uppercase",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    color: sortKey === "best_R" ? "#38bdf8" : "#94a3b8",
+                  }}
+                  title="Sort by Best trade return"
+                >
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span>Best / Worst</span>
+                    <span style={{ fontSize: 10, color: sortKey === "best_R" ? "#38bdf8" : "#64748b" }}>
+                      {sortKey === "best_R" ? (sortDir === "desc" ? "▼" : "▲") : "↕"}
+                    </span>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {symbolBreakdown.map((s) => {
-                const isSelected = selectedSymbolFilter === s.symbol;
+              {sortedBreakdown.map((s) => {
+                const isSelectedFilter = selectedSymbolFilter === s.symbol;
+                const isPaperSelected = selectedPaperSymbols.has(s.symbol);
                 return (
                   <tr
                     key={s.symbol}
-                    onClick={() => setSelectedSymbolFilter(isSelected ? "ALL" : s.symbol)}
+                    onClick={() => setSelectedSymbolFilter(isSelectedFilter ? "ALL" : s.symbol)}
                     style={{
                       borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
                       cursor: "pointer",
-                      background: isSelected ? "rgba(99, 102, 241, 0.15)" : "transparent",
+                      background: isSelectedFilter
+                        ? "rgba(99, 102, 241, 0.15)"
+                        : isPaperSelected
+                        ? "rgba(56, 189, 248, 0.03)"
+                        : "transparent",
                       transition: "background 0.15s ease",
                     }}
                   >
+                    {/* Market Checkbox + Badge */}
                     <td style={{ padding: "11px 12px", fontWeight: 700, color: "#f8fafc" }}>
-                      <span
-                        style={{
-                          background: isSelected ? "rgba(99, 102, 241, 0.3)" : "rgba(30, 41, 59, 0.8)",
-                          border: `1px solid ${isSelected ? "#818cf8" : "rgba(255,255,255,0.08)"}`,
-                          borderRadius: 6,
-                          padding: "3px 8px",
-                          fontSize: 11,
-                          letterSpacing: "0.02em",
-                        }}
-                      >
-                        {s.symbol}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={isPaperSelected}
+                          onChange={() => togglePaperSymbol(s.symbol)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            cursor: "pointer",
+                            accentColor: "#38bdf8",
+                            width: 14,
+                            height: 14,
+                          }}
+                          title="Toggle market for Live Paper Trading deployment"
+                        />
+                        <span
+                          style={{
+                            background: isSelectedFilter ? "rgba(99, 102, 241, 0.3)" : "rgba(30, 41, 59, 0.8)",
+                            border: `1px solid ${isSelectedFilter ? "#818cf8" : isPaperSelected ? "rgba(56, 189, 248, 0.3)" : "rgba(255,255,255,0.08)"}`,
+                            borderRadius: 6,
+                            padding: "3px 8px",
+                            fontSize: 11,
+                            letterSpacing: "0.02em",
+                            color: isPaperSelected ? "#f8fafc" : "#94a3b8",
+                          }}
+                        >
+                          {s.symbol}
+                        </span>
+                      </div>
                     </td>
                     <td style={{ padding: "11px 12px", color: "#cbd5e1" }}>{s.trades}</td>
                     <td style={{ padding: "11px 12px", color: "#94a3b8" }}>
@@ -979,7 +1423,10 @@ export default function BacktestAnalytics({
                 }}
               >
                 <td style={{ padding: "12px", color: "#38bdf8" }}>
-                  BASKET TOTAL ({symbolBreakdown.length} PAIRS)
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 13 }}>📊</span>
+                    <span>BASKET TOTAL ({symbolBreakdown.length} PAIRS)</span>
+                  </div>
                 </td>
                 <td style={{ padding: "12px", color: "#f8fafc" }}>{basketTotal.trades}</td>
                 <td style={{ padding: "12px", color: "#cbd5e1" }}>
@@ -1013,6 +1460,55 @@ export default function BacktestAnalytics({
             </tfoot>
           </table>
         </div>
+
+        {/* Bottom Quick Deploy Action for large baskets */}
+        {symbolBreakdown.length > 5 && (
+          <div
+            style={{
+              marginTop: 14,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 10,
+              padding: "10px 14px",
+              background: "rgba(15, 23, 42, 0.4)",
+              borderRadius: 8,
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>
+              Ready to execute with the backtested strategy? Deploy your selected{" "}
+              <strong style={{ color: "#38bdf8" }}>{selectedSymbolsList.length}</strong> market(s) directly:
+            </div>
+            <Link
+              href={selectedSymbolsList.length > 0 ? paperDeployUrl : "#"}
+              onClick={(e) => {
+                if (selectedSymbolsList.length === 0) {
+                  e.preventDefault();
+                }
+              }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 14px",
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 700,
+                textDecoration: "none",
+                color: selectedSymbolsList.length > 0 ? "#0f172a" : "#64748b",
+                background: selectedSymbolsList.length > 0
+                  ? "linear-gradient(135deg, #38bdf8 0%, #34d399 100%)"
+                  : "rgba(30, 41, 59, 0.6)",
+                cursor: selectedSymbolsList.length > 0 ? "pointer" : "not-allowed",
+              }}
+            >
+              <span>🚀</span>
+              <span>Deploy ({selectedSymbolsList.length}) to Paper Trading →</span>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* ─── MODULE 3: TRADE-BY-TRADE INSPECTION LOG & CSV EXPORT ─── */}

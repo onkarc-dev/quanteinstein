@@ -842,6 +842,7 @@ export default function Backtests() {
             <BacktestAnalytics
               trades={trades}
               summary={summary}
+              strategyId={selected?.strategy_id || selected?.id || selected?.display_strategy_id}
               strategyName={displayStrategy(selected)}
             />
           )}

@@ -3250,6 +3250,7 @@ function BacktestResult({
       <BacktestAnalytics
         trades={activeTradesList}
         summary={s}
+        strategyId={deployTargetId}
         strategyName={job.display_strategy_id || deployTargetId}
         feePct={fric.fee_pct_per_side ?? 0.04}
         slippagePct={fric.slippage_pct_per_side ?? 0.01}
