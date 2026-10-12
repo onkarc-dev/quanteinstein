@@ -23,8 +23,18 @@ from app.core.config import settings
 from app.services.live_paper import POPULAR_SYMBOLS
 
 SUPPORTED_SYMBOLS = POPULAR_SYMBOLS
-SUPPORTED_INTERVALS = ["1s", "5s", "10s", "15s", "30s", "1m", "5m", "15m", "1h"]
-BINANCE_INTERVALS = {"1s", "1m", "5m", "15m", "1h"}
+SUPPORTED_INTERVALS = [
+    "1s", "5s", "10s", "15s", "30s",
+    "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1w",
+    "1M", "3M", "6M", "9M", "12M",
+]
+BINANCE_INTERVALS = {
+    "1s", "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1w", "1M",
+}
 CHUNK_LIMIT = 1000
 REQUEST_TIMEOUT = 8
 MAX_RETRIES = 3
@@ -61,19 +71,33 @@ def parse_date_utc(date_text: str, end_of_day: bool = False) -> datetime:
 
 
 def interval_seconds(tf: str) -> int:
-    unit = tf[-1]
-    n = int(tf[:-1])
+    raw = str(tf or "1m").strip()
+    if raw.endswith("M"):
+        n = int(raw[:-1])
+        return 31536000 if n == 12 else n * 2592000
+    unit = raw[-1].lower()
+    n = int(raw[:-1])
     if unit == "s":
         return n
     if unit == "m":
         return n * 60
     if unit == "h":
         return n * 3600
+    if unit == "d":
+        return n * 86400
+    if unit == "w":
+        return n * 604800
+    if unit == "y":
+        return n * 31536000
     raise ValueError(f"Unsupported timeframe: {tf}")
 
 
 def _interval_for_binance(tf: str) -> str:
-    return tf if tf in BINANCE_INTERVALS else "1s"
+    if tf in BINANCE_INTERVALS:
+        return tf
+    if str(tf).endswith("M"):
+        return "1d"
+    return "1s"
 
 
 def _safe_symbol(symbol: str) -> str:
@@ -86,9 +110,25 @@ def _safe_symbol(symbol: str) -> str:
 
 
 def _safe_timeframe(tf: str) -> str:
-    t = (tf or "1m").lower().strip()
+    raw = (tf or "1m").strip()
+    low = raw.lower()
+    alias_map = {
+        "1mo": "1M",
+        "3mo": "3M",
+        "6mo": "6M",
+        "9mo": "9M",
+        "12mo": "12M",
+        "1y": "12M",
+        "1yr": "12M",
+    }
+    if low in alias_map:
+        t = alias_map[low]
+    elif raw.endswith("M") and raw[:-1].isdigit():
+        t = raw
+    else:
+        t = low
     if t not in SUPPORTED_INTERVALS:
-        raise ValueError(f"Unsupported timeframe {t}. Allowed: {', '.join(SUPPORTED_INTERVALS)}")
+        raise ValueError(f"Unsupported timeframe {raw}. Allowed: {', '.join(SUPPORTED_INTERVALS)}")
     return t
 
 
@@ -340,13 +380,20 @@ def fetch_real_binance_csv(
     if start_dt >= end_dt:
         raise ValueError("Start date must be before end date.")
     days = max(1, (end_dt.date() - start_dt.date()).days + 1)
-    if interval_seconds(timeframe) < 60 and days > 7:
+    tf_sec = interval_seconds(timeframe)
+    if tf_sec < 60 and days > 7:
         raise ValueError(
             "Sub-minute historical backtests are limited to 7 days because real 1s Binance data is extremely large. "
             "Use 1m+ for 30/90/365 day backtests; live paper can still use 1s/5s."
         )
+    if tf_sec >= 14400:
+        min_span_sec = 45 * tf_sec
+        if (end_dt - start_dt).total_seconds() < min_span_sec:
+            binance_genesis = datetime(2017, 8, 17, tzinfo=timezone.utc)
+            start_dt = max(binance_genesis, end_dt - timedelta(seconds=min_span_sec))
 
-    out_dir = settings.project_root / "data" / "binance" / symbol / timeframe
+    tf_dir_name = f"{timeframe[:-1]}mo" if timeframe.endswith("M") else timeframe
+    out_dir = settings.project_root / "data" / "binance" / symbol / tf_dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / f"{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.csv"
     meta_path = out_dir / f"{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.meta.json"

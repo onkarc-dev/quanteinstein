@@ -35,9 +35,24 @@ function timeframeToSeconds(tf: string): number {
     case "15s": return 15;
     case "30s": return 30;
     case "1m": return 60;
+    case "3m": return 180;
     case "5m": return 300;
     case "15m": return 900;
+    case "30m": return 1800;
     case "1h": return 3600;
+    case "2h": return 7200;
+    case "4h": return 14400;
+    case "6h": return 21600;
+    case "8h": return 28800;
+    case "12h": return 43200;
+    case "1d": return 86400;
+    case "3d": return 259200;
+    case "1w": return 604800;
+    case "1M": return 2592000;
+    case "3M": return 7776000;
+    case "6M": return 15552000;
+    case "9M": return 23328000;
+    case "12M": return 31536000;
     default: return 60;
   }
 }

@@ -1892,14 +1892,22 @@ def fetch_recent_candles(symbol: str, interval: str = "1m", limit: int = 100) ->
     }
     sym = symbol.strip().upper()
     lim = max(10, min(int(limit), 500))
+    raw_interval = str(interval or "1m").strip()
+    months_group = 1
+    query_interval = raw_interval
+    if raw_interval in ("3M", "6M", "9M", "12M"):
+        months_group = int(raw_interval[:-1])
+        query_interval = "1M"
+    query_lim = min(1000, lim * months_group)
+
     for base in ("https://data-api.binance.vision", "https://api.binance.com", "https://api.binance.us"):
         try:
-            url = f"{base}/api/v3/klines?symbol={sym}&interval={interval}&limit={lim}"
+            url = f"{base}/api/v3/klines?symbol={sym}&interval={query_interval}&limit={query_lim}"
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if isinstance(data, list) and data:
-                return [
+                candles = [
                     {
                         "time": int(k[0] // 1000),
                         "open": _float(k[1]),
@@ -1911,6 +1919,22 @@ def fetch_recent_candles(symbol: str, interval: str = "1m", limit: int = 100) ->
                     for k in data
                     if isinstance(k, list) and len(k) >= 6
                 ]
+                if months_group > 1 and candles:
+                    grouped: List[Dict[str, Any]] = []
+                    for idx in range(0, len(candles), months_group):
+                        grp = candles[idx : idx + months_group]
+                        grouped.append(
+                            {
+                                "time": grp[0]["time"],
+                                "open": grp[0]["open"],
+                                "high": max(c["high"] for c in grp),
+                                "low": min(c["low"] for c in grp),
+                                "close": grp[-1]["close"],
+                                "volume": sum(c["volume"] for c in grp),
+                            }
+                        )
+                    return grouped[-lim:]
+                return candles
         except Exception:
             continue
     return []

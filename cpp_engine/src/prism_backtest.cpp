@@ -544,7 +544,12 @@ int main(int argc, char** argv) {
     std::string entry_regime, entry_timestamp;
     PendingOrder pending_order;
 
-    const int lookback = std::max(1, run_config.strategy.breakout_lookback);
+    const int raw_lookback = std::max(1, run_config.strategy.breakout_lookback);
+    const int lookback = (run_config.bar_seconds >= 7776000)
+        ? std::min(raw_lookback, 3)
+        : (run_config.bar_seconds >= 2592000)
+            ? std::min(raw_lookback, 6)
+            : raw_lookback;
     const int entry_ttl = std::max(1, run_config.strategy.ttl_bars);
     const int trade_ttl = std::max(1, run_config.strategy.ttl_bars);
     const double atr_mult = run_config.strategy.stop_loss.atr_multiplier;

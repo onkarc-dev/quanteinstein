@@ -87,6 +87,10 @@ const RANGE_PRESETS = [
   ["Last 90 days", 90],
   ["Last 180 days", 180],
   ["Last 1 year", 365],
+  ["Last 2 years", 730],
+  ["Last 3 years", 1095],
+  ["Last 5 years", 1825],
+  ["Max History (8 years)", 2920],
 ] as const;
 
 const POPULAR_SYMBOLS = [
@@ -133,13 +137,58 @@ const CATEGORY_MAP: Record<string, string[]> = {
   ],
 };
 
-const TIMEFRAMES = ["1s", "5s", "10s", "15s", "30s", "1m", "5m", "15m", "1h"];
+const TIMEFRAMES = [
+  "1s", "5s", "10s", "15s", "30s",
+  "1m", "5m", "15m",
+  "1h", "2h", "4h", "8h", "12h",
+  "1d", "1w",
+  "1M", "3M", "6M", "9M", "12M",
+];
 
 function timeframeToSeconds(tf: string) {
-  const m = tf.match(/^(\d+)([smh])$/);
+  const raw = String(tf || "1m").trim();
+  if (raw.endsWith("M")) {
+    const n = Number(raw.slice(0, -1));
+    if (!Number.isFinite(n) || n <= 0) return 2592000;
+    return n === 12 ? 31536000 : n * 2592000;
+  }
+  const m = raw.match(/^(\d+)([smhdwy])$/i);
   if (!m) return 60;
   const n = Number(m[1]);
-  return m[2] === "s" ? n : m[2] === "m" ? n * 60 : n * 3600;
+  const u = m[2].toLowerCase();
+  if (u === "s") return n;
+  if (u === "m") return n * 60;
+  if (u === "h") return n * 3600;
+  if (u === "d") return n * 86400;
+  if (u === "w") return n * 604800;
+  return n * 31536000;
+}
+
+const TIMEFRAME_LABELS: Record<string, string> = {
+  "1s": "1s (1s candles)",
+  "5s": "5s (5s candles)",
+  "10s": "10s (10s candles)",
+  "15s": "15s (15s candles)",
+  "30s": "30s (30s candles)",
+  "1m": "1m (60s candles)",
+  "5m": "5m (300s candles)",
+  "15m": "15m (900s candles)",
+  "1h": "1h (1 hr · 3600s candles)",
+  "2h": "2h (2 hrs · 7200s candles)",
+  "4h": "4h (4 hrs · 14400s candles)",
+  "8h": "8h (8 hrs · 28800s candles)",
+  "12h": "12h (12 hrs · 43200s candles)",
+  "1d": "1d (1 day · 86400s candles)",
+  "1w": "1w (1 week · 7d candles)",
+  "1M": "1M (1 month · 30d candles)",
+  "3M": "3M (3 months · 90d candles)",
+  "6M": "6M (6 months · 180d candles)",
+  "9M": "9M (9 months · 270d candles)",
+  "12M": "12M (12 months / 1 yr candles)",
+};
+
+function formatTimeframeOption(tf: string) {
+  return TIMEFRAME_LABELS[tf] || `${tf} (${timeframeToSeconds(tf)}s candles)`;
 }
 
 function fmt(n: any, d = 2) {
@@ -347,6 +396,44 @@ export default function StrategyBuilderPage() {
   }, []);
 
   function upd(k: keyof Cfg, v: any) {
+    if (k === "timeframe") {
+      const nextTf = String(v);
+      const nextSec = timeframeToSeconds(nextTf);
+      if (nextSec >= 7776000) {
+        setStartDate(rangeStart(2920));
+      } else if (nextSec >= 2592000) {
+        setStartDate(rangeStart(1825));
+      } else if (nextSec >= 604800) {
+        setStartDate(rangeStart(1095));
+      } else if (nextSec >= 86400) {
+        setStartDate(rangeStart(365));
+      } else if (nextSec >= 43200) {
+        setStartDate(rangeStart(180));
+      } else if (nextSec >= 14400) {
+        setStartDate(rangeStart(90));
+      } else if (nextSec >= 3600) {
+        setStartDate(rangeStart(45));
+      }
+      setCfg((prev) => {
+        const idx = TIMEFRAMES.indexOf(nextTf);
+        const defaultHtf = idx >= 0 && idx + 1 < TIMEFRAMES.length ? TIMEFRAMES[idx + 1] : nextTf;
+        const nextTrendTf =
+          timeframeToSeconds(prev.trendTimeframe) <= nextSec ? defaultHtf : prev.trendTimeframe;
+        let nextLookback = prev.lookback;
+        if (nextSec >= 7776000 && prev.lookback > 3) {
+          nextLookback = 3;
+        } else if (nextSec >= 2592000 && prev.lookback > 6) {
+          nextLookback = 6;
+        }
+        return {
+          ...prev,
+          timeframe: nextTf,
+          trendTimeframe: nextTrendTf,
+          lookback: nextLookback,
+        };
+      });
+      return;
+    }
     setCfg((prev) => ({ ...prev, [k]: v }));
   }
 
@@ -727,7 +814,7 @@ export default function StrategyBuilderPage() {
               >
                 {TIMEFRAMES.map((tf) => (
                   <option key={tf} value={tf}>
-                    {tf} ({timeframeToSeconds(tf)}s candles)
+                    {formatTimeframeOption(tf)}
                   </option>
                 ))}
               </select>
@@ -1104,7 +1191,7 @@ export default function StrategyBuilderPage() {
                   onChange={(e) => upd("trendTimeframe", e.target.value)}
                 >
                   {TIMEFRAMES.filter((tf) => timeframeToSeconds(tf) >= timeframeToSeconds(cfg.timeframe)).map((tf) => (
-                    <option key={tf} value={tf}>{tf}</option>
+                    <option key={tf} value={tf}>{formatTimeframeOption(tf)}</option>
                   ))}
                 </select>
               </label>
@@ -2414,50 +2501,35 @@ function QuantCoachOptimizer({
         applyPatch: { trendFilter: "disabled" },
       });
     } else if (cfg.trendFilter === "enabled") {
-      if (cfg.timeframe === "15m" && cfg.trendTimeframe !== "1h") {
+      const htfMap: Record<string, string> = {
+        "1m": "5m",
+        "5m": "15m",
+        "15m": "1h",
+        "1h": "4h",
+        "2h": "8h",
+        "4h": "1d",
+        "8h": "1d",
+        "12h": "1w",
+        "1d": "1w",
+        "1w": "1M",
+        "1M": "3M",
+        "3M": "6M",
+        "6M": "12M",
+        "9M": "12M",
+      };
+      const recommendedHtf = htfMap[cfg.timeframe];
+      if (recommendedHtf && cfg.trendTimeframe !== recommendedHtf) {
         list.push({
           id: "trend_timeframe",
           category: "Trend Confluence",
-          title: "Align Higher Timeframe Filter to 1h EMA",
+          title: `Align Higher Timeframe Filter to ${recommendedHtf} EMA`,
           paramKey: "trendTimeframe",
           currentDisplay: `${cfg.trendTimeframe} EMA`,
-          recommendedDisplay: "1h EMA20 > EMA50",
-          explanation: `Aligning 15m execution with 1h EMA20/50 guarantees trade bias matches the macro trend.`,
+          recommendedDisplay: `${recommendedHtf} EMA20 > EMA50`,
+          explanation: `Aligning ${cfg.timeframe} execution with ${recommendedHtf} EMA20/50 guarantees trade bias matches the higher macro trend.`,
           impactBadge: "Macro Confluence",
           applyPatch: {
-            trendTimeframe: "1h",
-            trendFastEma: 20,
-            trendSlowEma: 50,
-          },
-        });
-      } else if (cfg.timeframe === "1m" && cfg.trendTimeframe !== "5m") {
-        list.push({
-          id: "trend_timeframe",
-          category: "Trend Confluence",
-          title: "Align Higher Timeframe Filter to 5m EMA",
-          paramKey: "trendTimeframe",
-          currentDisplay: `${cfg.trendTimeframe} EMA`,
-          recommendedDisplay: "5m EMA20 > EMA50",
-          explanation: "Aligning 1m execution with 5m trend filter avoids counter-trend whipsaws.",
-          impactBadge: "Macro Confluence",
-          applyPatch: {
-            trendTimeframe: "5m",
-            trendFastEma: 20,
-            trendSlowEma: 50,
-          },
-        });
-      } else if (cfg.timeframe === "5m" && cfg.trendTimeframe !== "15m") {
-        list.push({
-          id: "trend_timeframe",
-          category: "Trend Confluence",
-          title: "Align Higher Timeframe Filter to 15m EMA",
-          paramKey: "trendTimeframe",
-          currentDisplay: `${cfg.trendTimeframe} EMA`,
-          recommendedDisplay: "15m EMA20 > EMA50",
-          explanation: "Aligning 5m execution with 15m trend filter guarantees confluence.",
-          impactBadge: "Macro Confluence",
-          applyPatch: {
-            trendTimeframe: "15m",
+            trendTimeframe: recommendedHtf,
             trendFastEma: 20,
             trendSlowEma: 50,
           },

@@ -41,11 +41,26 @@ def _p() -> str:
 
 
 def _timeframe_seconds(timeframe: str) -> int:
-    m = re.match(r"^(\d+)([smh])$", str(timeframe or "1m").strip().lower())
+    raw = str(timeframe or "1m").strip()
+    if raw.endswith("M") and raw[:-1].isdigit():
+        n = int(raw[:-1])
+        return 31536000 if n == 12 else n * 2592000
+    m = re.match(r"^(\d+)([smhdwy])$", raw.lower())
     if not m:
         return 60
     n = int(m.group(1))
-    return n if m.group(2) == "s" else n * 60 if m.group(2) == "m" else n * 3600
+    u = m.group(2)
+    if u == "s":
+        return n
+    if u == "m":
+        return n * 60
+    if u == "h":
+        return n * 3600
+    if u == "d":
+        return n * 86400
+    if u == "w":
+        return n * 604800
+    return n * 31536000
 
 
 def _hosted_guard_enabled() -> bool:

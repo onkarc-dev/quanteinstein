@@ -33,8 +33,17 @@ const TIMEFRAMES = [
   { label: '15m', value: '15m' },
   { label: '30m', value: '30m' },
   { label: '1h', value: '1h' },
+  { label: '2h', value: '2h' },
   { label: '4h', value: '4h' },
+  { label: '8h', value: '8h' },
+  { label: '12h', value: '12h' },
   { label: '1d', value: '1d' },
+  { label: '1w', value: '1w' },
+  { label: '1M', value: '1M' },
+  { label: '3M', value: '3M' },
+  { label: '6M', value: '6M' },
+  { label: '9M', value: '9M' },
+  { label: '12M', value: '12M' },
 ];
 
 const CANDLE_LIMITS = [50, 100, 250, 500];
@@ -202,11 +211,15 @@ export default function ChartingPage() {
       // Attempt 2: Fallback to direct Binance Vision REST API
       if (!fetchedCandles.length) {
         try {
-          const url = `https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=${tf}&limit=${selectedLimit}`;
+          const isMultiMonth = ['3M', '6M', '9M', '12M'].includes(tf);
+          const monthsGroup = isMultiMonth ? Number(tf.slice(0, -1)) : 1;
+          const queryTf = isMultiMonth ? '1M' : tf;
+          const queryLim = Math.min(1000, selectedLimit * monthsGroup);
+          const url = `https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=${queryTf}&limit=${queryLim}`;
           const resp = await fetch(url);
           const raw = await resp.json();
           if (Array.isArray(raw) && raw.length > 0) {
-            fetchedCandles = raw.map((k: any) => ({
+            const rawCandles: TradingCandle[] = raw.map((k: any) => ({
               time: Math.floor(k[0] / 1000),
               open: Number(k[1]),
               high: Number(k[2]),
@@ -214,6 +227,23 @@ export default function ChartingPage() {
               close: Number(k[4]),
               volume: Number(k[5] || 0),
             }));
+            if (monthsGroup > 1) {
+              const grouped: TradingCandle[] = [];
+              for (let i = 0; i < rawCandles.length; i += monthsGroup) {
+                const grp = rawCandles.slice(i, i + monthsGroup);
+                grouped.push({
+                  time: grp[0].time,
+                  open: grp[0].open,
+                  high: Math.max(...grp.map((c) => c.high)),
+                  low: Math.min(...grp.map((c) => c.low)),
+                  close: grp[grp.length - 1].close,
+                  volume: grp.reduce((acc, c) => acc + (c.volume || 0), 0),
+                });
+              }
+              fetchedCandles = grouped.slice(-selectedLimit);
+            } else {
+              fetchedCandles = rawCandles;
+            }
           }
         } catch (err: any) {
           if (!cancelled) {
@@ -248,7 +278,12 @@ export default function ChartingPage() {
   useEffect(() => {
     let cancelled = false;
     const sym = selectedSymbol.toLowerCase();
-    const tf = selectedTimeframe === '1s' ? '1m' : selectedTimeframe;
+    const tf =
+      selectedTimeframe === '1s'
+        ? '1m'
+        : ['3M', '6M', '9M', '12M'].includes(selectedTimeframe)
+          ? '1M'
+          : selectedTimeframe;
 
     if (wsRef.current) {
       wsRef.current.close();
