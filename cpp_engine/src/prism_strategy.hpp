@@ -46,6 +46,7 @@ private:
     double average_volume(size_t lookback) const;
     void update_trend_filter(const Bar& bar);
     bool trend_filter_allows_long() const;
+    void update_atr(const Bar& bar);
     void update_rsi(const Bar& bar);
     bool rsi_filter_allows_long() const;
     void update_macd(const Bar& bar);
@@ -59,8 +60,9 @@ private:
 public:
     double current_rsi() const { return current_rsi_; }
     double current_macd() const { return macd_line_; }
-    double current_macd_signal() const { return macd_signal_; }
+    double current_macd_signal() const { return prevEMA_signal_; }
     double current_macd_hist() const { return macd_histogram_; }
+    double current_atr() const { return prevATR_; }
 
 private:
     struct ExtremaPoint {
@@ -84,19 +86,25 @@ private:
     double htf_fast_ema_ = 0.0;
     double htf_slow_ema_ = 0.0;
 
-    // RSI O(1) streaming state
+    // ATR O(1) single rolling scalar register
+    double prevATR_ = 0.0;
+    double atr_prev_close_ = 0.0;
+    double atr_tr_sum_ = 0.0;
+    uint64_t atr_bar_count_ = 0;
+
+    // RSI O(1) single rolling scalar registers (prevAvgGain, prevAvgLoss)
     double prev_close_ = 0.0;
-    double rsi_avg_gain_ = 0.0;
-    double rsi_avg_loss_ = 0.0;
+    double prevAvgGain_ = 0.0;
+    double prevAvgLoss_ = 0.0;
     double rsi_sum_gain_ = 0.0;
     double rsi_sum_loss_ = 0.0;
     double current_rsi_ = 50.0;
     uint64_t rsi_bar_count_ = 0;
 
-    // MACD O(1) streaming state
-    double macd_fast_ema_ = 0.0;
-    double macd_slow_ema_ = 0.0;
-    double macd_signal_ = 0.0;
+    // MACD O(1) single rolling scalar registers (prevEMA)
+    double prevEMA_fast_ = 0.0;
+    double prevEMA_slow_ = 0.0;
+    double prevEMA_signal_ = 0.0;
     double macd_line_ = 0.0;
     double macd_histogram_ = 0.0;
     double prev_macd_histogram_ = 0.0;

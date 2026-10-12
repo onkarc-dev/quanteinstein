@@ -16,15 +16,17 @@ PrismStrategy::PrismStrategy(const StrategyRulesConfig& config)
 
 void PrismStrategy::on_new_bar(const Bar& bar) {
     ++bars_processed_;
+    const size_t lookback = static_cast<size_t>(std::max(1, config_.breakout_lookback));
+    const size_t max_hist = std::max(static_cast<size_t>(22), lookback + 2);
     history_.push_back(bar);
-    if (history_.size() > 500) history_.pop_front();
+    while (history_.size() > max_hist) history_.pop_front();
+    update_atr(bar);
     update_trend_filter(bar);
     update_rsi(bar);
     update_macd(bar);
     update_extrema(bar);
     signal_ = Signal{};
 
-    const size_t lookback = static_cast<size_t>(std::max(1, config_.breakout_lookback));
     if (DEBUG_BAR_LOGS) {
         std::cout << "[BAR] index=" << bars_processed_ << " close=" << bar.close
                   << " atr14=" << bar.atr_14 << " state=" << static_cast<int>(state_) << "\n";
@@ -90,18 +92,32 @@ void PrismStrategy::detect_retest(const Bar& bar) {
     if (!accepted || score < config_.min_setup_score) { state_ = State::RETEST; return; }
 
     const double entry = bar.close;
-    const double atr_component = (bar.atr_14 > 0.0) ? bar.atr_14 * config_.stop_loss.atr_multiplier : range * 1.25;
+    const double effective_atr = (bar.atr_14 > 0.0) ? bar.atr_14 : prevATR_;
+    const double atr_component = (effective_atr > 0.0) ? effective_atr * config_.stop_loss.atr_multiplier : range * 1.25;
     const double structure_stop = bar.low - (range * config_.stop_loss.structure_buffer_pct);
     const double atr_stop = entry - atr_component;
     const double stop = std::min(structure_stop, atr_stop);
     const double risk = entry - stop;
     if (risk <= 0.0) { state_ = State::RETEST; return; }
 
+    const double tp1 = entry + risk * config_.targets.target1_R;
+    const double tp2 = entry + risk * config_.targets.target2_R;
+
+    // Task 4.1: Minimum Move Filter — suppress trade triggers if TP1 distance < 2.5 * (roundTripFeeRate + slippageRate)
+    const double round_trip_fee_pct = std::max(0.0, config_.execution_friction.fee_pct) * 2.0;
+    const double round_trip_slip_pct = std::max(0.0, config_.execution_friction.slippage_pct) * 2.0;
+    const double total_friction_pct = round_trip_fee_pct + round_trip_slip_pct;
+    const double tp1_dist_pct = (entry > 0.0) ? (std::abs(tp1 - entry) / entry * 100.0) : 0.0;
+    if (total_friction_pct > 0.0 && tp1_dist_pct < 2.5 * total_friction_pct) {
+        state_ = State::RETEST;
+        return;
+    }
+
     signal_.valid = true;
     signal_.entry_price = entry;
     signal_.stop_loss = stop;
-    signal_.target1 = entry + risk * config_.targets.target1_R;
-    signal_.target2 = entry + risk * config_.targets.target2_R;
+    signal_.target1 = tp1;
+    signal_.target2 = tp2;
     signal_.setup_score = score;
     std::string sig_reason = "PRISM_ATR_BREAKOUT_RETEST";
     if (config_.trend_filter.use_trend_filter) sig_reason += "_HTF_EMA";
@@ -112,6 +128,26 @@ void PrismStrategy::detect_retest(const Bar& bar) {
     state_ = State::IDLE;
     breakout_level_ = 0.0;
     breakout_bar_index_ = 0;
+}
+
+void PrismStrategy::update_atr(const Bar& bar) {
+    if (bar.atr_14 > 0.0) {
+        prevATR_ = bar.atr_14;
+        atr_prev_close_ = bar.close;
+        return;
+    }
+    const double hl = std::max(0.0, bar.high - bar.low);
+    const double tr = (atr_bar_count_ == 0)
+        ? hl
+        : std::max({hl, std::abs(bar.high - atr_prev_close_), std::abs(bar.low - atr_prev_close_)});
+    atr_prev_close_ = bar.close;
+    atr_bar_count_++;
+    if (atr_bar_count_ <= 14) {
+        atr_tr_sum_ += tr;
+        prevATR_ = atr_tr_sum_ / static_cast<double>(atr_bar_count_);
+    } else {
+        prevATR_ = ((prevATR_ * 13.0) + tr) / 14.0;
+    }
 }
 
 void PrismStrategy::update_trend_filter(const Bar& bar) {
@@ -196,19 +232,19 @@ void PrismStrategy::update_rsi(const Bar& bar) {
         rsi_sum_gain_ += gain;
         rsi_sum_loss_ += loss;
         if (rsi_bar_count_ == static_cast<uint64_t>(p + 1)) {
-            rsi_avg_gain_ = rsi_sum_gain_ / static_cast<double>(p);
-            rsi_avg_loss_ = rsi_sum_loss_ / static_cast<double>(p);
+            prevAvgGain_ = rsi_sum_gain_ / static_cast<double>(p);
+            prevAvgLoss_ = rsi_sum_loss_ / static_cast<double>(p);
         }
     } else {
-        rsi_avg_gain_ = (rsi_avg_gain_ * (p - 1) + gain) / static_cast<double>(p);
-        rsi_avg_loss_ = (rsi_avg_loss_ * (p - 1) + loss) / static_cast<double>(p);
+        prevAvgGain_ = (prevAvgGain_ * (p - 1) + gain) / static_cast<double>(p);
+        prevAvgLoss_ = (prevAvgLoss_ * (p - 1) + loss) / static_cast<double>(p);
     }
 
     if (rsi_bar_count_ > static_cast<uint64_t>(p)) {
-        if (rsi_avg_loss_ <= 1e-12) {
-            current_rsi_ = (rsi_avg_gain_ <= 1e-12) ? 50.0 : 100.0;
+        if (prevAvgLoss_ <= 1e-12) {
+            current_rsi_ = (prevAvgGain_ <= 1e-12) ? 50.0 : 100.0;
         } else {
-            const double rs = rsi_avg_gain_ / rsi_avg_loss_;
+            const double rs = prevAvgGain_ / prevAvgLoss_;
             current_rsi_ = 100.0 - (100.0 / (1.0 + rs));
         }
     }
@@ -243,23 +279,23 @@ void PrismStrategy::update_macd(const Bar& bar) {
     const double alpha_sig = 2.0 / (static_cast<double>(sig_p) + 1.0);
 
     if (!macd_seeded_) {
-        macd_fast_ema_ = bar.close;
-        macd_slow_ema_ = bar.close;
+        prevEMA_fast_ = bar.close;
+        prevEMA_slow_ = bar.close;
         macd_line_ = 0.0;
-        macd_signal_ = 0.0;
+        prevEMA_signal_ = 0.0;
         macd_histogram_ = 0.0;
         prev_macd_histogram_ = 0.0;
         macd_seeded_ = true;
         return;
     }
 
-    macd_fast_ema_ = alpha_f * bar.close + (1.0 - alpha_f) * macd_fast_ema_;
-    macd_slow_ema_ = alpha_s * bar.close + (1.0 - alpha_s) * macd_slow_ema_;
-    macd_line_ = macd_fast_ema_ - macd_slow_ema_;
+    prevEMA_fast_ = alpha_f * bar.close + (1.0 - alpha_f) * prevEMA_fast_;
+    prevEMA_slow_ = alpha_s * bar.close + (1.0 - alpha_s) * prevEMA_slow_;
+    macd_line_ = prevEMA_fast_ - prevEMA_slow_;
 
     prev_macd_histogram_ = macd_histogram_;
-    macd_signal_ = alpha_sig * macd_line_ + (1.0 - alpha_sig) * macd_signal_;
-    macd_histogram_ = macd_line_ - macd_signal_;
+    prevEMA_signal_ = alpha_sig * macd_line_ + (1.0 - alpha_sig) * prevEMA_signal_;
+    macd_histogram_ = macd_line_ - prevEMA_signal_;
 }
 
 bool PrismStrategy::macd_filter_allows_long() const {
@@ -271,7 +307,7 @@ bool PrismStrategy::macd_filter_allows_long() const {
         return has_two_bottom_bullish_macd() || (macd_histogram_ > prev_macd_histogram_ && prev_macd_histogram_ < 0.0);
     }
     if (cond == "signal_crossover") {
-        return macd_line_ >= macd_signal_;
+        return macd_line_ >= prevEMA_signal_;
     }
     if (cond == "zero_line") {
         return macd_line_ >= 0.0;

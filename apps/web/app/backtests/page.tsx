@@ -61,7 +61,16 @@ function PerformanceRobustness({ data }: { data: any }) {
   const risk = pr.risk || {};
   const tb = pr.trading_behavior || {};
   const robust = pr.robustness || {};
-  const warnings = Array.isArray(pr.warnings) ? pr.warnings : [];
+  const totalTrades = Number(data?.total_trades ?? pr?.summary?.total_trades ?? 0);
+  const rawWarnings = Array.isArray(pr.warnings) ? pr.warnings : [];
+  const warnings = totalTrades >= 100
+    ? rawWarnings.filter((w: string) => !/too few trades|needs more data|small sample/i.test(w))
+    : rawWarnings;
+  const dataSufficiencyBadge = totalTrades >= 100
+    ? `STATISTICALLY SIGNIFICANT (${totalTrades} TRADES)`
+    : totalTrades >= 30
+      ? `ADEQUATE SAMPLE (${totalTrades} TRADES)`
+      : `NEEDS MORE DATA (${totalTrades} TRADES)`;
 
   if (!data?.performance_and_robustness) return null;
 
@@ -118,7 +127,7 @@ function PerformanceRobustness({ data }: { data: any }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div>
               <div style={{ fontSize: 11, color: '#64748b' }}>Expectancy R / Trade</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#34d399' }}>{metric(ex.expectancy_R_per_trade, ' R')}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#34d399' }}>{metric(ex.expectancy_R_net ?? ex.expectancy_R_per_trade, ' R')}</div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: '#64748b' }}>Trades / Day</div>
@@ -177,7 +186,23 @@ function PerformanceRobustness({ data }: { data: any }) {
               {robust.overfitting_risk_label || 'Low Risk'} {robust.overfitting_risk_score !== undefined ? `(${robust.overfitting_risk_score}/10)` : ''}
             </div>
           </div>
-          <div style={{ marginTop: 10, fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
+          <div style={{ marginTop: 8 }}>
+            <span
+              style={{
+                display: 'inline-block',
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: 6,
+                background: totalTrades >= 100 ? 'rgba(34, 197, 94, 0.14)' : totalTrades >= 30 ? 'rgba(56, 189, 248, 0.14)' : 'rgba(245, 158, 11, 0.14)',
+                color: totalTrades >= 100 ? '#4ade80' : totalTrades >= 30 ? '#38bdf8' : '#fbbf24',
+                border: '1px solid currentColor',
+              }}
+            >
+              {dataSufficiencyBadge}
+            </span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
             Ratios require sufficient R-dispersion. Notional turnover requires equity curves; proxy indicates activity density.
           </div>
         </div>

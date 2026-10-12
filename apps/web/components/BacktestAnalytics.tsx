@@ -77,10 +77,36 @@ function signedColor(n: any): string {
   return x > 0 ? "#4ade80" : x < 0 ? "#f87171" : "#94a3b8";
 }
 
-function getTradeR(t: TradeRecord): number {
-  const raw = t.r_multiple ?? t.R_multiple ?? t.r ?? 0;
+function getTradeGrossR(t: TradeRecord): number {
+  const raw = t.gross_r ?? t.grossR ?? t.r_multiple ?? t.R_multiple ?? t.r ?? 0;
   const num = Number(raw);
   return Number.isFinite(num) ? num : 0;
+}
+
+function getTradeNetR(
+  t: TradeRecord,
+  feePct = 0.04,
+  slippagePct = 0.01,
+  riskPct = 1.0
+): number {
+  const explicitNet = t.net_r ?? t.netR;
+  if (explicitNet !== undefined && explicitNet !== null && String(explicitNet).trim() !== "") {
+    const parsed = Number(explicitNet);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const grossR = getTradeGrossR(t);
+  const roundTripFeeRate = Math.max(0, Number(feePct ?? 0.04)) * 2.0;
+  const slippageRate = Math.max(0, Number(slippagePct ?? 0.01)) * 2.0;
+  const ep = Number(t.entry_price);
+  const sl = Number(t.stop_loss);
+  const stopLossDistancePercent =
+    Number.isFinite(ep) && Number.isFinite(sl) && ep > 0 && Math.abs(ep - sl) > 0
+      ? (Math.abs(ep - sl) / ep) * 100.0
+      : riskPct && riskPct > 0
+        ? riskPct
+        : 1.0;
+  const frictionR = (roundTripFeeRate + slippageRate) / Math.max(stopLossDistancePercent, 1e-6);
+  return grossR - frictionR;
 }
 
 function getTradeSide(t: TradeRecord): "LONG" | "SHORT" {
@@ -154,9 +180,10 @@ export default function BacktestAnalytics({
     );
   }, [trades, selectedSymbolFilter]);
 
-  // Equity Curve Points calculation
+  // Equity Curve Points calculation (plots cumulative netR so Final Return matches Net Return (FRIC))
   const equityPoints = useMemo(() => {
     let cumR = 0;
+    let cumGrossR = 0;
     let peakR = 0;
     interface EquityPoint {
       index: number;
@@ -165,7 +192,9 @@ export default function BacktestAnalytics({
       symbol: string;
       side: string;
       r: number;
+      grossR: number;
       cumulativeR: number;
+      cumulativeGrossR: number;
       highWaterMark: number;
       drawdownR: number;
       exitReason: string;
@@ -178,7 +207,9 @@ export default function BacktestAnalytics({
         symbol: selectedSymbolFilter,
         side: "-",
         r: 0,
+        grossR: 0,
         cumulativeR: 0,
+        cumulativeGrossR: 0,
         highWaterMark: 0,
         drawdownR: 0,
         exitReason: "Initial Equity",
@@ -186,8 +217,10 @@ export default function BacktestAnalytics({
     ];
 
     activeTrades.forEach((t, i) => {
-      const r = getTradeR(t);
-      cumR += r;
+      const netR = getTradeNetR(t, feePct, slippagePct, riskPct);
+      const grossR = getTradeGrossR(t);
+      cumR += netR;
+      cumGrossR += grossR;
       if (cumR > peakR) peakR = cumR;
       const dd = cumR - peakR;
       pts.push({
@@ -196,8 +229,10 @@ export default function BacktestAnalytics({
         time: t.exit_time || t.entry_time || `Trade ${i + 1}`,
         symbol: String(t.symbol || "").toUpperCase() || "MARKET",
         side: getTradeSide(t),
-        r,
+        r: Number(netR.toFixed(4)),
+        grossR: Number(grossR.toFixed(4)),
         cumulativeR: Number(cumR.toFixed(4)),
+        cumulativeGrossR: Number(cumGrossR.toFixed(4)),
         highWaterMark: Number(peakR.toFixed(4)),
         drawdownR: Number(dd.toFixed(4)),
         exitReason: String(t.exit_reason || "EXIT"),
@@ -205,15 +240,16 @@ export default function BacktestAnalytics({
     });
 
     return pts;
-  }, [activeTrades, selectedSymbolFilter]);
+  }, [activeTrades, selectedSymbolFilter, feePct, slippagePct, riskPct]);
 
-  // Stats for the active equity curve
+  // Stats for the active equity curve (based on cumulative netR)
   const curveStats = useMemo(() => {
     if (equityPoints.length <= 1) {
-      return { finalR: 0, peakR: 0, maxDd: 0, recoveryFactor: 0, wins: 0, losses: 0, be: 0 };
+      return { finalR: 0, finalGrossR: 0, peakR: 0, maxDd: 0, recoveryFactor: 0, wins: 0, losses: 0, be: 0 };
     }
     const finalPt = equityPoints[equityPoints.length - 1];
     const finalR = finalPt.cumulativeR;
+    const finalGrossR = finalPt.cumulativeGrossR;
     let peak = 0;
     let maxDd = 0;
     let wins = 0;
@@ -221,7 +257,7 @@ export default function BacktestAnalytics({
     let be = 0;
 
     activeTrades.forEach((t) => {
-      const r = getTradeR(t);
+      const r = getTradeNetR(t, feePct, slippagePct, riskPct);
       if (r > 0.0001) wins++;
       else if (r < -0.0001) losses++;
       else be++;
@@ -236,6 +272,7 @@ export default function BacktestAnalytics({
     const recoveryFactor = maxDd > 0 ? Number((finalR / maxDd).toFixed(2)) : finalR > 0 ? 99.9 : 0;
     return {
       finalR,
+      finalGrossR,
       peakR: peak,
       maxDd: -maxDd,
       recoveryFactor,
@@ -243,11 +280,10 @@ export default function BacktestAnalytics({
       losses,
       be,
     };
-  }, [equityPoints, activeTrades]);
+  }, [equityPoints, activeTrades, feePct, slippagePct, riskPct]);
 
-  // Per-symbol breakdown statistics
+  // Per-symbol breakdown statistics (synchronized with per-trade netR)
   const symbolBreakdown = useMemo((): SymbolStat[] => {
-    const frictionR = ((feePct * 2) + (slippagePct * 2)) / (riskPct || 1.0);
     const groups: Record<string, TradeRecord[]> = {};
 
     uniqueSymbols.forEach((s) => {
@@ -261,21 +297,24 @@ export default function BacktestAnalytics({
     });
 
     return Object.entries(groups).map(([sym, symTrades]) => {
-      const rs = symTrades.map(getTradeR);
-      const n = rs.length;
-      const wins = rs.filter((x) => x > 0.0001);
-      const losses = rs.filter((x) => x < -0.0001);
-      const be = rs.filter((x) => Math.abs(x) <= 0.0001);
-      const grossR = rs.reduce((a, b) => a + b, 0);
-      const netR = grossR - (frictionR * n);
-      const grossWin = wins.reduce((a, b) => a + b, 0);
-      const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
-      const pf = grossLoss > 0 ? Number((grossWin / grossLoss).toFixed(2)) : grossWin > 0 ? 999 : null;
+      const grossRs = symTrades.map(getTradeGrossR);
+      const netRs = symTrades.map((t) => getTradeNetR(t, feePct, slippagePct, riskPct));
+      const n = netRs.length;
+      const wins = grossRs.filter((x) => x > 0.0001);
+      const losses = grossRs.filter((x) => x < -0.0001);
+      const be = grossRs.filter((x) => Math.abs(x) <= 0.0001);
+      const netWins = netRs.filter((x) => x > 0.0001);
+      const netLosses = netRs.filter((x) => x < -0.0001);
+      const grossR = grossRs.reduce((a, b) => a + b, 0);
+      const netR = netRs.reduce((a, b) => a + b, 0);
+      const netWinSum = netWins.reduce((a, b) => a + b, 0);
+      const netLossSum = Math.abs(netLosses.reduce((a, b) => a + b, 0));
+      const pf = netLossSum > 0 ? Number((netWinSum / netLossSum).toFixed(2)) : netWinSum > 0 ? 999 : null;
 
       let peak = 0;
       let eq = 0;
       let maxDd = 0;
-      rs.forEach((x) => {
+      netRs.forEach((x) => {
         eq += x;
         if (eq > peak) peak = eq;
         if (peak - eq > maxDd) maxDd = peak - eq;
@@ -292,21 +331,26 @@ export default function BacktestAnalytics({
         net_R: Number(netR.toFixed(3)),
         profit_factor: pf,
         max_drawdown_in_R: Number((-maxDd).toFixed(3)),
-        avg_R: n > 0 ? Number((grossR / n).toFixed(3)) : 0,
-        best_R: rs.length ? Number(Math.max(...rs).toFixed(3)) : 0,
-        worst_R: rs.length ? Number(Math.min(...rs).toFixed(3)) : 0,
+        avg_R: n > 0 ? Number((netR / n).toFixed(3)) : 0,
+        best_R: netRs.length ? Number(Math.max(...netRs).toFixed(3)) : 0,
+        worst_R: netRs.length ? Number(Math.min(...netRs).toFixed(3)) : 0,
       };
     });
   }, [trades, uniqueSymbols, feePct, slippagePct, riskPct]);
 
-  // Aggregate Basket Total
+  // Aggregate Basket Total (strictly equal to sum of trade netR values)
   const basketTotal = useMemo((): SymbolStat => {
     const totalTrades = symbolBreakdown.reduce((sum, s) => sum + s.trades, 0);
     const totalWins = symbolBreakdown.reduce((sum, s) => sum + s.wins, 0);
     const totalLosses = symbolBreakdown.reduce((sum, s) => sum + s.losses, 0);
     const totalBe = symbolBreakdown.reduce((sum, s) => sum + s.breakeven, 0);
-    const totalGross = symbolBreakdown.reduce((sum, s) => sum + s.gross_R, 0);
-    const totalNet = symbolBreakdown.reduce((sum, s) => sum + s.net_R, 0);
+    const allGrossRs = trades.map(getTradeGrossR);
+    const allNetRs = trades.map((t) => getTradeNetR(t, feePct, slippagePct, riskPct));
+    const totalGross = allGrossRs.reduce((a, b) => a + b, 0);
+    const totalNet = allNetRs.reduce((a, b) => a + b, 0);
+    const netWins = allNetRs.filter((x) => x > 0.0001).reduce((a, b) => a + b, 0);
+    const netLosses = Math.abs(allNetRs.filter((x) => x < -0.0001).reduce((a, b) => a + b, 0));
+    const netPf = netLosses > 0 ? Number((netWins / netLosses).toFixed(2)) : netWins > 0 ? 999 : 0;
 
     return {
       symbol: "BASKET TOTAL",
@@ -317,13 +361,13 @@ export default function BacktestAnalytics({
       win_rate: totalTrades > 0 ? totalWins / totalTrades : 0,
       gross_R: Number(totalGross.toFixed(2)),
       net_R: Number(totalNet.toFixed(2)),
-      profit_factor: summary?.profit_factor ?? (totalLosses ? Number((totalWins / totalLosses).toFixed(2)) : 0),
+      profit_factor: netPf,
       max_drawdown_in_R: curveStats.maxDd,
-      avg_R: totalTrades > 0 ? Number((totalGross / totalTrades).toFixed(3)) : 0,
-      best_R: Math.max(0, ...symbolBreakdown.map((s) => s.best_R)),
-      worst_R: Math.min(0, ...symbolBreakdown.map((s) => s.worst_R)),
+      avg_R: totalTrades > 0 ? Number((totalNet / totalTrades).toFixed(3)) : 0,
+      best_R: allNetRs.length ? Number(Math.max(...allNetRs).toFixed(3)) : 0,
+      worst_R: allNetRs.length ? Number(Math.min(...allNetRs).toFixed(3)) : 0,
     };
-  }, [symbolBreakdown, summary, curveStats]);
+  }, [symbolBreakdown, trades, curveStats, feePct, slippagePct, riskPct]);
 
   // Strategy ID resolution for paper trading deployment
   const effectiveStrategyId = useMemo(() => {
@@ -412,10 +456,10 @@ export default function BacktestAnalytics({
   const paperDeployUrl = `/paper-trading?strategy_id=${encodeURIComponent(effectiveStrategyId)}${selectedSymbolsList.length ? `&symbols=${encodeURIComponent(selectedSymbolsList.join(","))}` : ""}`;
 
 
-  // Filtered trades for Inspection Log Table
+  // Filtered trades for Inspection Log Table (uses netR for outcome classification)
   const filteredLogTrades = useMemo(() => {
     return activeTrades.filter((t, i) => {
-      const r = getTradeR(t);
+      const r = getTradeNetR(t, feePct, slippagePct, riskPct);
       const res = classifyTradeResultFromR(r);
       if (logOutcomeFilter !== "ALL" && res !== logOutcomeFilter) return false;
 
@@ -438,7 +482,7 @@ export default function BacktestAnalytics({
       }
       return true;
     });
-  }, [activeTrades, logOutcomeFilter, logSearchQuery]);
+  }, [activeTrades, logOutcomeFilter, logSearchQuery, feePct, slippagePct, riskPct]);
 
   // Paginated log trades
   const totalLogPages = Math.max(1, Math.ceil(filteredLogTrades.length / logPageSize));
@@ -462,14 +506,16 @@ export default function BacktestAnalytics({
       "Exit Time",
       "Exit Price",
       "Exit Reason",
-      "Realized R",
+      "Gross R",
+      "Net R (After Friction)",
       "Outcome",
       "Setup Score",
       "Holding Bars",
     ];
 
     const rows = trades.map((t, idx) => {
-      const r = getTradeR(t);
+      const grossR = getTradeGrossR(t);
+      const netR = getTradeNetR(t, feePct, slippagePct, riskPct);
       return [
         t.trade_id ?? idx + 1,
         String(t.symbol || "").toUpperCase() || "UNKNOWN",
@@ -482,8 +528,9 @@ export default function BacktestAnalytics({
         t.exit_time ?? "",
         t.exit_price ?? "",
         t.exit_reason ?? "",
-        r,
-        classifyTradeResultFromR(r),
+        grossR.toFixed(4),
+        netR.toFixed(4),
+        classifyTradeResultFromR(netR),
         t.setup_score_at_entry ?? "",
         t.holding_bars ?? "",
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`);
@@ -1618,7 +1665,7 @@ export default function BacktestAnalytics({
                 <th style={{ padding: "9px 10px", fontSize: 11, textTransform: "uppercase" }}>Holding</th>
                 <th style={{ padding: "9px 10px", fontSize: 11, textTransform: "uppercase" }}>Exit Reason</th>
                 <th style={{ padding: "9px 10px", fontSize: 11, textTransform: "uppercase" }}>Result</th>
-                <th style={{ padding: "9px 10px", fontSize: 11, textTransform: "uppercase" }}>Realized R</th>
+                <th style={{ padding: "9px 10px", fontSize: 11, textTransform: "uppercase" }}>Net R (Fric)</th>
               </tr>
             </thead>
             <tbody>
@@ -1630,9 +1677,10 @@ export default function BacktestAnalytics({
                 </tr>
               ) : (
                 currentLogTrades.map((t, idx) => {
-                  const r = getTradeR(t);
-                  const result = classifyTradeResultFromR(r);
-                  const reason = cleanupExitReason(t.exit_reason, r);
+                  const netR = getTradeNetR(t, feePct, slippagePct, riskPct);
+                  const grossR = getTradeGrossR(t);
+                  const result = classifyTradeResultFromR(netR);
+                  const reason = cleanupExitReason(t.exit_reason, grossR);
                   const side = getTradeSide(t);
                   const rowId = t.trade_id ?? (logPage - 1) * logPageSize + idx + 1;
 
@@ -1684,7 +1732,7 @@ export default function BacktestAnalytics({
                         ${fmt(t.exit_price)}
                       </td>
                       <td style={{ padding: "9px 10px", color: "#94a3b8" }}>
-                        {t.holding_bars != null ? `${t.holding_bars} bars` : "—"}
+                        {t.holding_bars != null ? `${Math.max(1, Number(t.holding_bars) || 1)} bars` : "—"}
                       </td>
                       <td style={{ padding: "9px 10px" }}>
                         <span
@@ -1724,8 +1772,11 @@ export default function BacktestAnalytics({
                           {result}
                         </span>
                       </td>
-                      <td style={{ padding: "9px 10px", fontWeight: 800, color: signedColor(r) }}>
-                        {r > 0 ? "+" : ""}{fmt(r, 3)} R
+                      <td style={{ padding: "9px 10px", fontWeight: 800, color: signedColor(netR) }}>
+                        <div>{netR > 0 ? "+" : ""}{fmt(netR, 3)} R</div>
+                        <div style={{ fontSize: 10, fontWeight: 500, color: "#64748b" }}>
+                          Gross: {grossR > 0 ? "+" : ""}{fmt(grossR, 2)} R
+                        </div>
                       </td>
                     </tr>
                   );

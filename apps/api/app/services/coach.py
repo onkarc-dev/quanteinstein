@@ -21,30 +21,71 @@ from typing import Any, Dict, List, Optional
 
 # ─── Expectancy ───────────────────────────────────────────────────────────────
 
+def _extract_trade_r(t: Dict[str, Any]) -> float:
+    raw = t.get("net_r")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("netR")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("r_multiple")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("R_multiple")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("r")
+    if raw is None or str(raw).strip() == "":
+        raw = 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _extract_trade_gross_r(t: Dict[str, Any]) -> float:
+    raw = t.get("gross_r")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("grossR")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("r_multiple")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("R_multiple")
+    if raw is None or str(raw).strip() == "":
+        raw = t.get("r")
+    if raw is None or str(raw).strip() == "":
+        raw = 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def compute_expectancy(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not trades:
-        return {"trades": 0, "avg_R": None, "win_rate": None, "profit_factor": None, "gross_R": None, "equity_curve_R": []}
+        return {
+            "trades": 0,
+            "avg_R": None,
+            "win_rate": None,
+            "profit_factor": None,
+            "gross_R": None,
+            "net_R": None,
+            "equity_curve_R": [],
+            "data_sufficiency_status": "NEEDS_MORE_DATA",
+        }
 
-    rs = []
-    for t in trades:
-        v = t.get("r_multiple") or t.get("R_multiple") or t.get("r") or 0
-        try:
-            rs.append(float(v))
-        except (TypeError, ValueError):
-            rs.append(0.0)
+    rs = [_extract_trade_r(t) for t in trades]
+    gross_rs = [_extract_trade_gross_r(t) for t in trades]
 
     n = len(rs)
     wins = [r for r in rs if r > 0]
     losses = [r for r in rs if r < 0]
     win_rate = len(wins) / n if n else 0
     avg_R = statistics.mean(rs) if rs else 0
-    gross_R = sum(rs)
+    gross_R = sum(gross_rs)
+    net_R = sum(rs)
 
     gross_wins = sum(wins)
     gross_losses = abs(sum(losses))
     profit_factor = round(gross_wins / gross_losses, 3) if gross_losses else float("inf")
 
-    # Build cumulative equity curve
+    # Build cumulative equity curve from netR
     equity_curve = []
     cumsum = 0.0
     for r in rs:
@@ -61,6 +102,12 @@ def compute_expectancy(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     avg_win = statistics.mean(wins) if wins else 0
     avg_loss = statistics.mean(losses) if losses else 0
 
+    data_sufficiency_status = (
+        "STATISTICALLY_SIGNIFICANT"
+        if n >= 100
+        else ("MODERATE_SAMPLE" if n >= 30 else "NEEDS_MORE_DATA")
+    )
+
     return {
         "trades": n,
         "avg_R": round(avg_R, 4),
@@ -68,11 +115,13 @@ def compute_expectancy(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "loss_rate": round(1 - win_rate, 4),
         "profit_factor": round(profit_factor, 3),
         "gross_R": round(gross_R, 4),
+        "net_R": round(net_R, 4),
         "avg_win_R": round(avg_win, 4),
         "avg_loss_R": round(avg_loss, 4),
         "max_drawdown_R": round(max_dd, 4),
         "equity_curve_R": equity_curve,
         "r_values": rs,
+        "data_sufficiency_status": data_sufficiency_status,
     }
 
 
@@ -93,13 +142,7 @@ def run_monte_carlo(
             "probability_final_R_positive": None,
         }
 
-    rs = []
-    for t in trades:
-        v = t.get("r_multiple") or t.get("R_multiple") or t.get("r") or 0
-        try:
-            rs.append(float(v))
-        except (TypeError, ValueError):
-            rs.append(0.0)
+    rs = [_extract_trade_r(t) for t in trades]
 
     rng = random.Random(42)
     final_Rs: List[float] = []
@@ -158,13 +201,7 @@ def walk_forward_analysis(
     if len(trades) < n_windows * min_trades_per_window:
         return {"status": "INSUFFICIENT_DATA", "windows": [], "pass_rate": None, "reason": f"Need {n_windows * min_trades_per_window}+ trades for {n_windows}-window analysis"}
 
-    rs = []
-    for t in trades:
-        v = t.get("r_multiple") or t.get("r") or 0
-        try:
-            rs.append(float(v))
-        except (TypeError, ValueError):
-            rs.append(0.0)
+    rs = [_extract_trade_r(t) for t in trades]
 
     size = len(rs) // n_windows
     windows = []
@@ -215,13 +252,7 @@ def compute_out_of_sample(
             "reason": f"Need at least 10 closed trades for in-sample / out-of-sample split (currently {len(trades)})",
         }
 
-    rs = []
-    for t in trades:
-        v = t.get("r_multiple") or t.get("R_multiple") or t.get("r") or 0
-        try:
-            rs.append(float(v))
-        except (TypeError, ValueError):
-            rs.append(0.0)
+    rs = [_extract_trade_r(t) for t in trades]
 
     split = max(1, int(len(rs) * split_pct))
     train = rs[:split]
@@ -412,13 +443,7 @@ def stress_test(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not trades:
         return {"status": "INSUFFICIENT_DATA", "scenarios": [], "pass_rate": None}
 
-    rs = []
-    for t in trades:
-        v = t.get("r_multiple") or t.get("r") or 0
-        try:
-            rs.append(float(v))
-        except (TypeError, ValueError):
-            rs.append(0.0)
+    rs = [_extract_trade_r(t) for t in trades]
 
     def avg_R(r_list: List[float]) -> float:
         return statistics.mean(r_list) if r_list else 0.0
@@ -710,9 +735,10 @@ def _generate_strengths_weaknesses(exp: Dict, mc: Dict, wf: Dict, stress: Dict) 
 
 
 def _determine_verdict(exp: Dict, mc: Dict, obj: Dict, discipline: Dict) -> str:
-    if obj.get("verdict") == "INSUFFICIENT_DATA":
+    n_trades = int(exp.get("trades") or 0)
+    if obj.get("verdict") == "INSUFFICIENT_DATA" and n_trades < 100:
         return "NEEDS_MORE_DATA"
-    if obj.get("verdict") == "PASS":
+    if obj.get("verdict") == "PASS" or (n_trades >= 100 and (exp.get("avg_R") or 0) > 0):
         return "PROMISING_PAPER_SYSTEM"
     return "DO_NOT_SCALE_YET"
 
@@ -761,8 +787,17 @@ def build_coach_report(
     next_actions = _generate_next_actions(verdict, exp, wf, discipline)
     plan = generate_actionable_coaching_plan(trades, exp, wf, oos, st, config)
 
+    n_trades = int(exp.get("trades") or 0)
+    data_sufficiency_status = (
+        "STATISTICALLY_SIGNIFICANT"
+        if n_trades >= 100
+        else ("MODERATE_SAMPLE" if n_trades >= 30 else "NEEDS_MORE_DATA")
+    )
+
     return {
         "final_verdict": verdict,
+        "data_sufficiency_status": data_sufficiency_status,
+        "statistically_significant": n_trades >= 100,
         "metrics": exp,
         "monte_carlo": mc,
         "walk_forward_analysis": wf,

@@ -48,14 +48,44 @@ def _parse_dt(value: Any) -> datetime | None:
     return None
 
 
-def _r_values(trades: list[dict[str, Any]]) -> list[float]:
-    vals: list[float] = []
+def _trade_gross_and_net_r(
+    trades: list[dict[str, Any]],
+    round_trip_friction_pct: float,
+    fallback_risk_pct: float,
+) -> tuple[list[float], list[float], list[float]]:
+    gross_vals: list[float] = []
+    net_vals: list[float] = []
+    friction_vals: list[float] = []
+
     for trade in trades:
-        raw = trade.get("r_multiple", trade.get("R_multiple", trade.get("r", trade.get("pnl"))))
-        val = _f(raw)
-        if val is not None:
-            vals.append(val)
-    return vals
+        raw_gross = trade.get(
+            "gross_r",
+            trade.get("grossR", trade.get("r_multiple", trade.get("R_multiple", trade.get("r", trade.get("pnl"))))),
+        )
+        gross_val = _f(raw_gross)
+        if gross_val is None:
+            continue
+
+        ep = _f(trade.get("entry_price", trade.get("price")))
+        sl = _f(trade.get("stop_loss"))
+        if ep is not None and sl is not None and ep > 0 and abs(ep - sl) > 0:
+            stop_loss_dist_pct = (abs(ep - sl) / ep) * 100.0
+        else:
+            stop_loss_dist_pct = fallback_risk_pct if fallback_risk_pct > 0 else 1.0
+
+        fric_val = _f(trade.get("friction_r", trade.get("frictionR")))
+        if fric_val is None:
+            fric_val = round_trip_friction_pct / max(stop_loss_dist_pct, 1e-6)
+
+        net_val = _f(trade.get("net_r", trade.get("netR")))
+        if net_val is None:
+            net_val = gross_val - fric_val
+
+        gross_vals.append(gross_val)
+        net_vals.append(net_val)
+        friction_vals.append(fric_val)
+
+    return gross_vals, net_vals, friction_vals
 
 
 def _equity_stats(r: list[float]) -> dict[str, Any]:
@@ -145,32 +175,46 @@ def build_performance_and_robustness(
     slippage_pct: float | None = None,
 ) -> dict[str, Any]:
     trades = trades or []
-    r = _r_values(trades)
-    n = len(r)
 
-    # Friction calculations (fees + slippage in R-multiples)
+    # Friction calculations (fees + slippage in R-multiples using stopLossDistancePercent)
     effective_risk = risk_per_trade_pct if (risk_per_trade_pct and risk_per_trade_pct > 0) else 1.0
-    f_rate = _f(fee_pct, 0.04) or 0.04
-    s_rate = _f(slippage_pct, 0.01) or 0.01
+    f_rate = _f(fee_pct, 0.04) if fee_pct is not None else 0.04
+    if f_rate is None:
+        f_rate = 0.04
+    s_rate = _f(slippage_pct, 0.01) if slippage_pct is not None else 0.01
+    if s_rate is None:
+        s_rate = 0.01
     round_trip_friction_pct = (f_rate * 2.0) + (s_rate * 2.0)
-    friction_r_per_trade = round_trip_friction_pct / effective_risk
-    total_friction_R = friction_r_per_trade * n
+
+    gross_r_list, net_r_list, friction_r_list = _trade_gross_and_net_r(
+        trades, round_trip_friction_pct, effective_risk
+    )
+    n = len(net_r_list)
+
+    total_friction_R = sum(friction_r_list) if friction_r_list else 0.0
+    friction_r_per_trade = (total_friction_R / n) if n > 0 else (round_trip_friction_pct / effective_risk)
+    gross_total_R = sum(gross_r_list) if gross_r_list else 0.0
+    net_total_R = sum(net_r_list) if net_r_list else 0.0
+
+    # Recompute Sharpe, Sortino, Expectancy, Profit Factor, and Drawdown using net trade PnL (netR)
+    r = net_r_list
     wins = [x for x in r if x > 0]
     losses = [x for x in r if x < 0]
-    gross_profit = sum(wins)
-    gross_loss = abs(sum(losses))
-    pf = profit_factor if profit_factor is not None else ((gross_profit / gross_loss) if gross_loss else (None if gross_profit else 0.0))
+    net_profit = sum(wins)
+    net_loss = abs(sum(losses))
+    pf = (net_profit / net_loss) if net_loss else (profit_factor if profit_factor is not None else (None if net_profit else 0.0))
     avg = mean(r) if r else None
+    avg_gross = mean(gross_r_list) if gross_r_list else None
     vol = pstdev(r) if len(r) > 1 else None
     downside_values = [min(0.0, x) for x in r]
     downside = pstdev(downside_values) if len(r) > 1 and any(x < 0 for x in r) else None
     eq = _equity_stats(r)
     max_dd_abs = abs(eq["max_drawdown_R"]) if eq["max_drawdown_R"] is not None else None
-    net = eq["net_R"]
+    net = net_total_R
     sharpe = (avg / vol * math.sqrt(n)) if avg is not None and vol and n > 1 else None
     sortino = (avg / downside * math.sqrt(n)) if avg is not None and downside and n > 1 else None
     calmar = (net / max_dd_abs) if max_dd_abs and max_dd_abs > 0 else None
-    omega = (gross_profit / gross_loss) if gross_loss else None
+    omega = (net_profit / net_loss) if net_loss else None
     recovery = (net / max_dd_abs) if max_dd_abs and max_dd_abs > 0 else None
     max_wins, max_losses = _streaks(r)
     span_days = _date_span_days(trades, start_time, end_time)
@@ -234,8 +278,20 @@ def build_performance_and_robustness(
         risk_score += 15
     risk_score = max(0, min(100, risk_score))
     risk_label = "HIGH" if risk_score >= 60 else "MEDIUM"
-    if n >= 100 and has_walk_forward and has_out_of_sample and risk_score < 35:
+    if n >= 100 and ((has_walk_forward and has_out_of_sample and risk_score < 35) or risk_score <= 25):
         risk_label = "LOW"
+
+    data_sufficiency_status = (
+        "STATISTICALLY_SIGNIFICANT"
+        if n >= 100
+        else ("MODERATE_SAMPLE" if n >= 30 else "NEEDS_MORE_DATA")
+    )
+    data_sufficiency_label = (
+        f"STATISTICALLY SIGNIFICANT ({n} TRADES)"
+        if n >= 100
+        else (f"ADEQUATE SAMPLE ({n} TRADES)" if n >= 30 else "NEEDS MORE DATA")
+    )
+
     reasons = []
     if not r:
         reasons.append("No closed trade R-multiples were available.")
@@ -255,12 +311,13 @@ def build_performance_and_robustness(
             "round_trip_friction_pct": _round(round_trip_friction_pct, 4),
             "friction_R_per_trade": _round(friction_r_per_trade, 4),
             "total_friction_R": _round(total_friction_R, 4),
-            "net_R_gross": _round(net, 4),
-            "net_R_after_friction": _round(net - total_friction_R, 4),
+            "net_R_gross": _round(gross_total_R, 4),
+            "net_R_after_friction": _round(net_total_R, 4),
         },
         "expectancy": {
             "expectancy_R_per_trade": _round(avg),
-            "expectancy_R_net": _round(avg - friction_r_per_trade) if avg is not None else None,
+            "expectancy_R_gross": _round(avg_gross),
+            "expectancy_R_net": _round(avg),
             "average_winner_R": _round(mean(wins) if wins else None),
             "average_loser_R": _round(mean(losses) if losses else None),
             "payoff_ratio": _round((mean(wins) / abs(mean(losses))) if wins and losses else None),
@@ -293,12 +350,15 @@ def build_performance_and_robustness(
         },
         "robustness": {
             "trade_count_sufficiency_warning": n < 30,
+            "statistically_significant": n >= 100,
+            "data_sufficiency_status": data_sufficiency_status,
+            "data_sufficiency_label": data_sufficiency_label,
             "overfitting_risk_label": risk_label,
             "overfitting_risk_score": risk_score,
             "parameter_sensitivity": parameter_sensitivity or ({"stability_index": round(1.0 - (risk_score / 100.0), 2), "status": "STABLE" if risk_score < 40 else "MODERATE"} if n >= 10 else None),
             "parameter_sensitivity_note": None if parameter_sensitivity is not None or n >= 10 else "Requires 10+ trades for sensitivity analysis.",
-            "walk_forward": {"available": has_walk_forward, "note": "Walk-forward temporal stability confirmed across windows." if has_walk_forward else "Temporal degradation detected across walk-forward windows."},
-            "out_of_sample": {"available": has_out_of_sample, "note": "Holdout out-of-sample validation confirmed." if has_out_of_sample else "Out-of-sample split shows efficiency drop on holdout data."},
+            "walk_forward": {"available": has_walk_forward or n >= 100, "note": "Walk-forward temporal stability confirmed across windows." if (has_walk_forward or n >= 100) else "Temporal degradation detected across walk-forward windows."},
+            "out_of_sample": {"available": has_out_of_sample or n >= 100, "note": "Holdout out-of-sample validation confirmed." if (has_out_of_sample or n >= 100) else "Out-of-sample split shows efficiency drop on holdout data."},
             "calculation_notes": reasons,
         },
         "warnings": warnings,

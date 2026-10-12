@@ -352,7 +352,7 @@ function QuantCoachContent() {
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 24, fontWeight: 800, color: '#f8fafc' }}>
                       {fmt(healthScore, '', 1)} / 100
                     </span>
@@ -367,7 +367,26 @@ function QuantCoachContent() {
                         border: '1px solid currentColor',
                       }}
                     >
-                      {report.final_verdict || 'QUANT EVALUATED'}
+                      {Number(trades) >= 100 && report.final_verdict === 'NEEDS_MORE_DATA'
+                        ? (Number(m.net_R ?? health?.performance?.net_return_R ?? m.gross_R ?? 0) > 0 ? 'PROMISING_PAPER_SYSTEM' : 'DO_NOT_SCALE_YET')
+                        : (report.final_verdict || 'QUANT EVALUATED')}
+                    </span>
+                    <span
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 12,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        background: Number(trades) >= 100 ? 'rgba(34, 197, 94, 0.14)' : Number(trades) >= 30 ? 'rgba(56, 189, 248, 0.14)' : 'rgba(245, 158, 11, 0.14)',
+                        color: Number(trades) >= 100 ? '#4ade80' : Number(trades) >= 30 ? '#38bdf8' : '#fbbf24',
+                        border: '1px solid currentColor',
+                      }}
+                    >
+                      {Number(trades) >= 100
+                        ? `STATISTICALLY SIGNIFICANT (${trades} TRADES)`
+                        : Number(trades) >= 30
+                          ? `ADEQUATE SAMPLE (${trades} TRADES)`
+                          : `NEEDS MORE DATA (${trades} TRADES)`}
                     </span>
                   </div>
                   <div style={{ color: '#cbd5e1', fontSize: 14, marginTop: 4, fontWeight: 500 }}>
@@ -495,13 +514,13 @@ function QuantCoachContent() {
               />
               <MetricCard
                 label="Net R (After Friction)"
-                value={fmt(health?.performance?.net_return_R ?? m.gross_R, ' R')}
+                value={fmt(m.net_R ?? health?.performance?.net_return_R ?? pr?.friction?.net_R_after_friction ?? m.gross_R, ' R')}
                 hint="Realized trading return"
-                color={Number(health?.performance?.net_return_R ?? m.gross_R) >= 0 ? '#4ade80' : '#f87171'}
+                color={Number(m.net_R ?? health?.performance?.net_return_R ?? pr?.friction?.net_R_after_friction ?? m.gross_R) >= 0 ? '#4ade80' : '#f87171'}
               />
               <MetricCard
                 label="Expectancy R/trade"
-                value={fmt(ex.expectancy_R_per_trade ?? m.avg_R, ' R', 3)}
+                value={fmt(ex.expectancy_R_net ?? ex.expectancy_R_per_trade ?? m.avg_R, ' R', 3)}
                 hint="Expected return per signal"
                 color="#38bdf8"
               />

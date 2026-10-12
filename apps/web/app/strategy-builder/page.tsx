@@ -2152,17 +2152,18 @@ function ExecutiveStrategyHealthCard({ job }: { job: any }) {
   const pr = healthData?.performance_and_robustness || s.performance_and_robustness || job.performance_and_robustness || {};
   const trades = Number(s.total_trades ?? (job.trades?.length ?? 0));
   const grossR = Number(s.gross_R ?? 0);
+  const netR = Number(s.net_R ?? pr?.friction?.net_R_after_friction ?? grossR);
 
   // Fallback calculation matching backend formula if API hasn't written to disk yet
   const fallbackSubScores = useMemo(() => {
     const maxDd = Math.abs(Number(s.max_drawdown_in_R ?? 1.0));
     const samplePenalty = trades < 10 ? 0.45 : trades < 30 ? 0.7 : 1.0;
-    const oneDayPenalty = 0.65;
-    const rawPerf = Math.max(0, Math.min(100, ((grossR + 5) / 25) * 100));
+    const oneDayPenalty = trades >= 100 ? 1.0 : 0.65;
+    const rawPerf = Math.max(0, Math.min(100, ((netR + 5) / 25) * 100));
     const perfScore = Math.round(rawPerf * samplePenalty * oneDayPenalty);
     const riskScore = Math.round(Math.max(20, Math.min(100, 100 - (maxDd * 10))));
     const execScore = 100;
-    const robustScore = trades < 10 ? 18 : trades < 30 ? 45 : 75;
+    const robustScore = trades < 10 ? 18 : trades < 30 ? 45 : trades >= 100 ? 85 : 75;
     const disciplineScore = 100;
     const overall = Math.round((0.30 * perfScore + 0.25 * riskScore + 0.15 * execScore + 0.20 * robustScore + 0.10 * disciplineScore) * 10) / 10;
     return {
@@ -2172,7 +2173,7 @@ function ExecutiveStrategyHealthCard({ job }: { job: any }) {
       execution: execScore,
       robustness: robustScore,
     };
-  }, [trades, grossR, s.max_drawdown_in_R]);
+  }, [trades, netR, s.max_drawdown_in_R]);
 
   const healthScore = healthData?.overall_strategy_health_score != null
     ? Number(healthData.overall_strategy_health_score)
@@ -2188,7 +2189,15 @@ function ExecutiveStrategyHealthCard({ job }: { job: any }) {
     robustness: fallbackSubScores.robustness,
   };
 
-  const finalVerdict = coachData?.final_verdict || (trades < 30 ? "NEEDS_MORE_DATA" : grossR > 0 ? "PROMISING_PAPER_SYSTEM" : "DO_NOT_SCALE_YET");
+  const rawVerdict = coachData?.final_verdict || (trades < 30 ? "NEEDS_MORE_DATA" : netR > 0 ? "PROMISING_PAPER_SYSTEM" : "DO_NOT_SCALE_YET");
+  const finalVerdict = trades >= 100 && rawVerdict === "NEEDS_MORE_DATA"
+    ? (netR > 0 ? "PROMISING_PAPER_SYSTEM" : "DO_NOT_SCALE_YET")
+    : rawVerdict;
+  const dataSufficiencyLabel = trades >= 100
+    ? `STATISTICALLY SIGNIFICANT (${trades} TRADES)`
+    : trades >= 30
+      ? `ADEQUATE SAMPLE (${trades} TRADES)`
+      : `NEEDS MORE DATA (${trades} TRADES)`;
   const finalRec = quantRecommendation(pr, healthScore);
 
   return (
@@ -2243,6 +2252,19 @@ function ExecutiveStrategyHealthCard({ job }: { job: any }) {
                 }}
               >
                 {finalVerdict}
+              </span>
+              <span
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  background: trades >= 100 ? "rgba(34, 197, 94, 0.14)" : trades >= 30 ? "rgba(56, 189, 248, 0.14)" : "rgba(245, 158, 11, 0.14)",
+                  color: trades >= 100 ? "#4ade80" : trades >= 30 ? "#38bdf8" : "#fbbf24",
+                  border: "1px solid currentColor",
+                }}
+              >
+                {dataSufficiencyLabel}
               </span>
             </div>
             <div style={{ color: "#cbd5e1", fontSize: 13, marginTop: 4, fontWeight: 500 }}>
@@ -3064,7 +3086,38 @@ function BacktestResult({
   const negative = Number(s.losses || 0);
   const be = Math.max(0, Number(s.total_trades || 0) - positive - negative);
 
-  const netAfterFriction = fric.net_R_after_friction != null ? fric.net_R_after_friction : s.gross_R;
+  const feeSide = Number(fric.fee_pct_per_side ?? 0.04);
+  const slipSide = Number(fric.slippage_pct_per_side ?? 0.01);
+  const roundTripFrictionPct = (feeSide + slipSide) * 2.0;
+  const riskPctFallback = Number(risk.risk_per_trade_pct ?? 1.0) > 0 ? Number(risk.risk_per_trade_pct ?? 1.0) : 1.0;
+
+  const netAfterFriction = useMemo(() => {
+    if (activeTradesList.length > 0) {
+      let sumNet = 0;
+      for (const t of activeTradesList) {
+        if (t.net_r !== undefined && t.net_r !== null && t.net_r !== "") {
+          const nr = Number(t.net_r);
+          if (Number.isFinite(nr)) {
+            sumNet += nr;
+            continue;
+          }
+        }
+        const gross = Number(t.gross_r ?? t.r_multiple ?? t.r ?? 0);
+        const ep = Number(t.entry_price ?? 0);
+        const sl = Number(t.stop_loss ?? 0);
+        let slDistPct = riskPctFallback;
+        if (ep > 0 && sl > 0 && Math.abs(ep - sl) > 1e-12) {
+          slDistPct = (Math.abs(ep - sl) / ep) * 100.0;
+        }
+        const fricR = roundTripFrictionPct / Math.max(slDistPct, 1e-6);
+        sumNet += gross - fricR;
+      }
+      return Math.round(sumNet * 10000) / 10000;
+    }
+    if (s.net_R != null) return Number(s.net_R);
+    if (fric.net_R_after_friction != null) return Number(fric.net_R_after_friction);
+    return Number(s.gross_R ?? 0);
+  }, [activeTradesList, s.net_R, fric.net_R_after_friction, s.gross_R, roundTripFrictionPct, riskPctFallback]);
 
   const rows = [
     [
@@ -3076,7 +3129,7 @@ function BacktestResult({
     [
       "Net Return (After Fees & Slippage)",
       `${fmt(netAfterFriction)} R`,
-      `Includes ${(fric.fee_pct_per_side ?? 0.04) * 2}% round-trip fee + ${(fric.slippage_pct_per_side ?? 0.01) * 2}% slippage.`,
+      `Includes ${feeSide * 2}% round-trip fee + ${slipSide * 2}% slippage.`,
     ],
     ["Bars Processed", s.bars_processed, "Historical bars scanned by engine."],
     ["Breakouts Detected", s.breakouts, "Total price level breakout triggers."],

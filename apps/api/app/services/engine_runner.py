@@ -79,11 +79,79 @@ def _friction_params(job_payload: Dict[str, Any]) -> tuple[float, float]:
     return fee, slip
 
 
+def _compute_trade_r_metrics(
+    trade: dict[str, Any],
+    round_trip_friction_pct: float,
+    fallback_risk_pct: float,
+) -> tuple[float, float, float]:
+    """Return (gross_r, net_r, friction_r) using per-trade stopLossDistancePercent."""
+    raw_gross = trade.get(
+        "gross_r",
+        trade.get("grossR", trade.get("r_multiple", trade.get("R_multiple", 0.0))),
+    )
+    try:
+        gross_r = float(raw_gross)
+    except Exception:
+        gross_r = 0.0
+
+    ep_raw = trade.get("entry_price", trade.get("price"))
+    sl_raw = trade.get("stop_loss")
+    stop_dist_pct = fallback_risk_pct if fallback_risk_pct > 0 else 1.0
+    try:
+        ep = float(ep_raw) if ep_raw is not None else 0.0
+        sl = float(sl_raw) if sl_raw is not None else 0.0
+        if ep > 0.0 and abs(ep - sl) > 0.0:
+            stop_dist_pct = (abs(ep - sl) / ep) * 100.0
+    except Exception:
+        pass
+
+    raw_fric = trade.get("friction_r", trade.get("frictionR"))
+    friction_r: float | None = None
+    if raw_fric is not None and str(raw_fric).strip() != "":
+        try:
+            friction_r = float(raw_fric)
+        except Exception:
+            friction_r = None
+    if friction_r is None:
+        friction_r = round_trip_friction_pct / max(stop_dist_pct, 1e-6)
+
+    raw_net = trade.get("net_r", trade.get("netR"))
+    net_r: float | None = None
+    if raw_net is not None and str(raw_net).strip() != "":
+        try:
+            net_r = float(raw_net)
+        except Exception:
+            net_r = None
+    if net_r is None:
+        net_r = gross_r - friction_r
+
+    return gross_r, net_r, friction_r
+
+
+def enrich_trades_with_net_r(
+    trades: list[dict[str, Any]],
+    fee_pct: float = 0.04,
+    slippage_pct: float = 0.01,
+    risk_pct: float = 1.0,
+) -> list[dict[str, Any]]:
+    effective_risk = risk_pct if (risk_pct and risk_pct > 0) else 1.0
+    round_trip_friction_pct = (fee_pct * 2.0) + (slippage_pct * 2.0)
+    for t in trades:
+        gross_r, net_r, friction_r = _compute_trade_r_metrics(t, round_trip_friction_pct, effective_risk)
+        t["gross_r"] = round(gross_r, 4)
+        t["net_r"] = round(net_r, 4)
+        t["friction_r"] = round(friction_r, 4)
+        if "r_multiple" not in t or t.get("r_multiple") is None or str(t.get("r_multiple")).strip() == "":
+            t["r_multiple"] = round(gross_r, 4)
+    return trades
+
+
 def write_trade_log_csv(trades: list[dict[str, Any]], path: Path) -> None:
     fieldnames = [
         "trade_id", "symbol", "entry_time", "entry_price", "stop_loss",
         "target1", "target2", "exit_time", "exit_price", "exit_reason",
-        "r_multiple", "setup_score_at_entry", "regime_at_entry", "holding_bars"
+        "r_multiple", "gross_r", "net_r", "friction_r",
+        "setup_score_at_entry", "regime_at_entry", "holding_bars"
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
@@ -100,7 +168,7 @@ def compute_symbol_breakdown(
     risk_pct: float = 1.0,
 ) -> dict[str, dict[str, Any]]:
     effective_risk = risk_pct if risk_pct > 0 else 1.0
-    friction_per_trade = ((fee_pct * 2.0) + (slippage_pct * 2.0)) / effective_risk
+    round_trip_friction_pct = (fee_pct * 2.0) + (slippage_pct * 2.0)
     
     by_symbol: dict[str, list[dict[str, Any]]] = {}
     for sym in (expected_symbols or []):
@@ -111,27 +179,28 @@ def compute_symbol_breakdown(
         
     breakdown = {}
     for sym, s_trades in by_symbol.items():
-        rs = []
+        gross_rs: list[float] = []
+        net_rs: list[float] = []
         for t in s_trades:
-            raw = t.get("r_multiple", t.get("R_multiple", 0))
-            try:
-                rs.append(float(raw))
-            except Exception:
-                rs.append(0.0)
-        n = len(rs)
-        wins = [x for x in rs if x > 0.0001]
-        losses = [x for x in rs if x < -0.0001]
-        be = [x for x in rs if abs(x) <= 0.0001]
-        gross_r = sum(rs)
-        net_r = gross_r - (friction_per_trade * n)
-        gross_win = sum(wins)
-        gross_loss = abs(sum(losses))
-        pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else (None if gross_win == 0 else 999.0)
+            g_r, n_r, _ = _compute_trade_r_metrics(t, round_trip_friction_pct, effective_risk)
+            gross_rs.append(g_r)
+            net_rs.append(n_r)
+        n = len(net_rs)
+        wins = [x for x in gross_rs if x > 0.0001]
+        losses = [x for x in gross_rs if x < -0.0001]
+        be = [x for x in gross_rs if abs(x) <= 0.0001]
+        net_wins = [x for x in net_rs if x > 0.0001]
+        net_losses = [x for x in net_rs if x < -0.0001]
+        gross_r = sum(gross_rs)
+        net_r = sum(net_rs)
+        net_win_sum = sum(net_wins)
+        net_loss_sum = abs(sum(net_losses))
+        pf = round(net_win_sum / net_loss_sum, 3) if net_loss_sum > 0 else (None if net_win_sum == 0 else 999.0)
         
         peak = 0.0
         cur_eq = 0.0
         max_dd = 0.0
-        for x in rs:
+        for x in net_rs:
             cur_eq += x
             peak = max(peak, cur_eq)
             max_dd = max(max_dd, peak - cur_eq)
@@ -147,9 +216,10 @@ def compute_symbol_breakdown(
             "net_R": round(net_r, 4),
             "profit_factor": pf,
             "max_drawdown_in_R": round(max_dd, 4),
-            "avg_R": round(gross_r / n, 4) if n > 0 else 0.0,
-            "best_R": round(max(rs), 4) if rs else 0.0,
-            "worst_R": round(min(rs), 4) if rs else 0.0,
+            "avg_R": round(net_r / n, 4) if n > 0 else 0.0,
+            "avg_gross_R": round(gross_r / n, 4) if n > 0 else 0.0,
+            "best_R": round(max(net_rs), 4) if net_rs else 0.0,
+            "worst_R": round(min(net_rs), 4) if net_rs else 0.0,
         }
     return breakdown
 
@@ -253,16 +323,18 @@ def insert_outputs(job_payload: Dict[str, Any], job_id: str, output_dir: Path):
     """Parse C++ output files and persist into database."""
     symbol = (job_payload.get("symbols") or ["BTCUSDT"])[0]
     trades = read_csv(output_dir / "trade_log.csv")
+    fee_rate, slip_rate = _friction_params(job_payload)
+    risk_pct = _risk_per_trade_pct(job_payload) or 1.0
+    enrich_trades_with_net_r(trades, fee_rate, slip_rate, risk_pct)
     summary = read_json(output_dir / "backtest_summary.json")
     if "performance_and_robustness" not in summary:
-        fee_rate, slip_rate = _friction_params(job_payload)
         summary["performance_and_robustness"] = build_performance_and_robustness(
             trades,
             start_time=job_payload.get("start_date"),
             end_time=job_payload.get("end_date"),
             bars_processed=summary.get("bars_processed"),
             profit_factor=summary.get("profit_factor"),
-            risk_per_trade_pct=_risk_per_trade_pct(job_payload),
+            risk_per_trade_pct=risk_pct,
             fee_pct=fee_rate,
             slippage_pct=slip_rate,
         )
@@ -274,7 +346,7 @@ def insert_outputs(job_payload: Dict[str, Any], job_id: str, output_dir: Path):
     with get_conn() as conn:
         conn.execute(f"DELETE FROM trades WHERE job_id={p}", (job_id,))
         for row in trades:
-            r = row.get("r_multiple") or row.get("R_multiple") or 0
+            r = row.get("net_r") if row.get("net_r") is not None else (row.get("r_multiple") or row.get("R_multiple") or 0)
             try:
                 rv = float(r)
             except Exception:
@@ -329,8 +401,8 @@ def _run_engine_sync_impl(
     market_paths: dict[str, str] = {}
     if mode == "backtest" and start_date:
         try:
-            # Download/cache real Binance candles for every selected symbol in parallel so
-            # the UI can truthfully show all selected markets without serial network latency.
+            # Download/cache real Binance candles for every selected symbol with bounded
+            # concurrency (max 2 workers) so Render 512MB RAM stays strictly O(1).
             market_rows = {}
             primary_md = None
             syms_to_fetch = list(symbols or [symbol_for_data])
@@ -338,7 +410,7 @@ def _run_engine_sync_impl(
             def _fetch_single_symbol(sym: str):
                 return sym, fetch_real_binance_csv(sym, timeframe, start_date, end_date)
 
-            max_fetch_workers = min(len(syms_to_fetch), 16)
+            max_fetch_workers = min(len(syms_to_fetch), 2)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_fetch_workers) as executor:
                 fetched_items = list(executor.map(_fetch_single_symbol, syms_to_fetch))
 
@@ -433,7 +505,7 @@ def _run_engine_sync_impl(
             except Exception as exc:
                 return sym, False, [], "", f"\n[{sym}] Error: {exc}"
 
-        max_proc_workers = min(len(symbols), 8)
+        max_proc_workers = min(len(symbols), 2)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_proc_workers) as executor:
             proc_results = list(executor.map(_run_single_symbol, symbols))
 
@@ -450,39 +522,39 @@ def _run_engine_sync_impl(
         error_category = None if any_success else "engine_nonzero_exit"
 
         if any_success:
+            fee_rate, slip_rate = _friction_params(job_payload)
+            risk_pct = _risk_per_trade_pct(job_payload) or 1.0
+            enrich_trades_with_net_r(all_basket_trades, fee_rate, slip_rate, risk_pct)
             all_basket_trades.sort(key=lambda t: str(t.get("entry_time") or ""))
             for idx, t in enumerate(all_basket_trades, start=1):
                 t["trade_id"] = idx
 
             write_trade_log_csv(all_basket_trades, output_dir / "trade_log.csv")
 
-            fee_rate, slip_rate = _friction_params(job_payload)
-            risk_pct = _risk_per_trade_pct(job_payload) or 1.0
             breakdown = compute_symbol_breakdown(all_basket_trades, symbols, fee_rate, slip_rate, risk_pct)
 
-            rs = []
-            for t in all_basket_trades:
-                try:
-                    rs.append(float(t.get("r_multiple") or 0))
-                except Exception:
-                    rs.append(0.0)
-            wins = [x for x in rs if x > 0.0001]
-            losses = [x for x in rs if x < -0.0001]
-            gross_r = sum(rs)
-            gross_win = sum(wins)
-            gross_loss = abs(sum(losses))
-            pf = round(gross_win / gross_loss, 3) if gross_loss > 0 else (None if gross_win == 0 else 999.0)
+            gross_rs = [float(t.get("gross_r") or 0.0) for t in all_basket_trades]
+            net_rs = [float(t.get("net_r") or 0.0) for t in all_basket_trades]
+            fric_rs = [float(t.get("friction_r") or 0.0) for t in all_basket_trades]
+            wins = [x for x in gross_rs if x > 0.0001]
+            losses = [x for x in gross_rs if x < -0.0001]
+            net_wins = [x for x in net_rs if x > 0.0001]
+            net_losses = [x for x in net_rs if x < -0.0001]
+            gross_r = sum(gross_rs)
+            net_r = sum(net_rs)
+            total_friction = sum(fric_rs)
+            net_win_sum = sum(net_wins)
+            net_loss_sum = abs(sum(net_losses))
+            pf = round(net_win_sum / net_loss_sum, 3) if net_loss_sum > 0 else (None if net_win_sum == 0 else 999.0)
 
             peak = 0.0
             equity = 0.0
             max_dd = 0.0
-            for x in rs:
+            for x in net_rs:
                 equity += x
                 peak = max(peak, equity)
                 max_dd = max(max_dd, peak - equity)
 
-            total_friction = ((fee_rate * 2.0) + (slip_rate * 2.0)) / risk_pct * len(all_basket_trades)
-            net_r = gross_r - total_friction
             total_bars = sum(int(v or 0) for v in (job_payload.get("market_data", {}).get("rows_per_symbol", {}).values()))
             combined_summary = {
                 "bars_processed": total_bars,
@@ -492,7 +564,9 @@ def _run_engine_sync_impl(
                 "win_rate": round(len(wins) / len(all_basket_trades), 4) if all_basket_trades else 0.0,
                 "gross_R": round(gross_r, 4),
                 "net_R": round(net_r, 4),
-                "average_R": round(gross_r / len(all_basket_trades), 4) if all_basket_trades else 0.0,
+                "total_friction_R": round(total_friction, 4),
+                "average_R": round(net_r / len(all_basket_trades), 4) if all_basket_trades else 0.0,
+                "average_gross_R": round(gross_r / len(all_basket_trades), 4) if all_basket_trades else 0.0,
                 "profit_factor": pf,
                 "max_drawdown_in_R": round(max_dd, 4),
                 "symbols": symbols,
@@ -542,27 +616,52 @@ def _run_engine_sync_impl(
 
         if status == "completed":
             trades = read_csv(output_dir / "trade_log.csv")
-            for t in trades:
-                t["symbol"] = symbols[0]
-            write_trade_log_csv(trades, output_dir / "trade_log.csv")
             fee_rate, slip_rate = _friction_params(job_payload)
             risk_pct = _risk_per_trade_pct(job_payload) or 1.0
+            for t in trades:
+                t["symbol"] = symbols[0]
+            enrich_trades_with_net_r(trades, fee_rate, slip_rate, risk_pct)
+            write_trade_log_csv(trades, output_dir / "trade_log.csv")
+
             summary = read_json(output_dir / "backtest_summary.json")
-            gross_r = float(summary.get("gross_R") or 0.0)
-            total_friction = ((fee_rate * 2.0) + (slip_rate * 2.0)) / risk_pct * len(trades)
-            summary["net_R"] = round(gross_r - total_friction, 4)
+            gross_rs = [float(t.get("gross_r") or 0.0) for t in trades]
+            net_rs = [float(t.get("net_r") or 0.0) for t in trades]
+            fric_rs = [float(t.get("friction_r") or 0.0) for t in trades]
+            net_wins = [x for x in net_rs if x > 0.0001]
+            net_losses = [x for x in net_rs if x < -0.0001]
+            gross_r = sum(gross_rs)
+            net_r = sum(net_rs)
+            total_friction = sum(fric_rs)
+            net_win_sum = sum(net_wins)
+            net_loss_sum = abs(sum(net_losses))
+            pf = round(net_win_sum / net_loss_sum, 3) if net_loss_sum > 0 else (None if net_win_sum == 0 else 999.0)
+
+            peak = 0.0
+            equity = 0.0
+            max_dd = 0.0
+            for x in net_rs:
+                equity += x
+                peak = max(peak, equity)
+                max_dd = max(max_dd, peak - equity)
+
+            summary["gross_R"] = round(gross_r, 4)
+            summary["net_R"] = round(net_r, 4)
+            summary["total_friction_R"] = round(total_friction, 4)
+            summary["average_R"] = round(net_r / len(trades), 4) if trades else 0.0
+            summary["average_gross_R"] = round(gross_r / len(trades), 4) if trades else 0.0
+            summary["profit_factor"] = pf
+            summary["max_drawdown_in_R"] = round(max_dd, 4)
             summary["per_symbol_breakdown"] = compute_symbol_breakdown(trades, symbols, fee_rate, slip_rate, risk_pct)
-            if "performance_and_robustness" not in summary:
-                summary["performance_and_robustness"] = build_performance_and_robustness(
-                    trades,
-                    start_time=job_payload.get("start_date"),
-                    end_time=job_payload.get("end_date"),
-                    bars_processed=summary.get("bars_processed"),
-                    profit_factor=summary.get("profit_factor"),
-                    risk_per_trade_pct=risk_pct,
-                    fee_pct=fee_rate,
-                    slippage_pct=slip_rate,
-                )
+            summary["performance_and_robustness"] = build_performance_and_robustness(
+                trades,
+                start_time=job_payload.get("start_date"),
+                end_time=job_payload.get("end_date"),
+                bars_processed=summary.get("bars_processed"),
+                profit_factor=pf,
+                risk_per_trade_pct=risk_pct,
+                fee_pct=fee_rate,
+                slippage_pct=slip_rate,
+            )
             (output_dir / "backtest_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if status == "completed":

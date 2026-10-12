@@ -25,7 +25,7 @@ def _score(value: float, lo: float, hi: float, invert: bool = False) -> float:
 
 
 def build_strategy_health_score(trades: list[dict[str, Any]], journal_entries: list[dict[str, Any]] | None = None, benchmark_returns: list[float] | None = None, risk_per_trade_pct: float | None = None) -> dict[str, Any]:
-    r = [_f(t.get('r_multiple', t.get('r', t.get('pnl', 0)))) for t in trades]
+    r = [_f(t.get('net_r', t.get('netR', t.get('r_multiple', t.get('r', t.get('pnl', 0)))))) for t in trades]
     n = len(r)
     wins = [x for x in r if x > 0]
     losses = [x for x in r if x < 0]
@@ -121,6 +121,7 @@ def build_strategy_health_score(trades: list[dict[str, Any]], journal_entries: l
             'parameter_sensitivity': sens_res,
         },
         'performance_and_robustness': pr,
+        'data_sufficiency_status': pr['robustness'].get('data_sufficiency_status', 'STATISTICALLY_SIGNIFICANT' if n >= 100 else 'ADEQUATE_SAMPLE' if n >= 30 else 'NEEDS_MORE_DATA'),
         'warnings': pr['warnings'],
         'regime_behavior': {'bull_score': None, 'sideways_score': None, 'bear_score': None, 'high_volatility_score': None, 'low_volatility_score': None},
         'discipline': {'journal_entries': len(journal_entries), 'mistake_count': len(mistakes), 'repeated_mistakes': repeated},
