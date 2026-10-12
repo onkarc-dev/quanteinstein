@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, getUser, getToken } from "../../lib/api";
 import BacktestAnalytics from "../../components/BacktestAnalytics";
+import InfoTip, { LabelWithInfo } from "../../components/InfoTip";
 
 type Cfg = {
   strategyCode: string;
@@ -610,12 +611,15 @@ export default function StrategyBuilderPage() {
                 Institutional Quant & Day Trading Lab
               </span>
             </div>
-            <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.02em" }}>
-              Quant Strategy Builder & Backtest Lab
-            </h1>
-            <p style={{ margin: "6px 0 0", color: "#94a3b8", fontSize: 13 }}>
-              Formulate user-defined rules, configure friction and dynamic exits, test against 200+ Binance markets, and deploy directly to Live Paper Trading.
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.02em" }}>
+                Quant Strategy Builder & Backtest Lab
+              </h1>
+              <InfoTip
+                size="md"
+                text="Formulate user-defined rules, configure friction and dynamic exits, test against 200+ Binance markets, and deploy directly to Live Paper Trading."
+              />
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -672,22 +676,34 @@ export default function StrategyBuilderPage() {
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
               Strategy Identity, Direction & Timeframe
             </h2>
+            <InfoTip
+              size="md"
+              text="Configure your unique strategy identifier, breakout trade direction (Long, Short, or Both), candle execution timeframe, lookback period, and minimum PRISM setup quality threshold."
+            />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 28 }}>
             <label style={labelStyle}>
-              Strategy Identifier
+              <LabelWithInfo title="Strategy Identifier" info="Unique label for backtest and live tracking" />
               <input
                 style={inputStyle}
                 value={cfg.strategyCode}
                 onChange={(e) => upd("strategyCode", e.target.value)}
                 placeholder="PRISM_BREAKOUT_RETEST"
               />
-              <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Unique label for backtest and live tracking</span>
             </label>
 
             <label style={labelStyle}>
-              Trade Direction
+              <LabelWithInfo
+                title="Trade Direction"
+                info={
+                  cfg.direction === "both"
+                    ? "Executes long breakouts & short breakdowns"
+                    : cfg.direction === "long_only"
+                      ? "Only buys high breakouts"
+                      : "Only shorts breakdown support"
+                }
+              />
               <select
                 style={{ ...inputStyle, borderColor: "#6366f1" }}
                 value={cfg.direction}
@@ -697,13 +713,13 @@ export default function StrategyBuilderPage() {
                 <option value="long_only">Long Only (Spot / Bullish)</option>
                 <option value="short_only">Short Only (Hedge / Bearish)</option>
               </select>
-              <span style={{ color: "#818cf8", fontSize: 11, textTransform: "none" }}>
-                {cfg.direction === "both" ? "Executes long breakouts & short breakdowns" : cfg.direction === "long_only" ? "Only buys high breakouts" : "Only shorts breakdown support"}
-              </span>
             </label>
 
             <label style={labelStyle}>
-              Execution Timeframe
+              <LabelWithInfo
+                title="Execution Timeframe"
+                info={`Candle length: ${timeframeToSeconds(cfg.timeframe)} seconds`}
+              />
               <select
                 style={inputStyle}
                 value={cfg.timeframe}
@@ -715,24 +731,20 @@ export default function StrategyBuilderPage() {
                   </option>
                 ))}
               </select>
-              <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>
-                Candle length: {timeframeToSeconds(cfg.timeframe)} seconds
-              </span>
             </label>
 
             <label style={labelStyle}>
-              Breakout Lookback
+              <LabelWithInfo title="Breakout Lookback" info="Previous bars for high/low breakout" />
               <input
                 style={inputStyle}
                 type="number"
                 value={cfg.lookback}
                 onChange={(e) => upd("lookback", +e.target.value)}
               />
-              <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Previous bars for high/low breakout</span>
             </label>
 
             <label style={labelStyle}>
-              Min Setup Score (0 - 10)
+              <LabelWithInfo title="Min Setup Score (0 - 10)" info="PRISM composite quality threshold" />
               <input
                 style={inputStyle}
                 type="number"
@@ -740,7 +752,6 @@ export default function StrategyBuilderPage() {
                 value={cfg.score}
                 onChange={(e) => upd("score", +e.target.value)}
               />
-              <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>PRISM composite quality threshold</span>
             </label>
           </div>
 
@@ -751,11 +762,15 @@ export default function StrategyBuilderPage() {
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
                 Dynamic Exits & Trade Management Architecture
               </h2>
+              <InfoTip
+                size="md"
+                text="Define initial stop-loss placement (ATR or market structure), R-multiple profit targets (T1 & T2), partial profit scaling, automatic breakeven lock, and ATR chandelier trailing stops."
+              />
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16, marginBottom: 20 }}>
               <label style={labelStyle}>
-                Stop-Loss Mode
+                <LabelWithInfo title="Stop-Loss Mode" info="Determines initial hard stop level" />
                 <select
                   style={inputStyle}
                   value={cfg.stop}
@@ -765,11 +780,10 @@ export default function StrategyBuilderPage() {
                   <option value="atr">ATR Multiplier Only</option>
                   <option value="structure">Market Structure Only</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Determines initial hard stop level</span>
               </label>
 
               <label style={labelStyle}>
-                ATR Multiplier
+                <LabelWithInfo title="ATR Multiplier" info={`Stop distance = ATR × ${cfg.atr}`} />
                 <input
                   style={inputStyle}
                   type="number"
@@ -777,11 +791,10 @@ export default function StrategyBuilderPage() {
                   value={cfg.atr}
                   onChange={(e) => upd("atr", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Stop distance = ATR × {cfg.atr}</span>
               </label>
 
               <label style={labelStyle}>
-                Target 1 R-Multiple
+                <LabelWithInfo title="Target 1 R-Multiple" info="First profit scaling exit target" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -789,11 +802,10 @@ export default function StrategyBuilderPage() {
                   value={cfg.t1}
                   onChange={(e) => upd("t1", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>First profit scaling exit target</span>
               </label>
 
               <label style={labelStyle}>
-                Target 2 R-Multiple
+                <LabelWithInfo title="Target 2 R-Multiple" info="Runner target for larger trend moves" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -801,11 +813,17 @@ export default function StrategyBuilderPage() {
                   value={cfg.t2}
                   onChange={(e) => upd("t2", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Runner target for larger trend moves</span>
               </label>
 
               <label style={labelStyle}>
-                Breakeven Stop Trigger
+                <LabelWithInfo
+                  title="Breakeven Stop Trigger"
+                  info={
+                    cfg.breakevenStop
+                      ? "Protects profits once price hits Target 1"
+                      : "Risk remains open until T2 or hard stop"
+                  }
+                />
                 <select
                   style={{ ...inputStyle, borderColor: cfg.breakevenStop ? "#4ade80" : "rgba(255,255,255,0.12)" }}
                   value={cfg.breakevenStop ? "enabled" : "disabled"}
@@ -814,13 +832,13 @@ export default function StrategyBuilderPage() {
                   <option value="enabled">Enabled (Move Stop to BE at T1)</option>
                   <option value="disabled">Disabled (Hold Hard Stop)</option>
                 </select>
-                <span style={{ color: "#4ade80", fontSize: 11, textTransform: "none" }}>
-                  {cfg.breakevenStop ? "Protects profits once price hits Target 1" : "Risk remains open until T2 or hard stop"}
-                </span>
               </label>
 
               <label style={labelStyle}>
-                Target 1 Scaling Size %
+                <LabelWithInfo
+                  title="Target 1 Scaling Size %"
+                  info={`${cfg.partialTpPct}% closed at T1; ${100 - cfg.partialTpPct}% runs to T2`}
+                />
                 <input
                   style={inputStyle}
                   type="number"
@@ -830,13 +848,10 @@ export default function StrategyBuilderPage() {
                   value={cfg.partialTpPct}
                   onChange={(e) => upd("partialTpPct", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>
-                  {cfg.partialTpPct}% closed at T1; {100 - cfg.partialTpPct}% runs to T2
-                </span>
               </label>
 
               <label style={labelStyle}>
-                Trailing Stop Loss
+                <LabelWithInfo title="Trailing Stop Loss" info="Trails stop via ATR after T1 profit" />
                 <select
                   style={inputStyle}
                   value={cfg.trailingStop ? "enabled" : "disabled"}
@@ -845,7 +860,6 @@ export default function StrategyBuilderPage() {
                   <option value="disabled">Disabled (Fixed T2)</option>
                   <option value="enabled">Enabled (ATR Chandelier Exit)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Trails stop via ATR after T1 profit</span>
               </label>
             </div>
           </div>
@@ -857,11 +871,15 @@ export default function StrategyBuilderPage() {
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
                 Account, Prop Firm & Portfolio Risk Discipline
               </h2>
+              <InfoTip
+                size="md"
+                text="Enforce institutional risk management: equity risk per trade, daily drawdown circuit breakers, maximum concurrent open positions, retest zone tolerance, setup expiry TTL, and re-entry cooldowns."
+              />
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
               <label style={labelStyle}>
-                Risk Per Trade %
+                <LabelWithInfo title="Risk Per Trade %" info="% of paper equity risked per setup" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -869,11 +887,13 @@ export default function StrategyBuilderPage() {
                   value={cfg.risk}
                   onChange={(e) => upd("risk", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>% of paper equity risked per setup</span>
               </label>
 
               <label style={labelStyle}>
-                Max Daily Loss % (Circuit Breaker)
+                <LabelWithInfo
+                  title="Max Daily Loss % (Circuit Breaker)"
+                  info={`Prop firm rule: halts trading if down ${cfg.maxDailyLoss}% in 1 day`}
+                />
                 <input
                   style={{ ...inputStyle, borderColor: "#f59e0b" }}
                   type="number"
@@ -881,13 +901,10 @@ export default function StrategyBuilderPage() {
                   value={cfg.maxDailyLoss}
                   onChange={(e) => upd("maxDailyLoss", +e.target.value)}
                 />
-                <span style={{ color: "#fbbf24", fontSize: 11, textTransform: "none" }}>
-                  Prop firm rule: halts trading if down {cfg.maxDailyLoss}% in 1 day
-                </span>
               </label>
 
               <label style={labelStyle}>
-                Max Open Positions
+                <LabelWithInfo title="Max Open Positions" info="Concurrent basket position cap" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -897,11 +914,10 @@ export default function StrategyBuilderPage() {
                   value={cfg.maxOpen}
                   onChange={(e) => upd("maxOpen", Math.max(1, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Concurrent basket position cap</span>
               </label>
 
               <label style={labelStyle}>
-                Retest Tolerance %
+                <LabelWithInfo title="Retest Tolerance %" info="Allowable zone penetration (0.001 = 0.1%)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -909,22 +925,20 @@ export default function StrategyBuilderPage() {
                   value={cfg.retest}
                   onChange={(e) => upd("retest", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Allowable zone penetration (0.001 = 0.1%)</span>
               </label>
 
               <label style={labelStyle}>
-                Setup TTL Bars
+                <LabelWithInfo title="Setup TTL Bars" info="Bars before pending setup expires" />
                 <input
                   style={inputStyle}
                   type="number"
                   value={cfg.ttl}
                   onChange={(e) => upd("ttl", +e.target.value)}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Bars before pending setup expires</span>
               </label>
 
               <label style={labelStyle}>
-                Re-Entry Filter
+                <LabelWithInfo title="Re-Entry Filter" info="Enforce re-entry cooldown rules" />
                 <select
                   style={inputStyle}
                   value={cfg.reentry}
@@ -933,11 +947,10 @@ export default function StrategyBuilderPage() {
                   <option value="enabled">Enabled</option>
                   <option value="disabled">Disabled</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Enforce re-entry cooldown rules</span>
               </label>
 
               <label style={labelStyle}>
-                Max Re-Entries
+                <LabelWithInfo title="Max Re-Entries" info="Limits repeated entries after stop" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -947,11 +960,10 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.reentry !== "enabled"}
                   onChange={(e) => upd("maxReentries", Math.max(0, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Limits repeated entries after stop</span>
               </label>
 
               <label style={labelStyle}>
-                Re-Entry Cooldown
+                <LabelWithInfo title="Re-Entry Cooldown" info="Cooldown bars before allowing re-entry" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -961,7 +973,6 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.reentry !== "enabled"}
                   onChange={(e) => upd("reentryCooldown", Math.max(0, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Cooldown bars before allowing re-entry</span>
               </label>
             </div>
           </div>
@@ -973,11 +984,18 @@ export default function StrategyBuilderPage() {
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
                 Execution Friction, Fees & Session Timing (Institutional Day Trader Controls)
               </h2>
+              <InfoTip
+                size="md"
+                text="Model realistic exchange taker/maker commissions, order book slippage, high-volume institutional kill zones (London/NY/Asia), weekend chop filters, and relative breakout volume (RVOL)."
+              />
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
               <label style={labelStyle}>
-                Exchange Fee Tier
+                <LabelWithInfo
+                  title="Exchange Fee Tier"
+                  info={`Fee per side: ${cfg.feePct}% (Round-trip: ${(cfg.feePct * 2).toFixed(3)}%)`}
+                />
                 <select
                   style={inputStyle}
                   value={cfg.feeTier}
@@ -994,13 +1012,10 @@ export default function StrategyBuilderPage() {
                   <option value="zero">Zero Commission (0.00%)</option>
                   <option value="custom">Custom Fee %</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>
-                  Fee per side: {cfg.feePct}% (Round-trip: {(cfg.feePct * 2).toFixed(3)}%)
-                </span>
               </label>
 
               <label style={labelStyle}>
-                Estimated Slippage %
+                <LabelWithInfo title="Estimated Slippage %" info="Deducted on entry and exit" />
                 <select
                   style={inputStyle}
                   value={cfg.slippagePct}
@@ -1011,11 +1026,10 @@ export default function StrategyBuilderPage() {
                   <option value={0.05}>0.05% (Higher volatility altcoin)</option>
                   <option value={0.0}>0.00% (No slippage ideal)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Deducted on entry and exit</span>
               </label>
 
               <label style={labelStyle}>
-                Trading Sessions / Kill Zones
+                <LabelWithInfo title="Trading Sessions / Kill Zones" info="Restricts breakouts to high volume windows" />
                 <select
                   style={inputStyle}
                   value={cfg.tradingHours}
@@ -1027,11 +1041,10 @@ export default function StrategyBuilderPage() {
                   <option value="ny">New York Session (12:00 - 20:00 UTC)</option>
                   <option value="asia">Asian Session (00:00 - 08:00 UTC)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Restricts breakouts to high volume windows</span>
               </label>
 
               <label style={labelStyle}>
-                Weekend Trading Filter
+                <LabelWithInfo title="Weekend Trading Filter" info="Avoids illiquid weekend price manipulation" />
                 <select
                   style={inputStyle}
                   value={cfg.skipWeekends ? "skip" : "include"}
@@ -1040,11 +1053,10 @@ export default function StrategyBuilderPage() {
                   <option value="include">Trade 24/7 (Include Weekends)</option>
                   <option value="skip">Skip Weekends (Avoid Saturday/Sunday Chop)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Avoids illiquid weekend price manipulation</span>
               </label>
 
               <label style={labelStyle}>
-                Breakout Volume (RVOL) Filter
+                <LabelWithInfo title="Breakout Volume (RVOL) Filter" info="Filters out low volume fakeouts" />
                 <select
                   style={inputStyle}
                   value={cfg.rvolFilter ? "enabled" : "disabled"}
@@ -1053,7 +1065,6 @@ export default function StrategyBuilderPage() {
                   <option value="disabled">Disabled (Price Breakout Only)</option>
                   <option value="enabled">Require High Volume (&gt; 1.5x 20-SMA)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Filters out low volume fakeouts</span>
               </label>
             </div>
           </div>
@@ -1065,11 +1076,15 @@ export default function StrategyBuilderPage() {
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
                 Higher-Timeframe EMA Trend Guard
               </h2>
+              <InfoTip
+                size="md"
+                text="Align breakout entries with higher-timeframe macro momentum by requiring Fast EMA > Slow EMA for longs and Fast EMA < Slow EMA for shorts."
+              />
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
               <label style={labelStyle}>
-                Trend Filter Status
+                <LabelWithInfo title="Trend Filter Status" info="Requires Fast EMA > Slow EMA for longs" />
                 <select
                   style={inputStyle}
                   value={cfg.trendFilter}
@@ -1078,11 +1093,10 @@ export default function StrategyBuilderPage() {
                   <option value="enabled">Enabled (Require Macro Trend Alignment)</option>
                   <option value="disabled">Disabled (Trade All Breakouts)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Requires Fast EMA &gt; Slow EMA for longs</span>
               </label>
 
               <label style={labelStyle}>
-                Trend Timeframe
+                <LabelWithInfo title="Trend Timeframe" info="Higher macro timeframe" />
                 <select
                   style={inputStyle}
                   value={cfg.trendTimeframe}
@@ -1093,11 +1107,10 @@ export default function StrategyBuilderPage() {
                     <option key={tf} value={tf}>{tf}</option>
                   ))}
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Higher macro timeframe</span>
               </label>
 
               <label style={labelStyle}>
-                Fast EMA Period
+                <LabelWithInfo title="Fast EMA Period" info="Typically 20 or 21" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1107,11 +1120,10 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.trendFilter !== "enabled"}
                   onChange={(e) => upd("trendFastEma", Math.max(1, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Typically 20 or 21</span>
               </label>
 
               <label style={labelStyle}>
-                Slow EMA Period
+                <LabelWithInfo title="Slow EMA Period" info="Typically 50 or 200" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1121,24 +1133,22 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.trendFilter !== "enabled"}
                   onChange={(e) => upd("trendSlowEma", Math.max(cfg.trendFastEma + 1, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Typically 50 or 200</span>
               </label>
             </div>
           </div>
 
           {/* ─── Section 6: RSI Momentum & Two-Top / Two-Bottom Divergence Engine ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 18 }}>📊</span>
-                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                    Relative Strength Index (RSI) &amp; Divergence Guard
-                  </h2>
-                </div>
-                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-                  Ultra-low latency recursive Wilder&apos;s smoothing with systematic two-bottom bullish divergence and two-top bearish divergence filters.
-                </p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>📊</span>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                  Relative Strength Index (RSI) &amp; Divergence Guard
+                </h2>
+                <InfoTip
+                  size="md"
+                  text="Ultra-low latency recursive Wilder's smoothing with systematic two-bottom bullish divergence and two-top bearish divergence filters. Two-Bottom Bullish confirms when price forms equal/lower bottoms while RSI forms a higher momentum trough. Two-Top Bearish detects exhausted tops to reject buying at cyclical peaks without latency spikes."
+                />
               </div>
               <div style={{
                 fontSize: 11,
@@ -1159,7 +1169,7 @@ export default function StrategyBuilderPage() {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
               <label style={labelStyle}>
-                RSI Guard Status
+                <LabelWithInfo title="RSI Guard Status" info="Zero-latency recursive smoothing" />
                 <select
                   style={inputStyle}
                   value={cfg.rsiFilter}
@@ -1168,11 +1178,10 @@ export default function StrategyBuilderPage() {
                   <option value="disabled">Disabled (Trade All Setups)</option>
                   <option value="enabled">Enabled (Enforce RSI Filter Guard)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Zero-latency recursive smoothing</span>
               </label>
 
               <label style={labelStyle}>
-                Systematic RSI Condition
+                <LabelWithInfo title="Systematic RSI Condition" info="Rule applied for entry validation" />
                 <select
                   style={inputStyle}
                   value={cfg.rsiCondition}
@@ -1184,11 +1193,10 @@ export default function StrategyBuilderPage() {
                   <option value="momentum">Momentum Regime (Require RSI &gt; 50 Centerline)</option>
                   <option value="mean_reversion">Mean Reversion (Buy Oversold Dip &lt;= {cfg.rsiOversold})</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Rule applied for entry validation</span>
               </label>
 
               <label style={labelStyle}>
-                RSI Period
+                <LabelWithInfo title="RSI Period" info="Standard lookback (default 14)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1199,11 +1207,10 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.rsiFilter !== "enabled"}
                   onChange={(e) => upd("rsiPeriod", Math.max(2, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Standard lookback (default 14)</span>
               </label>
 
               <label style={labelStyle}>
-                Overbought Boundary
+                <LabelWithInfo title="Overbought Boundary" info="Bearish ceiling (typically 70 or 80)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1214,11 +1221,10 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.rsiFilter !== "enabled"}
                   onChange={(e) => upd("rsiOverbought", Math.max(50, Math.min(95, +e.target.value)))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Bearish ceiling (typically 70 or 80)</span>
               </label>
 
               <label style={labelStyle}>
-                Oversold Boundary
+                <LabelWithInfo title="Oversold Boundary" info="Bullish floor (typically 30 or 20)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1229,42 +1235,22 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.rsiFilter !== "enabled"}
                   onChange={(e) => upd("rsiOversold", Math.max(5, Math.min(50, +e.target.value)))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Bullish floor (typically 30 or 20)</span>
               </label>
-            </div>
-
-            <div style={{
-              marginTop: 12,
-              padding: "10px 14px",
-              borderRadius: 10,
-              background: "rgba(15, 23, 42, 0.6)",
-              border: "1px solid rgba(255, 255, 255, 0.05)",
-              color: "#94a3b8",
-              fontSize: 12,
-              display: "flex",
-              alignItems: "center",
-              gap: 10
-            }}>
-              <span style={{ color: "#38bdf8", fontSize: 14 }}>💡</span>
-              <span>
-                <strong>Systematic Divergence Execution:</strong> Two-Bottom Bullish confirms when price forms equal/lower bottoms while RSI forms a higher momentum trough. Two-Top Bearish detects exhausted tops to reject buying at cyclical peaks without latency spikes.
-              </span>
             </div>
           </div>
 
           {/* ─── Section 7: MACD Trend & Two-Top / Two-Bottom Reversal Engine ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 18 }}>🌊</span>
-                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                    MACD Trend &amp; Reversal Engine
-                  </h2>
-                </div>
-                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-                  Zero-allocation dual exponential smoothing with two-top bearish roll-over and two-bottom bullish momentum curling.
-                </p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>🌊</span>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                  MACD Trend &amp; Reversal Engine
+                </h2>
+                <InfoTip
+                  size="md"
+                  text="Zero-allocation dual exponential smoothing with two-top bearish roll-over and two-bottom bullish momentum curling. Zero-Latency Spikes: MACD & RSI are updated in O(1) constant time on every bar via primitive streaming registers without rescanning arrays."
+                />
               </div>
               <div style={{
                 fontSize: 11,
@@ -1285,7 +1271,7 @@ export default function StrategyBuilderPage() {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16 }}>
               <label style={labelStyle}>
-                MACD Guard Status
+                <LabelWithInfo title="MACD Guard Status" info="Zero-allocation EMA registers" />
                 <select
                   style={inputStyle}
                   value={cfg.macdFilter}
@@ -1294,11 +1280,10 @@ export default function StrategyBuilderPage() {
                   <option value="disabled">Disabled (Evaluate All Setups)</option>
                   <option value="enabled">Enabled (Enforce MACD Systematic Rule)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Zero-allocation EMA registers</span>
               </label>
 
               <label style={labelStyle}>
-                Systematic MACD Condition
+                <LabelWithInfo title="Systematic MACD Condition" info="Systematic momentum validation" />
                 <select
                   style={inputStyle}
                   value={cfg.macdCondition}
@@ -1310,11 +1295,10 @@ export default function StrategyBuilderPage() {
                   <option value="signal_crossover">Signal Line Crossover (MACD Line &gt; Signal Line)</option>
                   <option value="zero_line">Zero-Line Centerline Regime (MACD Line &gt; 0)</option>
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Systematic momentum validation</span>
               </label>
 
               <label style={labelStyle}>
-                Fast EMA Period
+                <LabelWithInfo title="Fast EMA Period" info="Lead momentum (default 12)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1325,11 +1309,10 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.macdFilter !== "enabled"}
                   onChange={(e) => upd("macdFastPeriod", Math.max(1, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Lead momentum (default 12)</span>
               </label>
 
               <label style={labelStyle}>
-                Slow EMA Period
+                <LabelWithInfo title="Slow EMA Period" info="Baseline EMA (default 26)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1340,11 +1323,10 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.macdFilter !== "enabled"}
                   onChange={(e) => upd("macdSlowPeriod", Math.max(cfg.macdFastPeriod + 1, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Baseline EMA (default 26)</span>
               </label>
 
               <label style={labelStyle}>
-                Signal Smoothing Period
+                <LabelWithInfo title="Signal Smoothing Period" info="Signal trigger EMA (default 9)" />
                 <input
                   style={inputStyle}
                   type="number"
@@ -1355,42 +1337,22 @@ export default function StrategyBuilderPage() {
                   disabled={cfg.macdFilter !== "enabled"}
                   onChange={(e) => upd("macdSignalPeriod", Math.max(1, +e.target.value))}
                 />
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Signal trigger EMA (default 9)</span>
               </label>
-            </div>
-
-            <div style={{
-              marginTop: 12,
-              padding: "10px 14px",
-              borderRadius: 10,
-              background: "rgba(15, 23, 42, 0.6)",
-              border: "1px solid rgba(255, 255, 255, 0.05)",
-              color: "#94a3b8",
-              fontSize: 12,
-              display: "flex",
-              alignItems: "center",
-              gap: 10
-            }}>
-              <span style={{ color: "#c084fc", fontSize: 14 }}>⚡</span>
-              <span>
-                <strong>Zero-Latency Spikes:</strong> MACD &amp; RSI are updated in $O(1)$ constant time on every bar via primitive streaming registers without rescanning arrays.
-              </span>
             </div>
           </div>
 
           {/* ─── Section 8: 200+ Cryptocurrency Market Basket Selector (Transfer Box) ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 18 }}>🪙</span>
-                  <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                    Cryptocurrency Markets for Backtest & Paper Trading
-                  </h2>
-                </div>
-                <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-                  Search and transfer cryptocurrency markets between available Binance pairs and your active strategy basket.
-                </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>🪙</span>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
+                  Cryptocurrency Markets for Backtest & Paper Trading
+                </h2>
+                <InfoTip
+                  size="md"
+                  text="Search and transfer cryptocurrency markets between available Binance pairs and your active strategy basket. Click + on available pairs to add, or ✕ on selected pairs to return to available."
+                />
               </div>
 
               {/* Fast presets buttons */}
@@ -1840,11 +1802,15 @@ export default function StrategyBuilderPage() {
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
                 Historical Backtest Range & Controls
               </h2>
+              <InfoTip
+                size="md"
+                text={`Real Binance Historical Kline Mode: Backtest executes on authentic Binance candle data for ${cfg.symbols.join(", ")} from ${startDate} to ${endDate || yesterdayIso()}. Missing intervals are automatically fetched; synthetic fallbacks are strictly disabled.`}
+              />
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16, marginBottom: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16, marginBottom: 24 }}>
               <label style={labelStyle}>
-                Quick Date Preset
+                <LabelWithInfo title="Quick Date Preset" info="Automatically sets start/end dates" />
                 <select
                   style={inputStyle}
                   value=""
@@ -1863,11 +1829,10 @@ export default function StrategyBuilderPage() {
                     </option>
                   ))}
                 </select>
-                <span style={{ color: "#64748b", fontSize: 11, textTransform: "none" }}>Automatically sets start/end dates</span>
               </label>
 
               <label style={labelStyle}>
-                Start Date
+                <LabelWithInfo title="Start Date" info="Historical backtest window start date" />
                 <input
                   style={inputStyle}
                   type="date"
@@ -1877,7 +1842,7 @@ export default function StrategyBuilderPage() {
               </label>
 
               <label style={labelStyle}>
-                End Date
+                <LabelWithInfo title="End Date" info="Historical backtest window end date" />
                 <input
                   style={inputStyle}
                   type="date"
@@ -1886,25 +1851,6 @@ export default function StrategyBuilderPage() {
                   onChange={(e) => setEndDate(e.target.value)}
                 />
               </label>
-            </div>
-
-            {/* Real Data Notice Banner */}
-            <div
-              style={{
-                background: "rgba(15, 23, 42, 0.6)",
-                border: "1px solid rgba(255, 255, 255, 0.06)",
-                borderRadius: 12,
-                padding: "14px 18px",
-                marginBottom: 24,
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <span style={{ fontSize: 20 }}>📡</span>
-              <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.5 }}>
-                <strong style={{ color: "#f1f5f9" }}>Real Binance Historical Kline Mode:</strong> Backtest executes on authentic Binance candle data for <span style={{ color: "#38bdf8" }}>{cfg.symbols.join(", ")}</span> from {startDate} to {endDate || yesterdayIso()}. Missing intervals are automatically fetched; synthetic fallbacks are strictly disabled.
-              </div>
             </div>
 
             {/* Action Buttons */}
@@ -2027,8 +1973,9 @@ export default function StrategyBuilderPage() {
               </div>
             )}
 
-            <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 12 }}>
-              {msg}
+            <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <InfoTip text={msg} size="sm" />
+              <span>Ready</span>
             </div>
           </div>
         </div>
@@ -2036,8 +1983,9 @@ export default function StrategyBuilderPage() {
         {/* ─── Real-Time Strategy Mechanics Cards ─── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginBottom: 28 }}>
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Stop Logic
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+              <span>Stop Logic</span>
+              <InfoTip text="Protects capital on invalidations. Triggered dynamically in tick simulation." size="sm" />
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#f87171", marginTop: 6 }}>
               {cfg.stop === "atr"
@@ -2046,57 +1994,49 @@ export default function StrategyBuilderPage() {
                   ? "Recent Structure Level"
                   : `ATR × ${cfg.atr} or Structure`}
             </div>
-            <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              Protects capital on invalidations. Triggered dynamically in tick simulation.
-            </p>
           </div>
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Target & Breakeven Exits
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+              <span>Target & Breakeven Exits</span>
+              <InfoTip text={cfg.breakevenStop ? "Locks in gains at T1 and moves stop to entry." : "Fixed targets without breakeven move."} size="sm" />
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#4ade80", marginTop: 6 }}>
               T1 {cfg.t1}R ({cfg.partialTpPct}%) {cfg.breakevenStop ? "→ BE Lock" : ""} → T2 {cfg.t2}R
             </div>
-            <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              {cfg.breakevenStop ? "Locks in gains at T1 and moves stop to entry." : "Fixed targets without breakeven move."}
-            </p>
           </div>
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Prop Firm & Risk Circuit Breaker
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+              <span>Prop Firm & Risk Circuit Breaker</span>
+              <InfoTip text={`${cfg.maxOpen} max positions · ${payload.strategy.reentry.enabled ? `${payload.strategy.reentry.max_reentries} re-entries` : "No re-entries"}`} size="sm" />
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginTop: 6 }}>
               {cfg.risk}% Risk · {cfg.maxDailyLoss}% Daily Loss Halt
             </div>
-            <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              {cfg.maxOpen} max positions · {payload.strategy.reentry.enabled ? `${payload.strategy.reentry.max_reentries} re-entries` : "No re-entries"}
-            </p>
           </div>
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Direction & Macro Guard
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+              <span>Direction & Macro Guard</span>
+              <InfoTip text={`${cfg.feePct}% taker fee · ${cfg.slippagePct}% slippage · ${cfg.tradingHours === "all_day" ? "24/7 Hours" : "Session Filtered"}`} size="sm" />
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#c084fc", marginTop: 6 }}>
               {cfg.direction === "both" ? "Both (Long & Short)" : cfg.direction === "long_only" ? "Long Only" : "Short Only"} · {payload.strategy.trend_filter.use_trend_filter ? `${payload.strategy.trend_filter.higher_timeframe} EMA` : "No Filter"}
             </div>
-            <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              {cfg.feePct}% taker fee · {cfg.slippagePct}% slippage · {cfg.tradingHours === "all_day" ? "24/7 Hours" : "Session Filtered"}
-            </p>
           </div>
 
           <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              RSI &amp; MACD Indicator Guard
+            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+              <span>RSI &amp; MACD Indicator Guard</span>
+              <InfoTip
+                text={`${cfg.rsiFilter === "enabled" ? (cfg.rsiCondition === "two_bottom_bull_two_top_bear" ? "Two-Bottom/Top Divergence" : cfg.rsiCondition) : "RSI inactive"} · ${cfg.macdFilter === "enabled" ? (cfg.macdCondition === "two_top_bear_two_bottom_bull" ? "Two-Top/Bottom Reversal" : cfg.macdCondition) : "MACD inactive"}`}
+                size="sm"
+              />
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, color: "#38bdf8", marginTop: 6 }}>
               {cfg.rsiFilter === "enabled" ? `RSI (${cfg.rsiPeriod})` : "RSI Off"} · {cfg.macdFilter === "enabled" ? `MACD (${cfg.macdFastPeriod}/${cfg.macdSlowPeriod})` : "MACD Off"}
             </div>
-            <p style={{ color: "#64748b", fontSize: 12, margin: "6px 0 0", lineHeight: 1.4 }}>
-              {cfg.rsiFilter === "enabled" ? (cfg.rsiCondition === "two_bottom_bull_two_top_bear" ? "Two-Bottom/Top Divergence" : cfg.rsiCondition) : "RSI inactive"} · {cfg.macdFilter === "enabled" ? (cfg.macdCondition === "two_top_bear_two_bottom_bull" ? "Two-Top/Bottom Reversal" : cfg.macdCondition) : "MACD inactive"}
-            </p>
           </div>
         </div>
 
@@ -2743,12 +2683,15 @@ function QuantCoachOptimizer({
               1-Click Edge Repair &amp; Optimization
             </span>
           </div>
-          <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
-            Institutional Parameter Optimization Device
-          </h3>
-          <p style={{ margin: "5px 0 0", color: "#94a3b8", fontSize: 12, lineHeight: 1.5 }}>
-            Diagnoses execution bottlenecks, resolves setup starvation, corrects inverted trend filters, and widens asymmetric payoff. Apply all suggestions with one click and re-test immediately.
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
+              Institutional Parameter Optimization Device
+            </h3>
+            <InfoTip
+              size="md"
+              text="Diagnoses execution bottlenecks, resolves setup starvation, corrects inverted trend filters, and widens asymmetric payoff. Apply all suggestions with one click and re-test immediately."
+            />
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -3178,13 +3121,14 @@ function BacktestResult({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#ffffff" }}>
             Backtest Execution Performance
           </h2>
-          <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-            Simulated performance metrics across selected historical Binance market data
-          </p>
+          <InfoTip
+            size="md"
+            text="Simulated performance metrics across selected historical Binance market data."
+          />
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link
@@ -3415,13 +3359,14 @@ function StrategyPreview({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#ffffff" }}>
             Active Strategy Configuration Summary
           </h2>
-          <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-            Validated system specifications registered for backtest and live paper trading engines
-          </p>
+          <InfoTip
+            size="md"
+            text="Validated system specifications registered for backtest and live paper trading engines."
+          />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {activeLabel && (

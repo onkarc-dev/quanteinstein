@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { classifyTradeResultFromR, cleanupExitReason } from "../lib/tradeClassification";
+import { InfoTip } from "./InfoTip";
 
 export interface TradeRecord {
   trade_id?: string | number;
@@ -589,17 +590,16 @@ export default function BacktestAnalytics({
           boxShadow: "0 10px 25px rgba(0, 0, 0, 0.25)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14, marginBottom: 20 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 16 }}>📈</span>
-              <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
-                Cumulative Equity Curve & Underwater Drawdown
-              </h3>
-            </div>
-            <p style={{ margin: 0, color: "#94a3b8", fontSize: 12 }}>
-              Continuous R-multiple progression and high-water mark drawdown simulation
-            </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14, marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📈</span>
+            <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
+              Cumulative Equity Curve & Underwater Drawdown
+            </h3>
+            <InfoTip
+              size="md"
+              text="Continuous R-multiple progression and high-water mark drawdown simulation."
+            />
           </div>
 
           {/* Quick KPIs */}
@@ -989,31 +989,29 @@ export default function BacktestAnalytics({
           boxShadow: "0 10px 25px rgba(0, 0, 0, 0.25)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 14 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 18 }}>🪙</span>
-              <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
-                Multi-Market Basket Performance Breakdown
-              </h3>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: "2px 8px",
-                  borderRadius: 12,
-                  background: "rgba(56, 189, 248, 0.15)",
-                  color: "#38bdf8",
-                  border: "1px solid rgba(56, 189, 248, 0.3)",
-                }}
-              >
-                Sorted by {sortKey === "win_rate" ? "Win Rate (100% → 0%)" : sortKey} {sortDir === "desc" ? "↓" : "↑"}
-              </span>
-            </div>
-            <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-              Independent performance attribution across {symbolBreakdown.length} tested cryptocurrency markets.
-              Select top performers to deploy directly to Live Paper Trading.
-            </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 18 }}>🪙</span>
+            <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
+              Multi-Market Basket Performance Breakdown
+            </h3>
+            <InfoTip
+              size="md"
+              text={`Independent performance attribution across ${symbolBreakdown.length} tested cryptocurrency markets. Click any column header to sort (Win Rate 100% → 0% by default), click any row to isolate its equity curve & trade log, or select symbols to deploy directly to Live Paper Trading.`}
+            />
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "2px 8px",
+                borderRadius: 12,
+                background: "rgba(56, 189, 248, 0.15)",
+                color: "#38bdf8",
+                border: "1px solid rgba(56, 189, 248, 0.3)",
+              }}
+            >
+              Sorted by {sortKey === "win_rate" ? "Win Rate (100% → 0%)" : sortKey} {sortDir === "desc" ? "↓" : "↑"}
+            </span>
           </div>
 
           {/* Action CTA: Deploy to Paper Trading */}
@@ -1522,16 +1520,15 @@ export default function BacktestAnalytics({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 16 }}>📋</span>
-              <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
-                Trade-by-Trade Execution Audit Log
-              </h3>
-            </div>
-            <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>
-              Inspect simulated executions, fill levels, duration, and R-multiple realizations
-            </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📋</span>
+            <h3 style={{ fontSize: 16, fontWeight: 800, margin: 0, color: "#ffffff", letterSpacing: "-0.01em" }}>
+              Trade-by-Trade Execution Audit Log
+            </h3>
+            <InfoTip
+              size="md"
+              text="Inspect simulated executions, fill levels, holding duration, and R-multiple realizations."
+            />
           </div>
 
           <button
