@@ -22,7 +22,9 @@ from app.core.config import settings
 from app.db import get_conn, now
 from app.services.output_reader import read_csv, read_json
 from app.services.coach import write_coach_report
-from app.services.binance_historical import fetch_real_binance_csv, yesterday_utc
+from app.services.binance_historical import yesterday_utc
+from app.services.market_data_service import fetch_historical_market_csv
+from app.services.forex_historical import is_forex_symbol
 from app.services.performance_metrics import build_performance_and_robustness
 
 
@@ -408,7 +410,7 @@ def _run_engine_sync_impl(
             syms_to_fetch = list(symbols or [symbol_for_data])
 
             def _fetch_single_symbol(sym: str):
-                return sym, fetch_real_binance_csv(sym, timeframe, start_date, end_date)
+                return sym, fetch_historical_market_csv(sym, timeframe, start_date, end_date)
 
             max_fetch_workers = min(len(syms_to_fetch), 2)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_fetch_workers) as executor:
@@ -429,11 +431,15 @@ def _run_engine_sync_impl(
             job_payload["input_data"] = md.get("path")
             job_payload["market_data"] = md
             job_payload["market_paths"] = market_paths
-            job_payload["real_binance_data_used"] = True
+            has_crypto = any(not is_forex_symbol(s) for s in syms_to_fetch)
+            has_forex = any(is_forex_symbol(s) for s in syms_to_fetch)
+            job_payload["real_binance_data_used"] = has_crypto
+            job_payload["real_forex_data_used"] = has_forex
             job_payload["end_date"] = end_date
         except Exception as e:
             # Keep this explicit. Do not silently generate synthetic/sample data.
             job_payload["real_binance_data_used"] = False
+            job_payload["real_forex_data_used"] = False
             job_payload["market_data_error"] = str(e)
 
     config_path = write_config(job_payload, job_id, output_dir)

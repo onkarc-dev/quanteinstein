@@ -155,17 +155,27 @@ def set_wallet_balance(payload: dict = Body(default={}), user=Depends(current_us
 
 
 @router.get('/symbols')
-def get_crypto_symbols():
-    from app.services.live_paper import get_all_crypto_symbols
-    symbols = get_all_crypto_symbols()
-    return {"symbols": symbols, "total": len(symbols)}
+def get_market_symbols(market: str = "all"):
+    from app.services.market_data_service import get_market_symbols_catalog
+    catalog = get_market_symbols_catalog()
+    m = market.strip().lower()
+    selected_list = catalog["all"] if m == "all" else catalog["forex"] if m == "forex" else catalog["crypto"]
+    return {
+        "symbols": selected_list,
+        "crypto": catalog["crypto"],
+        "forex": catalog["forex"],
+        "crypto_popular": catalog["crypto_popular"],
+        "forex_popular": catalog["forex_popular"],
+        "total": len(selected_list),
+    }
 
 
 @router.get('/candles')
 def get_live_candles(symbol: str = "BTCUSDT", interval: str = "1m", limit: int = 100):
-    from app.services.live_paper import fetch_recent_candles, is_valid_crypto_symbol
+    from app.services.live_paper import fetch_recent_candles
+    from app.services.market_data_service import is_valid_market_symbol
     sym = symbol.strip().upper()
-    if not is_valid_crypto_symbol(sym):
+    if not is_valid_market_symbol(sym):
         sym = "BTCUSDT"
     candles = fetch_recent_candles(sym, interval=interval, limit=limit)
     return {"symbol": sym, "interval": interval, "candles": candles}

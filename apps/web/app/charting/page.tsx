@@ -25,6 +25,35 @@ export const FEATURED_16_SYMBOLS = [
   'LTCUSDT',
 ];
 
+export const FEATURED_FOREX_SYMBOLS = [
+  'EURUSD',
+  'GBPUSD',
+  'USDJPY',
+  'USDCHF',
+  'USDCAD',
+  'AUDUSD',
+  'NZDUSD',
+  'EURGBP',
+  'EURJPY',
+  'GBPJPY',
+];
+
+export function isForexPair(sym: string): boolean {
+  const s = String(sym || '').toUpperCase().replace(/[\/-]/g, '');
+  return (
+    FEATURED_FOREX_SYMBOLS.includes(s) ||
+    (s.length === 6 && !s.endsWith('USDT') && !s.endsWith('USDC') && !s.endsWith('BUSD'))
+  );
+}
+
+export function formatDisplaySymbol(sym: string): string {
+  const s = String(sym || '').toUpperCase().trim();
+  if (isForexPair(s) && s.length === 6 && !s.includes('/')) {
+    return `${s.slice(0, 3)}/${s.slice(3)}`;
+  }
+  return s;
+}
+
 const TIMEFRAMES = [
   { label: '1s', value: '1s' },
   { label: '1m', value: '1m' },
@@ -58,8 +87,15 @@ interface Ticker24h {
   quoteVolume: number;
 }
 
-function formatPrice(val: number | undefined | null): string {
+function formatPrice(val: number | undefined | null, symbol?: string): string {
   if (val == null || !Number.isFinite(val) || val === 0) return '---';
+  if (symbol && isForexPair(symbol)) {
+    const s = symbol.toUpperCase();
+    if (s.includes('JPY') || s.includes('INR')) {
+      return val.toFixed(3);
+    }
+    return val.toFixed(5);
+  }
   if (val >= 1000) {
     return val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -84,10 +120,11 @@ export default function ChartingPage() {
   const [selectedSymbol, setSelectedSymbol] = useState<string>('BTCUSDT');
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1m');
   const [selectedLimit, setSelectedLimit] = useState<number>(100);
-  const [allSymbols, setAllSymbols] = useState<string[]>(FEATURED_16_SYMBOLS);
+  const [allSymbols, setAllSymbols] = useState<string[]>([...FEATURED_16_SYMBOLS, ...FEATURED_FOREX_SYMBOLS]);
+  const [chartMarketFilter, setChartMarketFilter] = useState<'ALL' | 'CRYPTO' | 'FOREX'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [customInput, setCustomInput] = useState<string>('');
-  const [recentSymbols, setRecentSymbols] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'SOLUSDT']);
+  const [recentSymbols, setRecentSymbols] = useState<string[]>(['BTCUSDT', 'EURUSD', 'ETHUSDT']);
 
   const [candles, setCandles] = useState<TradingCandle[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -208,46 +245,80 @@ export default function ChartingPage() {
         // Fallback to Binance Vision directly
       }
 
-      // Attempt 2: Fallback to direct Binance Vision REST API
+      // Attempt 2: Fallback to direct Binance Vision REST API for crypto or Yahoo Finance for forex
       if (!fetchedCandles.length) {
-        try {
-          const isMultiMonth = ['3M', '6M', '9M', '12M'].includes(tf);
-          const monthsGroup = isMultiMonth ? Number(tf.slice(0, -1)) : 1;
-          const queryTf = isMultiMonth ? '1M' : tf;
-          const queryLim = Math.min(1000, selectedLimit * monthsGroup);
-          const url = `https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=${queryTf}&limit=${queryLim}`;
-          const resp = await fetch(url);
-          const raw = await resp.json();
-          if (Array.isArray(raw) && raw.length > 0) {
-            const rawCandles: TradingCandle[] = raw.map((k: any) => ({
-              time: Math.floor(k[0] / 1000),
-              open: Number(k[1]),
-              high: Number(k[2]),
-              low: Number(k[3]),
-              close: Number(k[4]),
-              volume: Number(k[5] || 0),
-            }));
-            if (monthsGroup > 1) {
-              const grouped: TradingCandle[] = [];
-              for (let i = 0; i < rawCandles.length; i += monthsGroup) {
-                const grp = rawCandles.slice(i, i + monthsGroup);
-                grouped.push({
-                  time: grp[0].time,
-                  open: grp[0].open,
-                  high: Math.max(...grp.map((c) => c.high)),
-                  low: Math.min(...grp.map((c) => c.low)),
-                  close: grp[grp.length - 1].close,
-                  volume: grp.reduce((acc, c) => acc + (c.volume || 0), 0),
+        if (isForexPair(sym)) {
+          try {
+            const yfTf = tf.toLowerCase() === '1m' ? '1m' : tf.toLowerCase() === '5m' ? '5m' : tf.toLowerCase() === '15m' ? '15m' : tf.toLowerCase() === '1h' ? '1h' : '1d';
+            const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}=X?interval=${yfTf}&range=5d`;
+            const resp = await fetch(yfUrl);
+            const data = await resp.json();
+            const result = data?.chart?.result?.[0];
+            const timestamps = result?.timestamp || [];
+            const quote = result?.indicators?.quote?.[0] || {};
+            const opens = quote.open || [];
+            const highs = quote.high || [];
+            const lows = quote.low || [];
+            const closes = quote.close || [];
+            const volumes = quote.volume || [];
+            for (let i = 0; i < timestamps.length; i++) {
+              const c = Number(closes[i]);
+              if (Number.isFinite(c) && c > 0) {
+                fetchedCandles.push({
+                  time: Number(timestamps[i]),
+                  open: Number(opens[i] ?? c),
+                  high: Number(highs[i] ?? c),
+                  low: Number(lows[i] ?? c),
+                  close: c,
+                  volume: Number(volumes[i] ?? 0),
                 });
               }
-              fetchedCandles = grouped.slice(-selectedLimit);
-            } else {
-              fetchedCandles = rawCandles;
+            }
+          } catch (err: any) {
+            if (!cancelled) {
+              setErrorMsg(`Could not fetch candles for ${sym}: ${err?.message || 'Network error'}`);
             }
           }
-        } catch (err: any) {
-          if (!cancelled) {
-            setErrorMsg(`Could not fetch candles for ${sym}: ${err?.message || 'Network error'}`);
+        } else {
+          try {
+            const isMultiMonth = ['3M', '6M', '9M', '12M'].includes(tf);
+            const monthsGroup = isMultiMonth ? Number(tf.slice(0, -1)) : 1;
+            const queryTf = isMultiMonth ? '1M' : tf;
+            const queryLim = Math.min(1000, selectedLimit * monthsGroup);
+            const url = `https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=${queryTf}&limit=${queryLim}`;
+            const resp = await fetch(url);
+            const raw = await resp.json();
+            if (Array.isArray(raw) && raw.length > 0) {
+              const rawCandles: TradingCandle[] = raw.map((k: any) => ({
+                time: Math.floor(k[0] / 1000),
+                open: Number(k[1]),
+                high: Number(k[2]),
+                low: Number(k[3]),
+                close: Number(k[4]),
+                volume: Number(k[5] || 0),
+              }));
+              if (monthsGroup > 1) {
+                const grouped: TradingCandle[] = [];
+                for (let i = 0; i < rawCandles.length; i += monthsGroup) {
+                  const grp = rawCandles.slice(i, i + monthsGroup);
+                  grouped.push({
+                    time: grp[0].time,
+                    open: grp[0].open,
+                    high: Math.max(...grp.map((c) => c.high)),
+                    low: Math.min(...grp.map((c) => c.low)),
+                    close: grp[grp.length - 1].close,
+                    volume: grp.reduce((acc, c) => acc + (c.volume || 0), 0),
+                  });
+                }
+                fetchedCandles = grouped.slice(-selectedLimit);
+              } else {
+                fetchedCandles = rawCandles;
+              }
+            }
+          } catch (err: any) {
+            if (!cancelled) {
+              setErrorMsg(`Could not fetch candles for ${sym}: ${err?.message || 'Network error'}`);
+            }
           }
         }
       }
@@ -274,10 +345,11 @@ export default function ChartingPage() {
     };
   }, [selectedSymbol, selectedTimeframe, selectedLimit]);
 
-  // 4. Real-Time Streaming (Binance WebSocket with Polling Fallback)
+  // 4. Real-Time Streaming (Binance WebSocket for Crypto / Fast Polling for Forex)
   useEffect(() => {
     let cancelled = false;
     const sym = selectedSymbol.toLowerCase();
+    const isFx = isForexPair(selectedSymbol);
     const tf =
       selectedTimeframe === '1s'
         ? '1m'
@@ -290,95 +362,132 @@ export default function ChartingPage() {
       wsRef.current = null;
     }
 
-    setConnectionStatus('connecting');
-
-    // Connect to Binance public WebSocket stream for live candlestick updates
-    const streamName = `${sym}@kline_${tf}`;
-    const wsUrl = `wss://stream.binance.com:9443/ws/${streamName}`;
-
     let socket: WebSocket | null = null;
-    try {
-      socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
 
-      socket.onopen = () => {
-        if (!cancelled) setConnectionStatus('websocket');
-      };
-
-      socket.onmessage = (event) => {
-        if (cancelled) return;
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg && msg.k) {
-            const k = msg.k;
-            const barTime = Math.floor(k.t / 1000);
-            const openP = Number(k.o);
-            const highP = Number(k.h);
-            const lowP = Number(k.l);
-            const closeP = Number(k.c);
-            const vol = Number(k.v || 0);
-
-            // Detect price direction flash
-            const prev = prevPriceRef.current;
-            if (prev > 0 && closeP !== prev) {
-              setPriceFlash(closeP > prev ? 'up' : 'down');
-              setTimeout(() => setPriceFlash(null), 500);
-            }
-            prevPriceRef.current = closeP;
-            setLastUpdateTime(new Date().toLocaleTimeString());
-
-            setCandles((prevCandles) => {
-              if (!prevCandles.length) {
-                return [{ time: barTime, open: openP, high: highP, low: lowP, close: closeP, volume: vol }];
-              }
-              const last = prevCandles[prevCandles.length - 1];
-              if (last.time === barTime) {
-                // Update current forming bar
-                const updated = [...prevCandles];
-                updated[updated.length - 1] = {
-                  time: barTime,
-                  open: openP,
-                  high: Math.max(last.high, highP),
-                  low: Math.min(last.low, lowP),
-                  close: closeP,
-                  volume: vol,
-                };
-                return updated;
-              } else if (barTime > Number(last.time)) {
-                // New bar started
-                return [...prevCandles.slice(-(selectedLimit - 1)), {
-                  time: barTime,
-                  open: openP,
-                  high: highP,
-                  low: lowP,
-                  close: closeP,
-                  volume: vol,
-                }];
-              }
-              return prevCandles;
-            });
-          }
-        } catch {
-          // ignore parse errors
-        }
-      };
-
-      socket.onerror = () => {
-        if (!cancelled) setConnectionStatus('polling');
-      };
-
-      socket.onclose = () => {
-        if (!cancelled && connectionStatus === 'websocket') {
-          setConnectionStatus('polling');
-        }
-      };
-    } catch {
+    if (isFx) {
       setConnectionStatus('polling');
+    } else {
+      setConnectionStatus('connecting');
+      // Connect to Binance public WebSocket stream for live candlestick updates
+      const streamName = `${sym}@kline_${tf}`;
+      const wsUrl = `wss://stream.binance.com:9443/ws/${streamName}`;
+
+      try {
+        socket = new WebSocket(wsUrl);
+        wsRef.current = socket;
+
+        socket.onopen = () => {
+          if (!cancelled) setConnectionStatus('websocket');
+        };
+
+        socket.onmessage = (event) => {
+          if (cancelled) return;
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg && msg.k) {
+              const k = msg.k;
+              const barTime = Math.floor(k.t / 1000);
+              const openP = Number(k.o);
+              const highP = Number(k.h);
+              const lowP = Number(k.l);
+              const closeP = Number(k.c);
+              const vol = Number(k.v || 0);
+
+              // Detect price direction flash
+              const prev = prevPriceRef.current;
+              if (prev > 0 && closeP !== prev) {
+                setPriceFlash(closeP > prev ? 'up' : 'down');
+                setTimeout(() => setPriceFlash(null), 500);
+              }
+              prevPriceRef.current = closeP;
+              setLastUpdateTime(new Date().toLocaleTimeString());
+
+              setCandles((prevCandles) => {
+                if (!prevCandles.length) {
+                  return [{ time: barTime, open: openP, high: highP, low: lowP, close: closeP, volume: vol }];
+                }
+                const last = prevCandles[prevCandles.length - 1];
+                if (last.time === barTime) {
+                  // Update current forming bar
+                  const updated = [...prevCandles];
+                  updated[updated.length - 1] = {
+                    time: barTime,
+                    open: openP,
+                    high: Math.max(last.high, highP),
+                    low: Math.min(last.low, lowP),
+                    close: closeP,
+                    volume: vol,
+                  };
+                  return updated;
+                } else if (barTime > Number(last.time)) {
+                  // New bar started
+                  return [...prevCandles.slice(-(selectedLimit - 1)), {
+                    time: barTime,
+                    open: openP,
+                    high: highP,
+                    low: lowP,
+                    close: closeP,
+                    volume: vol,
+                  }];
+                }
+                return prevCandles;
+              });
+            }
+          } catch {
+            // ignore parse errors
+          }
+        };
+
+        socket.onerror = () => {
+          if (!cancelled) setConnectionStatus('polling');
+        };
+
+        socket.onclose = () => {
+          if (!cancelled && connectionStatus === 'websocket') {
+            setConnectionStatus('polling');
+          }
+        };
+      } catch {
+        setConnectionStatus('polling');
+      }
     }
 
-    // Secondary Polling Safety Net: if WebSocket fails or lags, poll live price every 2 seconds
+    // Secondary Polling Safety Net: polls every 2-3 seconds
     const pollId = setInterval(async () => {
       if (cancelled) return;
+      if (isFx) {
+        try {
+          const res: any = await api(`/live-paper/candles?symbol=${selectedSymbol.toUpperCase()}&interval=1m&limit=1`);
+          if (Array.isArray(res?.candles) && res.candles.length > 0) {
+            const last = res.candles[res.candles.length - 1];
+            const p = Number(last.close);
+            if (p > 0 && !cancelled) {
+              const prev = prevPriceRef.current;
+              if (prev > 0 && p !== prev) {
+                setPriceFlash(p > prev ? 'up' : 'down');
+                setTimeout(() => setPriceFlash(null), 500);
+              }
+              prevPriceRef.current = p;
+              setLastUpdateTime(new Date().toLocaleTimeString());
+
+              setCandles((prevList) => {
+                if (!prevList.length) return prevList;
+                const updated = [...prevList];
+                const lastBar = updated[updated.length - 1];
+                updated[updated.length - 1] = {
+                  ...lastBar,
+                  high: Math.max(lastBar.high, p),
+                  low: Math.min(lastBar.low, p),
+                  close: p,
+                };
+                return updated;
+              });
+            }
+          }
+        } catch {}
+        return;
+      }
+
       try {
         const r = await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${selectedSymbol.toUpperCase()}`);
         const d = await r.json();
@@ -408,7 +517,7 @@ export default function ChartingPage() {
       } catch {
         // ignore
       }
-    }, 2000);
+    }, isFx ? 3000 : 2000);
 
     return () => {
       cancelled = true;
@@ -428,13 +537,15 @@ export default function ChartingPage() {
   }
 
   function handleCustomAdd() {
-    const raw = customInput.trim().toUpperCase();
+    let raw = customInput.trim().toUpperCase().replace(/[\/-]/g, '');
     if (!raw) return;
-    const sym = raw.endsWith('USDT') ? raw : `${raw}USDT`;
-    if (!allSymbols.includes(sym)) {
-      setAllSymbols((prev) => [sym, ...prev]);
+    if (!isForexPair(raw) && !raw.endsWith('USDT') && !raw.includes('USD')) {
+      raw = `${raw}USDT`;
     }
-    handleSelectSymbol(sym);
+    if (!allSymbols.includes(raw)) {
+      setAllSymbols((prev) => [raw, ...prev]);
+    }
+    handleSelectSymbol(raw);
     setCustomInput('');
   }
 
@@ -503,12 +614,24 @@ export default function ChartingPage() {
     return { channelHigh: high, channelLow: low, priceLines: lines, signalMarkers: markers };
   }, [candles, showChannel, showRiskBracket, showMarkers, currentPrice]);
 
-  // Filtered symbols based on user search query
+  // Filtered symbols based on user search query & market filter
   const filteredSymbols = useMemo(() => {
-    const q = searchQuery.trim().toUpperCase();
-    if (!q) return allSymbols;
-    return allSymbols.filter((s) => s.includes(q));
-  }, [allSymbols, searchQuery]);
+    const q = searchQuery.trim().toUpperCase().replace(/[\/-]/g, '');
+    let list = allSymbols;
+    if (chartMarketFilter === 'CRYPTO') {
+      list = list.filter((s) => !isForexPair(s));
+    } else if (chartMarketFilter === 'FOREX') {
+      list = list.filter((s) => isForexPair(s));
+    }
+    if (!q) return list;
+    return list.filter((s) => s.includes(q) || formatDisplaySymbol(s).toUpperCase().includes(q));
+  }, [allSymbols, searchQuery, chartMarketFilter]);
+
+  const featuredGridSymbols = useMemo(() => {
+    if (chartMarketFilter === 'CRYPTO') return FEATURED_16_SYMBOLS;
+    if (chartMarketFilter === 'FOREX') return FEATURED_FOREX_SYMBOLS;
+    return [...FEATURED_16_SYMBOLS, ...FEATURED_FOREX_SYMBOLS];
+  }, [chartMarketFilter]);
 
   return (
     <main style={{ padding: '24px', maxWidth: 1360, margin: '0 auto', color: '#f8fafc' }}>
@@ -518,7 +641,7 @@ export default function ChartingPage() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h1 style={{ fontSize: 32, fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
-                Institutional Crypto Charting
+                Institutional Multi-Asset Charting
               </h1>
               <span
                 style={{
@@ -532,11 +655,11 @@ export default function ChartingPage() {
                   textTransform: 'uppercase',
                 }}
               >
-                Official TradingView Lightweight Charts
+                Crypto &amp; Forex
               </span>
             </div>
             <p style={{ color: '#94a3b8', fontSize: 14, margin: '6px 0 0 0' }}>
-              Real-time WebSocket & historical multi-timeframe charts for 200+ Binance cryptocurrency markets. Real market data · zero financial risk.
+              Real-time WebSocket &amp; historical multi-timeframe charts for 200+ Binance crypto &amp; Yahoo Finance forex pairs. Real market data · zero financial risk.
             </p>
           </div>
 
@@ -599,14 +722,66 @@ export default function ChartingPage() {
         </div>
       </section>
 
-      {/* ─── 1. Featured Top 16 Cryptocurrency Grid ─── */}
+      {/* ─── 1. Featured Multi-Asset Markets Grid (Crypto & Forex) ─── */}
       <section style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              ★ Top 16 Featured Crypto Markets
+              ★ Featured Multi-Asset Markets
             </span>
             <span style={{ color: '#64748b', fontSize: 12 }}>— 1-click instant live chart switch</span>
+          </div>
+
+          {/* Market Filter Tabs */}
+          <div style={{ display: 'inline-flex', background: 'rgba(30, 41, 59, 0.8)', borderRadius: 8, padding: 3, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <button
+              type="button"
+              onClick={() => setChartMarketFilter('ALL')}
+              style={{
+                background: chartMarketFilter === 'ALL' ? '#6366f1' : 'transparent',
+                color: chartMarketFilter === 'ALL' ? '#ffffff' : '#94a3b8',
+                border: 'none',
+                borderRadius: 6,
+                padding: '3px 10px',
+                fontSize: 11,
+                fontWeight: chartMarketFilter === 'ALL' ? 700 : 500,
+                cursor: 'pointer',
+              }}
+            >
+              🌐 All ({FEATURED_16_SYMBOLS.length + FEATURED_FOREX_SYMBOLS.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartMarketFilter('CRYPTO')}
+              style={{
+                background: chartMarketFilter === 'CRYPTO' ? '#38bdf8' : 'transparent',
+                color: chartMarketFilter === 'CRYPTO' ? '#0f172a' : '#94a3b8',
+                border: 'none',
+                borderRadius: 6,
+                padding: '3px 10px',
+                fontSize: 11,
+                fontWeight: chartMarketFilter === 'CRYPTO' ? 800 : 500,
+                cursor: 'pointer',
+              }}
+            >
+              🪙 Crypto ({FEATURED_16_SYMBOLS.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartMarketFilter('FOREX')}
+              style={{
+                background: chartMarketFilter === 'FOREX' ? '#10b981' : 'transparent',
+                color: chartMarketFilter === 'FOREX' ? '#0f172a' : '#94a3b8',
+                border: 'none',
+                borderRadius: 6,
+                padding: '3px 10px',
+                fontSize: 11,
+                fontWeight: chartMarketFilter === 'FOREX' ? 800 : 500,
+                cursor: 'pointer',
+              }}
+            >
+              💱 Forex ({FEATURED_FOREX_SYMBOLS.length})
+            </button>
           </div>
         </div>
 
@@ -617,8 +792,9 @@ export default function ChartingPage() {
             gap: 8,
           }}
         >
-          {FEATURED_16_SYMBOLS.map((sym) => {
+          {featuredGridSymbols.map((sym) => {
             const isSelected = sym === selectedSymbol;
+            const fx = isForexPair(sym);
             const t = tickers[sym];
             const price = t?.lastPrice;
             const change = t?.priceChangePercent;
@@ -632,7 +808,7 @@ export default function ChartingPage() {
                 style={{
                   padding: '9px 10px',
                   borderRadius: 8,
-                  border: isSelected ? '2px solid #38bdf8' : '1px solid #1e293b',
+                  border: isSelected ? '2px solid #38bdf8' : fx ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid #1e293b',
                   background: isSelected ? 'rgba(56, 189, 248, 0.16)' : '#0b1220',
                   color: isSelected ? '#38bdf8' : '#cbd5e1',
                   cursor: 'pointer',
@@ -645,7 +821,21 @@ export default function ChartingPage() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontWeight: isSelected ? 800 : 700, fontSize: 13 }}>{sym.replace('USDT', '')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{
+                      fontSize: 8,
+                      fontWeight: 800,
+                      padding: '1px 3px',
+                      borderRadius: 3,
+                      background: fx ? 'rgba(16, 185, 129, 0.25)' : 'rgba(99, 102, 241, 0.25)',
+                      color: fx ? '#34d399' : '#a5b4fc',
+                    }}>
+                      {fx ? 'FX' : 'C'}
+                    </span>
+                    <span style={{ fontWeight: isSelected ? 800 : 700, fontSize: 12 }}>
+                      {formatDisplaySymbol(sym)}
+                    </span>
+                  </div>
                   {isSelected && (
                     <span
                       style={{
@@ -661,7 +851,7 @@ export default function ChartingPage() {
                 </div>
 
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#f8fafc' }}>
-                  ${formatPrice(price)}
+                  {fx ? '' : '$'}{formatPrice(price, sym)}
                 </div>
 
                 {change != null && (
@@ -681,7 +871,7 @@ export default function ChartingPage() {
         </div>
       </section>
 
-      {/* ─── 2. Universal Search & Explorer for 200+ Remaining Crypto Symbols ─── */}
+      {/* ─── 2. Universal Search & Explorer for 200+ Multi-Asset Symbols ─── */}
       <section
         style={{
           background: '#090d16',
@@ -705,7 +895,7 @@ export default function ChartingPage() {
           {/* Search Input */}
           <input
             type="text"
-            placeholder="Type any of 200+ crypto (e.g. SUI, AAVE, PEPE, RENDER, INJ)..."
+            placeholder="Type any crypto or forex pair (e.g. EURUSD, SUI, GBPJPY, PEPE)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
             style={{
@@ -738,11 +928,12 @@ export default function ChartingPage() {
             }}
           >
             {filteredSymbols.slice(0, 150).map((sym) => {
+              const fx = isForexPair(sym);
               const p = tickers[sym]?.lastPrice;
               const ch = tickers[sym]?.priceChangePercent;
               return (
                 <option key={sym} value={sym}>
-                  {sym} {p ? `($${formatPrice(p)}${ch != null ? ` · ${ch >= 0 ? '+' : ''}${ch.toFixed(1)}%` : ''})` : ''}
+                  {fx ? '[FX] ' : '[CRYPTO] '}{formatDisplaySymbol(sym)} {p ? `(${fx ? '' : '$'}${formatPrice(p, sym)}${ch != null ? ` · ${ch >= 0 ? '+' : ''}${ch.toFixed(1)}%` : ''})` : ''}
                 </option>
               );
             })}
@@ -753,7 +944,7 @@ export default function ChartingPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="text"
-            placeholder="e.g. TIA, SEI..."
+            placeholder="e.g. EURUSD, TIA..."
             value={customInput}
             onChange={(e) => setCustomInput(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && handleCustomAdd()}
@@ -764,7 +955,7 @@ export default function ChartingPage() {
               padding: '7px 10px',
               color: '#f8fafc',
               fontSize: 13,
-              width: 120,
+              width: 130,
               textTransform: 'uppercase',
               outline: 'none',
             }}

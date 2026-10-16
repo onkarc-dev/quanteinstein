@@ -93,7 +93,7 @@ const RANGE_PRESETS = [
   ["Max History (8 years)", 2920],
 ] as const;
 
-const POPULAR_SYMBOLS = [
+const POPULAR_CRYPTO_SYMBOLS = [
   "BTCUSDT",
   "ETHUSDT",
   "SOLUSDT",
@@ -111,6 +111,75 @@ const POPULAR_SYMBOLS = [
   "DOTUSDT",
   "LTCUSDT",
 ];
+
+const FOREX_MAJOR_SYMBOLS = [
+  "EURUSD",
+  "GBPUSD",
+  "USDJPY",
+  "USDCHF",
+  "USDCAD",
+  "AUDUSD",
+  "NZDUSD",
+];
+
+const FOREX_CROSS_SYMBOLS = [
+  "EURGBP",
+  "EURJPY",
+  "GBPJPY",
+  "EURCHF",
+  "AUDJPY",
+  "EURAUD",
+  "CADJPY",
+  "GBPAUD",
+  "NZDJPY",
+  "AUDCAD",
+  "GBPCHF",
+  "CHFJPY",
+];
+
+const FOREX_EXOTIC_SYMBOLS = [
+  "USDINR",
+  "USDZAR",
+  "USDMXN",
+  "USDTRY",
+  "USDSGD",
+];
+
+const POPULAR_FOREX_SYMBOLS = [
+  "EURUSD",
+  "GBPUSD",
+  "USDJPY",
+  "USDCHF",
+  "USDCAD",
+  "AUDUSD",
+  "NZDUSD",
+  "EURGBP",
+  "EURJPY",
+  "GBPJPY",
+  "AUDJPY",
+  "USDINR",
+];
+
+const ALL_FOREX_SYMBOLS = [
+  ...FOREX_MAJOR_SYMBOLS,
+  ...FOREX_CROSS_SYMBOLS,
+  ...FOREX_EXOTIC_SYMBOLS,
+];
+
+const POPULAR_SYMBOLS = [...POPULAR_CRYPTO_SYMBOLS, ...POPULAR_FOREX_SYMBOLS];
+
+function isForexPair(sym: string): boolean {
+  const s = String(sym || "").toUpperCase().replace(/[\/-]/g, "");
+  return ALL_FOREX_SYMBOLS.includes(s) || (s.length === 6 && !s.endsWith("USDT") && !s.endsWith("USDC") && !s.endsWith("BUSD"));
+}
+
+function formatDisplaySymbol(sym: string): string {
+  const s = String(sym || "").toUpperCase().trim();
+  if (isForexPair(s) && s.length === 6 && !s.includes("/")) {
+    return `${s.slice(0, 3)}/${s.slice(3)}`;
+  }
+  return s;
+}
 
 const CATEGORY_MAP: Record<string, string[]> = {
   "TOP 10": [
@@ -135,6 +204,9 @@ const CATEGORY_MAP: Record<string, string[]> = {
     "FETUSDT", "RENDERUSDT", "NEARUSDT", "WLDUSDT", "TAOUSDT",
     "GRTUSDT", "ARKMUSDT", "AIUSDT"
   ],
+  "FOREX MAJORS": FOREX_MAJOR_SYMBOLS,
+  "FOREX CROSSES": FOREX_CROSS_SYMBOLS,
+  "FOREX EXOTICS": FOREX_EXOTIC_SYMBOLS,
 };
 
 const TIMEFRAMES = [
@@ -364,6 +436,7 @@ export default function StrategyBuilderPage() {
   });
 
   const [allAvailableSymbols, setAllAvailableSymbols] = useState<string[]>(POPULAR_SYMBOLS);
+  const [marketFilter, setMarketFilter] = useState<"ALL" | "CRYPTO" | "FOREX">("ALL");
   const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
   const [selectedSearchQuery, setSelectedSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("ALL");
@@ -372,7 +445,7 @@ export default function StrategyBuilderPage() {
   const [strategyDisplayName, setStrategyDisplayName] = useState("");
   const [job, setJob] = useState<any>(null);
   const [pollJob, setPollJob] = useState<any>(null);
-  const [msg, setMsg] = useState("Configure strategy parameters, select crypto markets, and run a backtest.");
+  const [msg, setMsg] = useState("Configure strategy parameters, select crypto & forex markets, and run a backtest.");
   const [running, setRunning] = useState(false);
   const [runProgress, setRunProgress] = useState("");
   const [startDate, setStartDate] = useState(startIso());
@@ -460,9 +533,25 @@ export default function StrategyBuilderPage() {
     upd("symbols", [...POPULAR_SYMBOLS]);
   }
 
+  function selectPopularCrypto() {
+    upd("symbols", [...POPULAR_CRYPTO_SYMBOLS]);
+  }
+
+  function selectPopularForex() {
+    upd("symbols", [...POPULAR_FOREX_SYMBOLS]);
+  }
+
+  function selectForexMajors() {
+    upd("symbols", [...FOREX_MAJOR_SYMBOLS]);
+  }
+
+  function selectHybridBasket() {
+    upd("symbols", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "EURUSD", "GBPUSD"]);
+  }
+
   function selectTop50Symbols() {
-    const top50 = allAvailableSymbols.slice(0, 50);
-    upd("symbols", top50);
+    const top50 = allAvailableSymbols.filter((s) => !isForexPair(s)).slice(0, 50);
+    upd("symbols", top50.length ? top50 : allAvailableSymbols.slice(0, 50));
   }
 
   function clearSymbols() {
@@ -470,9 +559,9 @@ export default function StrategyBuilderPage() {
   }
 
   function addCustomSymbol() {
-    let s = customSymbolInput.trim().toUpperCase();
+    let s = customSymbolInput.trim().toUpperCase().replace(/[\/-]/g, "");
     if (!s) return;
-    if (!s.endsWith("USDT") && !s.includes("USD")) {
+    if (!isForexPair(s) && !s.endsWith("USDT") && !s.includes("USD")) {
       s = `${s}USDT`;
     }
     if (!cfg.symbols.includes(s)) {
@@ -485,23 +574,28 @@ export default function StrategyBuilderPage() {
   }
 
   const availableList = useMemo(() => {
-    const q = symbolSearchQuery.trim().toUpperCase();
+    const q = symbolSearchQuery.trim().toUpperCase().replace(/[\/-]/g, "");
     const cat = activeCategory.toUpperCase();
     let list = allAvailableSymbols.filter((s) => !cfg.symbols.includes(s));
+    if (marketFilter === "CRYPTO") {
+      list = list.filter((s) => !isForexPair(s));
+    } else if (marketFilter === "FOREX") {
+      list = list.filter((s) => isForexPair(s));
+    }
     if (cat !== "ALL" && CATEGORY_MAP[cat]) {
       const allowed = new Set(CATEGORY_MAP[cat]);
       list = list.filter((s) => allowed.has(s));
     }
     if (q) {
-      list = list.filter((s) => s.includes(q));
+      list = list.filter((s) => s.includes(q) || formatDisplaySymbol(s).toUpperCase().includes(q));
     }
     return list;
-  }, [allAvailableSymbols, cfg.symbols, symbolSearchQuery, activeCategory]);
+  }, [allAvailableSymbols, cfg.symbols, symbolSearchQuery, activeCategory, marketFilter]);
 
   const selectedList = useMemo(() => {
-    const q = selectedSearchQuery.trim().toUpperCase();
+    const q = selectedSearchQuery.trim().toUpperCase().replace(/[\/-]/g, "");
     if (!q) return cfg.symbols;
-    return cfg.symbols.filter((s) => s.includes(q));
+    return cfg.symbols.filter((s) => s.includes(q) || formatDisplaySymbol(s).toUpperCase().includes(q));
   }, [cfg.symbols, selectedSearchQuery]);
 
   const payload = useMemo(() => buildPayload(cfg), [cfg]);
@@ -721,7 +815,7 @@ export default function StrategyBuilderPage() {
                 fontWeight: 600,
               }}
             >
-              ✓ Authentic Binance Klines
+              ✓ Authentic Binance Crypto &amp; Yahoo Forex Feeds
             </span>
             <Link
               href={`/paper-trading?strategy_id=${encodeURIComponent(deployTargetId)}`}
@@ -1428,17 +1522,17 @@ export default function StrategyBuilderPage() {
             </div>
           </div>
 
-          {/* ─── Section 8: 200+ Cryptocurrency Market Basket Selector (Transfer Box) ─── */}
+          {/* ─── Section 8: Multi-Asset (Crypto & Forex) Market Basket Selector (Transfer Box) ─── */}
           <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24, marginBottom: 28 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 18 }}>🪙</span>
                 <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
-                  Cryptocurrency Markets for Backtest & Paper Trading
+                  Multi-Asset Markets for Backtest &amp; Paper Trading (Crypto &amp; Forex)
                 </h2>
                 <InfoTip
                   size="md"
-                  text="Search and transfer cryptocurrency markets between available Binance pairs and your active strategy basket. Click + on available pairs to add, or ✕ on selected pairs to return to available."
+                  text="Search and transfer markets between available pairs (Binance Crypto & Yahoo Finance Forex) and your active strategy basket. You can execute backtests and paper trading exclusively in Crypto, exclusively in Forex, or across hybrid multi-asset portfolios."
                 />
               </div>
 
@@ -1446,7 +1540,7 @@ export default function StrategyBuilderPage() {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
-                  onClick={selectPopularSymbols}
+                  onClick={selectPopularCrypto}
                   style={{
                     background: "rgba(99, 102, 241, 0.15)",
                     color: "#a5b4fc",
@@ -1458,15 +1552,15 @@ export default function StrategyBuilderPage() {
                     cursor: "pointer",
                   }}
                 >
-                  Popular (16)
+                  🪙 Popular Crypto (16)
                 </button>
                 <button
                   type="button"
-                  onClick={selectTop50Symbols}
+                  onClick={selectForexMajors}
                   style={{
-                    background: "rgba(30, 41, 59, 0.7)",
-                    color: "#cbd5e1",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    background: "rgba(16, 185, 129, 0.15)",
+                    color: "#6ee7b7",
+                    border: "1px solid rgba(16, 185, 129, 0.35)",
                     padding: "6px 12px",
                     borderRadius: 8,
                     fontSize: 12,
@@ -1474,7 +1568,39 @@ export default function StrategyBuilderPage() {
                     cursor: "pointer",
                   }}
                 >
-                  Top 50 Pairs
+                  💱 Forex Majors (7)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => upd("symbols", [...FOREX_CROSS_SYMBOLS])}
+                  style={{
+                    background: "rgba(16, 185, 129, 0.1)",
+                    color: "#a7f3d0",
+                    border: "1px solid rgba(16, 185, 129, 0.25)",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  💱 FX Crosses (12)
+                </button>
+                <button
+                  type="button"
+                  onClick={selectHybridBasket}
+                  style={{
+                    background: "linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(16, 185, 129, 0.2) 100%)",
+                    color: "#e2e8f0",
+                    border: "1px solid rgba(129, 140, 248, 0.4)",
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  🌐 Hybrid Basket (5)
                 </button>
                 <button
                   type="button"
@@ -1493,6 +1619,110 @@ export default function StrategyBuilderPage() {
                   BTC Only
                 </button>
               </div>
+            </div>
+
+            {/* Market Asset Filter Segment Bar */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 10,
+              background: "rgba(15, 23, 42, 0.6)",
+              border: "1px solid rgba(255, 255, 255, 0.06)",
+              borderRadius: 10,
+              padding: "8px 14px",
+              marginBottom: 16,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>Filter Available Markets:</span>
+                <div style={{ display: "inline-flex", background: "rgba(30, 41, 59, 0.8)", borderRadius: 8, padding: 3, border: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                  <button
+                    type="button"
+                    onClick={() => { setMarketFilter("ALL"); setActiveCategory("ALL"); }}
+                    style={{
+                      background: marketFilter === "ALL" ? "#6366f1" : "transparent",
+                      color: marketFilter === "ALL" ? "#ffffff" : "#94a3b8",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "4px 12px",
+                      fontSize: 12,
+                      fontWeight: marketFilter === "ALL" ? 700 : 500,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    🌐 All Markets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMarketFilter("CRYPTO"); setActiveCategory("ALL"); }}
+                    style={{
+                      background: marketFilter === "CRYPTO" ? "#38bdf8" : "transparent",
+                      color: marketFilter === "CRYPTO" ? "#0f172a" : "#94a3b8",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "4px 12px",
+                      fontSize: 12,
+                      fontWeight: marketFilter === "CRYPTO" ? 800 : 500,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    🪙 Crypto Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMarketFilter("FOREX"); setActiveCategory("ALL"); }}
+                    style={{
+                      background: marketFilter === "FOREX" ? "#10b981" : "transparent",
+                      color: marketFilter === "FOREX" ? "#0f172a" : "#94a3b8",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "4px 12px",
+                      fontSize: 12,
+                      fontWeight: marketFilter === "FOREX" ? 800 : 500,
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    💱 Forex Only
+                  </button>
+                </div>
+              </div>
+
+              {/* Basket Composition Summary */}
+              {(() => {
+                const cryptoCount = cfg.symbols.filter((s) => !isForexPair(s)).length;
+                const forexCount = cfg.symbols.filter((s) => isForexPair(s)).length;
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                    <span style={{ color: "#94a3b8" }}>Active Basket:</span>
+                    <span style={{
+                      background: cryptoCount > 0 && forexCount > 0
+                        ? "linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(16, 185, 129, 0.25) 100%)"
+                        : forexCount > 0
+                        ? "rgba(16, 185, 129, 0.2)"
+                        : "rgba(99, 102, 241, 0.2)",
+                      color: cryptoCount > 0 && forexCount > 0
+                        ? "#a5b4fc"
+                        : forexCount > 0
+                        ? "#34d399"
+                        : "#38bdf8",
+                      border: `1px solid ${cryptoCount > 0 && forexCount > 0 ? "rgba(129, 140, 248, 0.4)" : forexCount > 0 ? "rgba(16, 185, 129, 0.4)" : "rgba(99, 102, 241, 0.4)"}`,
+                      padding: "2px 8px",
+                      borderRadius: 6,
+                      fontWeight: 700,
+                    }}>
+                      {cryptoCount > 0 && forexCount > 0
+                        ? `🌐 Hybrid (${cryptoCount} Crypto · ${forexCount} Forex)`
+                        : forexCount > 0
+                        ? `💱 Forex Only (${forexCount} Pairs)`
+                        : `🪙 Crypto Only (${cryptoCount} Pairs)`}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* DUAL BLOCKS CONTAINER */}
@@ -1515,8 +1745,16 @@ export default function StrategyBuilderPage() {
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255, 255, 255, 0.06)", paddingBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 14 }}>🌐</span>
-                    <strong style={{ fontSize: 13, color: "#f1f5f9" }}>Available Binance Pairs</strong>
+                    <span style={{ fontSize: 14 }}>
+                      {marketFilter === "FOREX" ? "💱" : marketFilter === "CRYPTO" ? "🪙" : "🌐"}
+                    </span>
+                    <strong style={{ fontSize: 13, color: "#f1f5f9" }}>
+                      {marketFilter === "FOREX"
+                        ? "Available Forex Pairs (Yahoo Direct)"
+                        : marketFilter === "CRYPTO"
+                        ? "Available Binance Crypto Pairs"
+                        : "Available Multi-Asset Pairs"}
+                    </strong>
                     <span style={{
                       background: "rgba(99, 102, 241, 0.2)",
                       color: "#a5b4fc",
@@ -1551,7 +1789,12 @@ export default function StrategyBuilderPage() {
 
                 {/* Category Filter Pills */}
                 <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
-                  {["ALL", "TOP 10", "LAYER 1", "DEFI", "MEME", "AI & DATA"].map((cat) => (
+                  {(marketFilter === "FOREX"
+                    ? ["ALL", "FOREX MAJORS", "FOREX CROSSES", "FOREX EXOTICS"]
+                    : marketFilter === "CRYPTO"
+                    ? ["ALL", "TOP 10", "LAYER 1", "DEFI", "MEME", "AI & DATA"]
+                    : ["ALL", "TOP 10", "FOREX MAJORS", "LAYER 1", "FOREX CROSSES", "DEFI", "MEME", "AI & DATA", "FOREX EXOTICS"]
+                  ).map((cat) => (
                     <button
                       key={cat}
                       type="button"
@@ -1578,7 +1821,7 @@ export default function StrategyBuilderPage() {
                 <div style={{ position: "relative" }}>
                   <input
                     type="text"
-                    placeholder="Search available pairs (e.g. SOL, PEPE, SUI)..."
+                    placeholder="Search available pairs (e.g. EURUSD, SOL, GBPJPY, PEPE)..."
                     value={symbolSearchQuery}
                     onChange={(e) => setSymbolSearchQuery(e.target.value)}
                     style={{
@@ -1617,7 +1860,7 @@ export default function StrategyBuilderPage() {
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <input
                     type="text"
-                    placeholder="Add custom pair (e.g. RENDER)..."
+                    placeholder="Add custom crypto or forex pair (e.g. EURUSD, SOL, USDCAD)..."
                     value={customSymbolInput}
                     onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
                     onKeyDown={(e) => {
@@ -1662,39 +1905,54 @@ export default function StrategyBuilderPage() {
                       ✓ All matching pairs have been transferred to your selected basket!
                     </div>
                   ) : (
-                    availableList.map((sym) => (
-                      <button
-                        type="button"
-                        key={sym}
-                        onClick={() => addSymbol(sym)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "8px 10px",
-                          borderRadius: 8,
-                          background: "rgba(15, 23, 42, 0.7)",
-                          border: "1px solid rgba(255, 255, 255, 0.07)",
-                          color: "#cbd5e1",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          textAlign: "left",
-                          transition: "all 0.12s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.6)";
-                          e.currentTarget.style.background = "rgba(99, 102, 241, 0.12)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.07)";
-                          e.currentTarget.style.background = "rgba(15, 23, 42, 0.7)";
-                        }}
-                      >
-                        <span>{sym}</span>
-                        <span style={{ fontSize: 13, color: "#818cf8", fontWeight: 800 }}>+</span>
-                      </button>
-                    ))
+                    availableList.map((sym) => {
+                      const fx = isForexPair(sym);
+                      return (
+                        <button
+                          type="button"
+                          key={sym}
+                          onClick={() => addSymbol(sym)}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            background: "rgba(15, 23, 42, 0.7)",
+                            border: `1px solid ${fx ? "rgba(16, 185, 129, 0.25)" : "rgba(255, 255, 255, 0.07)"}`,
+                            color: "#cbd5e1",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            textAlign: "left",
+                            transition: "all 0.12s ease",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = fx ? "rgba(16, 185, 129, 0.6)" : "rgba(99, 102, 241, 0.6)";
+                            e.currentTarget.style.background = fx ? "rgba(16, 185, 129, 0.12)" : "rgba(99, 102, 241, 0.12)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = fx ? "rgba(16, 185, 129, 0.25)" : "rgba(255, 255, 255, 0.07)";
+                            e.currentTarget.style.background = "rgba(15, 23, 42, 0.7)";
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              padding: "1px 4px",
+                              borderRadius: 4,
+                              background: fx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
+                              color: fx ? "#34d399" : "#a5b4fc",
+                            }}>
+                              {fx ? "FX" : "CRYPTO"}
+                            </span>
+                            <span>{formatDisplaySymbol(sym)}</span>
+                          </div>
+                          <span style={{ fontSize: 13, color: fx ? "#34d399" : "#818cf8", fontWeight: 800 }}>+</span>
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -1801,50 +2059,62 @@ export default function StrategyBuilderPage() {
                       No pairs matching filter.
                     </div>
                   ) : (
-                    selectedList.map((sym) => (
-                      <div
-                        key={sym}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "8px 10px",
-                          borderRadius: 8,
-                          background: "rgba(99, 102, 241, 0.22)",
-                          border: "1px solid rgba(99, 102, 241, 0.5)",
-                          color: "#ffffff",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          transition: "all 0.12s ease",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ color: "#4ade80", fontSize: 11 }}>✓</span>
-                          <span>{sym}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeSymbol(sym)}
-                          title={`Remove ${sym}`}
+                    selectedList.map((sym) => {
+                      const fx = isForexPair(sym);
+                      return (
+                        <div
+                          key={sym}
                           style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "#f87171",
-                            cursor: "pointer",
-                            fontSize: 13,
-                            fontWeight: 700,
-                            padding: "0 2px",
                             display: "flex",
                             alignItems: "center",
-                            justifyContent: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            background: fx ? "rgba(16, 185, 129, 0.18)" : "rgba(99, 102, 241, 0.22)",
+                            border: `1px solid ${fx ? "rgba(16, 185, 129, 0.5)" : "rgba(99, 102, 241, 0.5)"}`,
+                            color: "#ffffff",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            transition: "all 0.12s ease",
                           }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = "#f87171")}
                         >
-                          ✕
-                        </button>
-                      </div>
-                    ))
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              padding: "1px 4px",
+                              borderRadius: 4,
+                              background: fx ? "rgba(16, 185, 129, 0.3)" : "rgba(99, 102, 241, 0.3)",
+                              color: fx ? "#34d399" : "#a5b4fc",
+                            }}>
+                              {fx ? "FX" : "CRYPTO"}
+                            </span>
+                            <span>{formatDisplaySymbol(sym)}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeSymbol(sym)}
+                            title={`Remove ${sym}`}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#f87171",
+                              cursor: "pointer",
+                              fontSize: 13,
+                              fontWeight: 700,
+                              padding: "0 2px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = "#f87171")}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
 
@@ -1862,12 +2132,18 @@ export default function StrategyBuilderPage() {
                   flexWrap: "wrap",
                   gap: 8,
                 }}>
-                  <div>
-                    Active Basket: <strong style={{ color: "#38bdf8" }}>{cfg.symbols.length} pair{cfg.symbols.length > 1 ? "s" : ""}</strong>
-                    <span style={{ color: "#64748b", marginLeft: 6 }}>
-                      ({(100 / Math.max(1, cfg.symbols.length)).toFixed(1)}% equal weight)
-                    </span>
-                  </div>
+                  {(() => {
+                    const cryptoCount = cfg.symbols.filter((s) => !isForexPair(s)).length;
+                    const forexCount = cfg.symbols.filter((s) => isForexPair(s)).length;
+                    return (
+                      <div>
+                        Active Basket: <strong style={{ color: "#38bdf8" }}>{cfg.symbols.length} pair{cfg.symbols.length > 1 ? "s" : ""}</strong>
+                        <span style={{ color: "#64748b", marginLeft: 6 }}>
+                          ({cryptoCount} Crypto · {forexCount} Forex · {(100 / Math.max(1, cfg.symbols.length)).toFixed(1)}% equal weight)
+                        </span>
+                      </div>
+                    );
+                  })()}
                   <div style={{ fontSize: 11, color: "#64748b" }}>
                     Click ✕ on any pair to return to available
                   </div>
@@ -3343,7 +3619,15 @@ function BacktestResult({
             <tbody>
               <tr>
                 <td style={tdStrong}>Data Source</td>
-                <td style={td}>Real Binance Spot Klines (Direct Exchange Cache)</td>
+                <td style={td}>
+                  {(() => {
+                    const hasCrypto = allSymbols.some((s: string) => !isForexPair(s));
+                    const hasForex = allSymbols.some((s: string) => isForexPair(s));
+                    if (hasCrypto && hasForex) return "Authentic Multi-Asset (Binance Spot Klines & Yahoo Finance Forex)";
+                    if (hasForex) return "Real Forex Rates (Yahoo Finance Direct Cache)";
+                    return "Real Binance Spot Klines (Direct Exchange Cache)";
+                  })()}
+                </td>
               </tr>
               <tr>
                 <td style={tdStrong}>Market Basket</td>

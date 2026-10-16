@@ -27,6 +27,13 @@ from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.db import get_conn, now, row_to_dict
+from app.services.forex_historical import (
+    ALL_FOREX_PAIRS,
+    POPULAR_FOREX_PAIRS,
+    is_forex_symbol,
+    fetch_live_forex_prices,
+    fetch_recent_forex_candles,
+)
 
 STARTING_BALANCE = 100000.0
 DEFAULT_SYMBOL = "BTCUSDT"
@@ -103,8 +110,17 @@ def is_valid_crypto_symbol(symbol: str) -> bool:
     return sym in set(get_all_crypto_symbols())
 
 
-def _fetch_market_prices(max_age: float = 1.0) -> Dict[str, float]:
-    """Latest price snapshot for all Binance USDT cryptocurrency pairs."""
+def is_valid_market_symbol(symbol: str) -> bool:
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return False
+    if is_forex_symbol(sym):
+        return True
+    return is_valid_crypto_symbol(sym)
+
+
+def _fetch_market_prices(max_age: float = 1.0, extra_symbols: Optional[List[str]] = None) -> Dict[str, float]:
+    """Latest price snapshot for Binance cryptocurrency and Yahoo Finance Forex pairs."""
     now_ts = time.time()
     if now_ts - float(_ticker_cache.get("ts", 0.0)) < max_age:
         return dict(_ticker_cache.get("prices", {}))
@@ -112,27 +128,55 @@ def _fetch_market_prices(max_age: float = 1.0) -> Dict[str, float]:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json",
     }
+    crypto_prices: Dict[str, float] = {}
     for base in ("https://data-api.binance.vision", "https://api.binance.com", "https://api.binance.us"):
         try:
             req = urllib.request.Request(f"{base}/api/v3/ticker/price", headers=headers)
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            prices = {
+            crypto_prices = {
                 str(x.get("symbol", "")).upper(): _float(x.get("price"))
                 for x in data
                 if str(x.get("symbol", "")).upper().endswith("USDT")
             }
-            if prices:
-                _ticker_cache["ts"] = now_ts
-                _ticker_cache["prices"] = prices
-                return prices
+            if crypto_prices:
+                break
         except Exception:
             continue
+
+    # Fetch live Forex prices
+    forex_targets = list(POPULAR_FOREX_PAIRS)
+    if extra_symbols:
+        for s in extra_symbols:
+            if is_forex_symbol(s) and s not in forex_targets:
+                forex_targets.append(s)
+    try:
+        forex_prices = fetch_live_forex_prices(forex_targets, max_age=max_age)
+    except Exception:
+        forex_prices = {}
+
+    merged_prices = dict(_ticker_cache.get("prices", {}))
+    if crypto_prices:
+        merged_prices.update(crypto_prices)
+    if forex_prices:
+        merged_prices.update(forex_prices)
+
+    if merged_prices:
+        _ticker_cache["ts"] = now_ts
+        _ticker_cache["prices"] = merged_prices
+        return merged_prices
     return dict(_ticker_cache.get("prices", {}))
 
 
 def _market_table(session: Optional["LivePaperSession"] = None) -> List[Dict[str, Any]]:
-    prices = _fetch_market_prices()
+    active_syms = list((session.live_config.get("symbols") or []) if session and session.live_config else [])
+    try:
+        prices = _fetch_market_prices(extra_symbols=active_syms)
+    except TypeError:
+        try:
+            prices = _fetch_market_prices(5.0)
+        except Exception:
+            prices = _fetch_market_prices()
     selected_symbols: set[str] = set()
     if session and session.live_config:
         selected_symbols = {str(x).upper() for x in (session.live_config.get("symbols") or [DEFAULT_SYMBOL])}
@@ -586,7 +630,7 @@ def _clean_symbols(symbols: Any) -> List[str]:
     out: List[str] = []
     for x in symbols or []:
         sym = str(x).upper().strip()
-        if is_valid_crypto_symbol(sym) and sym not in out:
+        if is_valid_market_symbol(sym) and sym not in out:
             out.append(sym)
     return out or [DEFAULT_SYMBOL]
 
@@ -1886,11 +1930,14 @@ def replay_csv_paper_session(csv_path: Path | str, max_rows: int = 500) -> Dict[
 
 
 def fetch_recent_candles(symbol: str, interval: str = "1m", limit: int = 100) -> List[Dict[str, Any]]:
+    sym = symbol.strip().upper()
+    if is_forex_symbol(sym):
+        return fetch_recent_forex_candles(sym, interval=interval, limit=limit)
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json",
     }
-    sym = symbol.strip().upper()
     lim = max(10, min(int(limit), 500))
     raw_interval = str(interval or "1m").strip()
     months_group = 1

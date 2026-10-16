@@ -77,6 +77,19 @@ function signedColor(n: any): string {
   return x > 0 ? "#4ade80" : x < 0 ? "#f87171" : "#94a3b8";
 }
 
+function isForexPair(sym: string): boolean {
+  const s = String(sym || "").toUpperCase().replace(/[\/-]/g, "");
+  return s.length === 6 && !s.endsWith("USDT") && !s.endsWith("USDC") && !s.endsWith("BUSD");
+}
+
+function formatDisplaySymbol(sym: string): string {
+  const s = String(sym || "").toUpperCase().trim();
+  if (isForexPair(s) && s.length === 6 && !s.includes("/")) {
+    return `${s.slice(0, 3)}/${s.slice(3)}`;
+  }
+  return s;
+}
+
 function getTradeGrossR(t: TradeRecord): number {
   const raw = t.gross_r ?? t.grossR ?? t.r_multiple ?? t.R_multiple ?? t.r ?? 0;
   const num = Number(raw);
@@ -716,7 +729,7 @@ export default function BacktestAnalytics({
                   cursor: "pointer",
                 }}
               >
-                {sym}
+                {formatDisplaySymbol(sym)}
               </button>
             ))}
           </div>
@@ -1044,7 +1057,7 @@ export default function BacktestAnalytics({
             </h3>
             <InfoTip
               size="md"
-              text={`Independent performance attribution across ${symbolBreakdown.length} tested cryptocurrency markets. Click any column header to sort (Win Rate 100% → 0% by default), click any row to isolate its equity curve & trade log, or select symbols to deploy directly to Live Paper Trading.`}
+              text={`Independent performance attribution across ${symbolBreakdown.length} tested cryptocurrency & forex markets. Click any column header to sort (Win Rate 100% → 0% by default), click any row to isolate its equity curve & trade log, or select symbols to deploy directly to Live Paper Trading.`}
             />
             <span
               style={{
@@ -1420,9 +1433,24 @@ export default function BacktestAnalytics({
                             fontSize: 11,
                             letterSpacing: "0.02em",
                             color: isPaperSelected ? "#f8fafc" : "#94a3b8",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
                           }}
                         >
-                          {s.symbol}
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              padding: "1px 4px",
+                              borderRadius: 4,
+                              background: isForexPair(s.symbol) ? "rgba(16, 185, 129, 0.25)" : "rgba(99, 102, 241, 0.25)",
+                              color: isForexPair(s.symbol) ? "#34d399" : "#a5b4fc",
+                            }}
+                          >
+                            {isForexPair(s.symbol) ? "FX" : "CRYPTO"}
+                          </span>
+                          <span>{formatDisplaySymbol(s.symbol)}</span>
                         </span>
                       </div>
                     </td>
@@ -1470,7 +1498,7 @@ export default function BacktestAnalytics({
                 <td style={{ padding: "12px", color: "#38bdf8" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 13 }}>📊</span>
-                    <span>BASKET TOTAL ({symbolBreakdown.length} PAIRS)</span>
+                    <span>BASKET TOTAL ({symbolBreakdown.length} MARKETS)</span>
                   </div>
                 </td>
                 <td style={{ padding: "12px", color: "#f8fafc" }}>{basketTotal.trades}</td>

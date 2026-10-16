@@ -115,7 +115,7 @@ type LiveStatus = {
   };
 };
 
-const POPULAR_SYMBOLS = [
+const POPULAR_CRYPTO_SYMBOLS = [
   "BTCUSDT",
   "ETHUSDT",
   "SOLUSDT",
@@ -133,7 +133,90 @@ const POPULAR_SYMBOLS = [
   "DOTUSDT",
   "LTCUSDT",
 ];
+
+const FOREX_MAJOR_SYMBOLS = [
+  "EURUSD",
+  "GBPUSD",
+  "USDJPY",
+  "USDCHF",
+  "USDCAD",
+  "AUDUSD",
+  "NZDUSD",
+];
+
+const FOREX_CROSS_SYMBOLS = [
+  "EURGBP",
+  "EURJPY",
+  "GBPJPY",
+  "EURCHF",
+  "AUDJPY",
+  "EURAUD",
+  "CADJPY",
+  "GBPAUD",
+  "NZDJPY",
+  "AUDCAD",
+  "GBPCHF",
+  "CHFJPY",
+];
+
+const FOREX_EXOTIC_SYMBOLS = [
+  "USDINR",
+  "USDZAR",
+  "USDMXN",
+  "USDTRY",
+  "USDSGD",
+];
+
+const ALL_FOREX_SYMBOLS = [
+  ...FOREX_MAJOR_SYMBOLS,
+  ...FOREX_CROSS_SYMBOLS,
+  ...FOREX_EXOTIC_SYMBOLS,
+];
+
+const POPULAR_FOREX_SYMBOLS = [
+  "EURUSD",
+  "GBPUSD",
+  "USDJPY",
+  "USDCHF",
+  "USDCAD",
+  "AUDUSD",
+  "NZDUSD",
+  "EURGBP",
+  "EURJPY",
+  "GBPJPY",
+  "AUDJPY",
+  "USDINR",
+];
+
+const POPULAR_SYMBOLS = [...POPULAR_CRYPTO_SYMBOLS, ...POPULAR_FOREX_SYMBOLS];
 const SUPPORTED_SYMBOLS = POPULAR_SYMBOLS;
+
+function isForexPair(sym: string): boolean {
+  const s = String(sym || "").toUpperCase().replace(/[\/-]/g, "");
+  return ALL_FOREX_SYMBOLS.includes(s) || (s.length === 6 && !s.endsWith("USDT") && !s.endsWith("USDC") && !s.endsWith("BUSD"));
+}
+
+function formatDisplaySymbol(sym: string): string {
+  const s = String(sym || "").toUpperCase().trim();
+  if (isForexPair(s) && s.length === 6 && !s.includes("/")) {
+    return `${s.slice(0, 3)}/${s.slice(3)}`;
+  }
+  return s;
+}
+
+function formatPriceBySymbol(v: unknown, sym?: string): string {
+  const n = typeof v === "number" ? v : Number(v || 0);
+  if (!Number.isFinite(n) || n === 0) return "-";
+  if (sym && isForexPair(sym)) {
+    const s = sym.toUpperCase();
+    if (s.includes("JPY") || s.includes("INR")) {
+      return n.toFixed(3);
+    }
+    return n.toFixed(5);
+  }
+  if (n < 1) return `$${n.toFixed(4)}`;
+  return `$${money(n)}`;
+}
 
 function money(v: unknown) {
   const n = typeof v === "number" ? v : Number(v || 0);
@@ -448,10 +531,11 @@ export default function PaperTradingPage() {
   const [balanceInput, setBalanceInput] = useState<string>("100000");
   const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
   const [customSymbolInput, setCustomSymbolInput] = useState("");
+  const [paperMarketFilter, setPaperMarketFilter] = useState<"ALL" | "CRYPTO" | "FOREX">("ALL");
   const [telemetryCandles, setTelemetryCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [initialCandles, setInitialCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [message, setMessage] = useState(
-    "Real-time Binance multi-market live paper mode. No real-money execution.",
+    "Real-time Multi-Asset (Binance Crypto & Global Forex) live paper mode. No real-money execution.",
   );
   const [busy, setBusy] = useState(false);
 
@@ -658,7 +742,21 @@ export default function PaperTradingPage() {
   }
 
   function selectAllLiveSymbols() {
-    setSelectedSymbols([...POPULAR_SYMBOLS]);
+    if (paperMarketFilter === "CRYPTO") {
+      setSelectedSymbols([...POPULAR_CRYPTO_SYMBOLS]);
+    } else if (paperMarketFilter === "FOREX") {
+      setSelectedSymbols([...POPULAR_FOREX_SYMBOLS]);
+    } else {
+      setSelectedSymbols([...POPULAR_SYMBOLS]);
+    }
+  }
+
+  function selectForexMajors() {
+    setSelectedSymbols([...FOREX_MAJOR_SYMBOLS]);
+  }
+
+  function selectHybridBasket() {
+    setSelectedSymbols(["BTCUSDT", "ETHUSDT", "SOLUSDT", "EURUSD", "GBPUSD"]);
   }
 
   function useStrategySymbols() {
@@ -668,9 +766,10 @@ export default function PaperTradingPage() {
   }
 
   function addCustomSymbol() {
-    const raw = customSymbolInput.trim().toUpperCase();
+    const raw = customSymbolInput.trim().toUpperCase().replace(/[\/-]/g, "");
     if (!raw) return;
-    const sym = raw.endsWith("USDT") ? raw : `${raw}USDT`;
+    const isFx = isForexPair(raw);
+    const sym = isFx ? raw : (raw.endsWith("USDT") ? raw : `${raw}USDT`);
     if (!selectedSymbols.includes(sym)) {
       setSelectedSymbols((prev) => [...prev, sym]);
     }
@@ -679,7 +778,7 @@ export default function PaperTradingPage() {
     }
     setChartSymbol(sym);
     setCustomSymbolInput("");
-    setMessage(`Added ${sym} to live paper active markets.`);
+    setMessage(`Added ${formatDisplaySymbol(sym)} to live paper active markets.`);
   }
 
   async function start() {
@@ -888,6 +987,18 @@ export default function PaperTradingPage() {
     return selectedSymbols;
   }, [status.status, status.active_symbols, status.selected_symbols, selectedSymbols]);
 
+  const allAvailableMarkets = useMemo(() => {
+    return Array.from(new Set([...POPULAR_SYMBOLS, ...selectedSymbols]));
+  }, [selectedSymbols]);
+
+  const filteredMarketList = useMemo(() => {
+    return allAvailableMarkets.filter((sym) => {
+      if (paperMarketFilter === "CRYPTO") return !isForexPair(sym);
+      if (paperMarketFilter === "FOREX") return isForexPair(sym);
+      return true;
+    });
+  }, [allAvailableMarkets, paperMarketFilter]);
+
   const displayedMarketRows = useMemo(() => {
     const list = marketRows.filter((m: any) => 
       activeSymbolsList.includes(m.symbol) || m.paper_status === "ACTIVE_WEBSOCKET"
@@ -1021,40 +1132,41 @@ export default function PaperTradingPage() {
       <section style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 34, marginBottom: 8 }}>Live Paper Trading</h1>
         <p style={{ color: "#94a3b8" }}>
-          Real-time Binance cryptocurrency markets · live market data · paper account equity ${money(wallet.starting_balance || customBalance)} · zero financial risk.
+          Real-time Multi-Asset Markets (Binance Spot &amp; Forex) · authentic live price action · paper account equity ${money(wallet.starting_balance || customBalance)} · zero financial risk.
         </p>
       </section>
 
       <section style={{ ...panelStyle, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <div>
-            <h2 style={{ ...h2Style, marginBottom: 2 }}>{selectedChartSymbol} Live Market Chart</h2>
+            <h2 style={{ ...h2Style, marginBottom: 2 }}>{formatDisplaySymbol(selectedChartSymbol)} Live Market Chart</h2>
             <div style={{ color: "#94a3b8", fontSize: 13 }}>
-              Select or search any of {allSymbols.length || 500}+ Binance cryptocurrency markets to view its real candlestick chart and live paper trades.
+              Select or search any of {allSymbols.length || 500}+ Crypto &amp; Forex markets to view authentic candlestick charts and live paper trades.
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ color: "#94a3b8", fontSize: 12 }}>Search Crypto:</span>
+            <span style={{ color: "#94a3b8", fontSize: 12 }}>Search Market:</span>
             <input
               type="text"
-              placeholder="e.g. PEPE, SUI, DOGE..."
+              placeholder="e.g. EURUSD, BTC, SOL..."
               value={symbolSearchQuery}
               onChange={(e) => setSymbolSearchQuery(e.target.value.toUpperCase())}
-              style={{ ...inputStyle, width: 130, textTransform: "uppercase" }}
+              style={{ ...inputStyle, width: 140, textTransform: "uppercase" }}
             />
             <select
               value={selectedChartSymbol}
               onChange={(e) => setChartSymbol(e.target.value)}
-              style={{ ...inputStyle, minWidth: 160 }}
+              style={{ ...inputStyle, minWidth: 190 }}
             >
               {allSymbols
                 .filter((s) => !symbolSearchQuery.trim() || s.includes(symbolSearchQuery.trim().toUpperCase()))
                 .slice(0, 100)
                 .map((sym) => {
                   const p = marketRows.find((m: any) => m.symbol === sym)?.latest_price;
+                  const isFx = isForexPair(sym);
                   return (
                     <option key={sym} value={sym}>
-                      {sym} {p ? `($${Number(p) < 1 ? Number(p).toFixed(4) : money(p)})` : ""}
+                      {formatDisplaySymbol(sym)} [{isFx ? "FX" : "CRYPTO"}] {p ? `(${formatPriceBySymbol(p, sym)})` : ""}
                     </option>
                   );
                 })}
@@ -1062,11 +1174,11 @@ export default function PaperTradingPage() {
           </div>
         </div>
 
-        {/* Popular & Active Crypto Quick-Tabs */}
+        {/* Popular & Active Market Quick-Tabs */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(115px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
             gap: 8,
             marginBottom: 14,
           }}
@@ -1075,11 +1187,12 @@ export default function PaperTradingPage() {
             ...POPULAR_SYMBOLS,
             ...(selectedChartSymbol ? [selectedChartSymbol] : []),
             ...selectedSymbols,
-          ])).slice(0, 16).map((sym) => {
+          ])).slice(0, 18).map((sym) => {
             const isSelected = sym === selectedChartSymbol;
             const symMarket = marketRows.find((m: any) => m.symbol === sym);
             const symPrice = symMarket?.latest_price || (symbolStateFor(status, sym) as any)?.last_price;
             const isTradeActive = (status.active_symbols?.includes(sym) || selectedSymbols.includes(sym)) && (status.status === "running" || status.status === "starting");
+            const isFx = isForexPair(sym);
             return (
               <button
                 key={sym}
@@ -1103,10 +1216,21 @@ export default function PaperTradingPage() {
                   {isTradeActive && (
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", display: "inline-block", boxShadow: "0 0 6px #22c55e" }} />
                   )}
-                  {sym}
+                  <span style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    padding: "1px 4px",
+                    borderRadius: 3,
+                    background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
+                    color: isFx ? "#34d399" : "#818cf8",
+                    border: `1px solid ${isFx ? "rgba(16, 185, 129, 0.4)" : "rgba(99, 102, 241, 0.4)"}`
+                  }}>
+                    {isFx ? "FX" : "CRYPTO"}
+                  </span>
+                  <span>{formatDisplaySymbol(sym)}</span>
                 </div>
                 <div style={{ fontSize: 11, color: isSelected ? "#e0f2fe" : "#94a3b8" }}>
-                  {Number(symPrice) > 0 ? (symPrice < 1 ? `$${Number(symPrice).toFixed(4)}` : `$${money(symPrice)}`) : "-"}
+                  {formatPriceBySymbol(symPrice, sym)}
                 </div>
               </button>
             );
@@ -1134,14 +1258,14 @@ export default function PaperTradingPage() {
           </div>
         )}
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "#94a3b8", fontSize: 12, marginTop: 10 }}>
-          <span>Market: <strong style={{ color: "#38bdf8" }}>{selectedChartSymbol}</strong></span>
+          <span>Market: <strong style={{ color: "#38bdf8" }}>{formatDisplaySymbol(selectedChartSymbol)}</strong></span>
           <span>Chart candles: {chartCandles.length}</span>
           <span>
             Last OHLC: {chartLastCandle
               ? `${Number(chartLastCandle.open).toFixed(2)} / ${Number(chartLastCandle.high).toFixed(2)} / ${Number(chartLastCandle.low).toFixed(2)} / ${Number(chartLastCandle.close).toFixed(2)}`
               : "not available"}
           </span>
-          <span>Last price: {Number(selectedChartPrice) > 0 ? (selectedChartPrice < 1 ? `$${Number(selectedChartPrice).toFixed(4)}` : `$${money(selectedChartPrice)}`) : "not available"}</span>
+          <span>Last price: {Number(selectedChartPrice) > 0 ? formatPriceBySymbol(selectedChartPrice, selectedChartSymbol) : "not available"}</span>
           <span>Last update: {chartUpdateTime(chartLastUpdate)}</span>
         </div>
         {status.status === "running" && (
@@ -1161,10 +1285,10 @@ export default function PaperTradingPage() {
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#f8fafc" }}>
-                Interactive Co-Pilot Desk: <strong style={{ color: "#38bdf8" }}>{selectedChartSymbol}</strong>
+                Interactive Co-Pilot Desk: <strong style={{ color: "#38bdf8" }}>{formatDisplaySymbol(selectedChartSymbol)}</strong>
               </span>
               <span style={{ fontSize: 12, color: "#94a3b8" }}>
-                Instant paper execution with dynamic Risk, Stop-Loss & Targets
+                Instant paper execution with dynamic Risk, Stop-Loss &amp; Targets
               </span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1186,7 +1310,7 @@ export default function PaperTradingPage() {
                         cursor: busy ? "not-allowed" : "pointer",
                       }}
                     >
-                      ✕ Close {selectedChartSymbol} Position ({currentPos.side} @ ${money(currentPos.entry_price)})
+                      ✕ Close {formatDisplaySymbol(selectedChartSymbol)} Position ({currentPos.side} @ {formatPriceBySymbol(currentPos.entry_price, selectedChartSymbol)})
                     </button>
                   );
                 }
@@ -1206,7 +1330,7 @@ export default function PaperTradingPage() {
                         cursor: busy ? "not-allowed" : "pointer",
                       }}
                     >
-                      🟢 Market Buy ({selectedChartSymbol})
+                      🟢 Market Buy ({formatDisplaySymbol(selectedChartSymbol)})
                     </button>
                     <button
                       onClick={() => handleExecuteManualOrder("SELL")}
@@ -1222,7 +1346,7 @@ export default function PaperTradingPage() {
                         cursor: busy ? "not-allowed" : "pointer",
                       }}
                     >
-                      🔴 Market Sell ({selectedChartSymbol})
+                      🔴 Market Sell ({formatDisplaySymbol(selectedChartSymbol)})
                     </button>
                   </>
                 );
@@ -1397,16 +1521,79 @@ export default function PaperTradingPage() {
               flexWrap: "wrap",
             }}
           >
-            <b>Activate paper markets</b>
             <div>
+              <b>Activate paper markets</b>
+              <span style={{ marginLeft: 10, fontSize: 12, color: "#94a3b8" }}>
+                ({selectedSymbols.filter((s) => !isForexPair(s)).length} Crypto · {selectedSymbols.filter(isForexPair).length} Forex)
+              </span>
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  background:
+                    selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                      ? "rgba(168, 85, 247, 0.2)"
+                      : selectedSymbols.every(isForexPair)
+                      ? "rgba(16, 185, 129, 0.2)"
+                      : "rgba(99, 102, 241, 0.2)",
+                  color:
+                    selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                      ? "#c084fc"
+                      : selectedSymbols.every(isForexPair)
+                      ? "#34d399"
+                      : "#818cf8",
+                  border: `1px solid ${
+                    selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                      ? "rgba(168, 85, 247, 0.4)"
+                      : selectedSymbols.every(isForexPair)
+                      ? "rgba(16, 185, 129, 0.4)"
+                      : "rgba(99, 102, 241, 0.4)"
+                  }`,
+                }}
+              >
+                {selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                  ? "🌐 Hybrid Multi-Asset Basket"
+                  : selectedSymbols.every(isForexPair)
+                  ? "💱 Forex Only Basket"
+                  : "🪙 Crypto Only Basket"}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button
                 type="button"
                 onClick={selectAllLiveSymbols}
                 disabled={!canStart}
                 title="Select all popular markets"
               >
-                Select Popular
-              </button>{" "}
+                Select All Popular
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setSelectedSymbols([...POPULAR_CRYPTO_SYMBOLS])}
+                disabled={!canStart}
+              >
+                🪙 Crypto Only ({POPULAR_CRYPTO_SYMBOLS.length})
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={selectForexMajors}
+                disabled={!canStart}
+              >
+                💱 Forex Majors ({FOREX_MAJOR_SYMBOLS.length})
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={selectHybridBasket}
+                disabled={!canStart}
+              >
+                🌐 Hybrid Basket (5)
+              </button>
               <button
                 type="button"
                 className="secondary"
@@ -1417,24 +1604,68 @@ export default function PaperTradingPage() {
               </button>
             </div>
           </div>
-          <div className="symbol-picker">
-            {Array.from(new Set([...POPULAR_SYMBOLS, ...selectedSymbols])).map((sym) => (
-              <label key={sym} className="symbol-chip">
-                <input
-                  type="checkbox"
-                  checked={selectedSymbols.includes(sym)}
-                  disabled={!canStart}
-                  onChange={() => toggleLiveSymbol(sym)}
-                />
-                <span>{sym}</span>
-              </label>
+
+          {/* Segmented Market Filter Tabs */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 8 }}>
+            {[
+              { id: "ALL", label: `🌐 All Markets (${allAvailableMarkets.length})` },
+              { id: "CRYPTO", label: `🪙 Crypto Only (${allAvailableMarkets.filter((s) => !isForexPair(s)).length})` },
+              { id: "FOREX", label: `💱 Forex Only (${allAvailableMarkets.filter(isForexPair).length})` },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setPaperMarketFilter(tab.id as any)}
+                style={{
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: paperMarketFilter === tab.id ? "1px solid #38bdf8" : "1px solid #334155",
+                  background: paperMarketFilter === tab.id ? "rgba(56, 189, 248, 0.15)" : "#0f172a",
+                  color: paperMarketFilter === tab.id ? "#38bdf8" : "#94a3b8",
+                  cursor: "pointer",
+                  fontWeight: paperMarketFilter === tab.id ? 700 : 500,
+                }}
+              >
+                {tab.label}
+              </button>
             ))}
+          </div>
+
+          <div className="symbol-picker">
+            {filteredMarketList.map((sym) => {
+              const isFx = isForexPair(sym);
+              return (
+                <label key={sym} className="symbol-chip">
+                  <input
+                    type="checkbox"
+                    checked={selectedSymbols.includes(sym)}
+                    disabled={!canStart}
+                    onChange={() => toggleLiveSymbol(sym)}
+                  />
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 800,
+                      padding: "1px 4px",
+                      borderRadius: 3,
+                      marginRight: 4,
+                      background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
+                      color: isFx ? "#34d399" : "#818cf8",
+                    }}
+                  >
+                    {isFx ? "FX" : "CRYPTO"}
+                  </span>
+                  <span>{formatDisplaySymbol(sym)}</span>
+                </label>
+              );
+            })}
           </div>
 
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <input
               type="text"
-              placeholder="Add any crypto pair (e.g. PEPE, SUI, DOGE)..."
+              placeholder="Add pair (e.g. EURUSD, GBPJPY, PEPE, SUI)..."
               value={customSymbolInput}
               onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
               onKeyDown={(e) => {
@@ -1609,16 +1840,16 @@ export default function PaperTradingPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: status.status === "running" ? (openPositions.length > 0 ? "#34d399" : "#38bdf8") : "#f8fafc" }}>
                   {status.status === "running"
-                    ? (openPositions.length > 0 ? "Active Paper Trade In Progress" : "Live Binance Stream Connected & Scanning")
+                    ? (openPositions.length > 0 ? "Active Paper Trade In Progress" : "Live Multi-Asset Stream Connected & Scanning")
                     : "Paper Trading Engine Ready"}
                 </h3>
               </div>
               <p style={{ color: "#cbd5e1", fontSize: 13, margin: "6px 0 0 0", lineHeight: 1.5 }}>
                 {status.status === "running"
                   ? (openPositions.length > 0
-                      ? `Holding ${String(openPositions[0].side || "").toUpperCase() === "SELL" ? "short" : "long"} position on ${openPositions[0].symbol} (Qty ${openPositions[0].qty}) entered at $${money(openPositions[0].entry_price)}. Floating PnL: ${unrealizedPnl >= 0 ? "+" : ""}$${money(unrealizedPnl)}. Stop-Loss is protected at $${money(openPositions[0].stop)} and Profit Target is active at $${money(openPositions[0].target1)}.`
-                      : `Streaming real-time Binance ticks across ${status.active_symbols?.length || selectedSymbols.length} active market${(status.active_symbols?.length || selectedSymbols.length) > 1 ? "s" : ""} (${selectedSymbols.slice(0, 4).join(", ")}${selectedSymbols.length > 4 ? ` +${selectedSymbols.length - 4} more` : ""}). The engine is analyzing 1m candles for breakout & retest momentum.`)
-                  : `Simulate real cryptocurrency market execution on live Binance price action with zero financial risk. Customize your paper balance, select your pairs above, and click 'Start Live Paper Trading'.`}
+                      ? `Holding ${String(openPositions[0].side || "").toUpperCase() === "SELL" ? "short" : "long"} position on ${formatDisplaySymbol(openPositions[0].symbol)} (Qty ${openPositions[0].qty}) entered at ${formatPriceBySymbol(openPositions[0].entry_price, openPositions[0].symbol)}. Floating PnL: ${unrealizedPnl >= 0 ? "+" : ""}$${money(unrealizedPnl)}. Stop-Loss is protected at ${formatPriceBySymbol(openPositions[0].stop, openPositions[0].symbol)} and Profit Target is active at ${formatPriceBySymbol(openPositions[0].target1, openPositions[0].symbol)}.`
+                      : `Streaming real-time multi-market ticks across ${status.active_symbols?.length || selectedSymbols.length} active market${(status.active_symbols?.length || selectedSymbols.length) > 1 ? "s" : ""} (${selectedSymbols.slice(0, 4).map(formatDisplaySymbol).join(", ")}${selectedSymbols.length > 4 ? ` +${selectedSymbols.length - 4} more` : ""}). The engine is analyzing 1m candles for breakout & retest momentum.`)
+                  : `Simulate authentic multi-asset execution across crypto and forex markets with live price action and zero financial risk. Customize your paper balance, select your pairs above, and click 'Start Live Paper Trading'.`}
               </p>
             </div>
           </div>
@@ -1677,9 +1908,9 @@ export default function PaperTradingPage() {
       >
         <Card label="Live status" value={liveStatusLabel} hint="Managed engine state" />
         <Card
-          label={`${primarySymbol} price`}
-          value={primaryPrice ? `$${money(primaryPrice)}` : "waiting for feed"}
-          hint="Live Binance Vision tick"
+          label={`${formatDisplaySymbol(primarySymbol)} price`}
+          value={primaryPrice ? formatPriceBySymbol(primaryPrice, primarySymbol) : "waiting for feed"}
+          hint={isForexPair(primarySymbol) ? "Live Forex rate" : "Live Binance tick"}
         />
         <Card
           label="Account equity"
@@ -1747,7 +1978,7 @@ export default function PaperTradingPage() {
           <div>
             <h2 style={{ ...h2Style, marginBottom: 2 }}>Active Markets Monitor ({displayedMarketRows.length} active)</h2>
             <p style={{ color: "#94a3b8", fontSize: 13, margin: 0 }}>
-              Live real-time Binance WebSocket stream, current pricing, and execution telemetry for your active paper pairs.
+              Live real-time Binance &amp; Forex market streams, current pricing, and execution telemetry for your active paper pairs.
             </p>
           </div>
           {status.status === "running" && (
@@ -1778,9 +2009,27 @@ export default function PaperTradingPage() {
               {displayedMarketRows.length ? (
                 displayedMarketRows.map((m: any) => {
                   const isStreaming = m.paper_status === "ACTIVE_WEBSOCKET" || (status.status === "running" && activeSymbolsList.includes(m.symbol));
+                  const isFx = isForexPair(m.symbol);
                   return (
                     <tr key={m.symbol}>
-                      <Td style={{ fontWeight: 700, color: "#f8fafc" }}>{m.symbol}</Td>
+                      <Td style={{ fontWeight: 700, color: "#f8fafc" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 800,
+                              padding: "1px 4px",
+                              borderRadius: 3,
+                              background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
+                              color: isFx ? "#34d399" : "#818cf8",
+                              border: `1px solid ${isFx ? "rgba(16, 185, 129, 0.4)" : "rgba(99, 102, 241, 0.4)"}`,
+                            }}
+                          >
+                            {isFx ? "FX" : "CRYPTO"}
+                          </span>
+                          <span>{formatDisplaySymbol(m.symbol)}</span>
+                        </span>
+                      </Td>
                       <Td>
                         <span
                           className={
@@ -1789,11 +2038,11 @@ export default function PaperTradingPage() {
                               : "pill pill-white"
                           }
                         >
-                          {isStreaming ? "STREAMING" : (status.status === "running" ? "WAITING" : "SELECTED")}
+                          {isStreaming ? (isFx ? "FAST POLL" : "STREAMING") : (status.status === "running" ? "WAITING" : "SELECTED")}
                         </span>
                       </Td>
                       <Td style={{ fontWeight: 600, color: "#38bdf8" }}>
-                        {m.latest_price ? `$${money(m.latest_price)}` : (primaryMarket?.latest_price ? `$${money(primaryMarket.latest_price)}` : "fetching...")}
+                        {m.latest_price ? formatPriceBySymbol(m.latest_price, m.symbol) : (primaryMarket?.latest_price ? formatPriceBySymbol(primaryMarket.latest_price, primarySymbol) : "fetching...")}
                       </Td>
                       <Td>{m.messages || (isStreaming ? status.processed || 0 : 0)}</Td>
                       <Td>{m.bars || 0}</Td>
@@ -1812,7 +2061,7 @@ export default function PaperTradingPage() {
               ) : (
                 <tr>
                   <Td colSpan={8} style={{ textAlign: "center", padding: "18px 0", color: "#94a3b8" }}>
-                    Select crypto markets above and click &quot;Start Live Paper Trading&quot; to begin streaming.
+                    Select crypto or forex markets above and click &quot;Start Live Paper Trading&quot; to begin streaming.
                   </Td>
                 </tr>
               )}
@@ -1851,37 +2100,57 @@ export default function PaperTradingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {openPositions.map((p: any, i: number) => (
-                    <tr key={`${p.symbol || "POS"}-${i}`}>
-                      <Td><span style={{ color: "#93c5fd", fontWeight: 800 }}>{p.symbol || "-"}</span></Td>
-                      <Td><span style={{ color: p.side === "SELL" ? "#f87171" : "#4ade80", fontWeight: 700 }}>{p.side || "BUY"}</span></Td>
-                      <Td>{displayValue(p.entry_price, (v) => `$${money(v)}`)}</Td>
-                      <Td>{displayValue(p.qty)}</Td>
-                      <Td>{displayValue(p.current_price, (v) => `$${money(v)}`)}</Td>
-                      <Td><span style={signedStyle(p.current_R)}>{displayValue(p.current_R, (v) => `${Number(v).toFixed(3)}R`)}</span></Td>
-                      <Td><span style={signedStyle(p.unrealized_pnl)}>{displayValue(p.unrealized_pnl, (v) => `$${money(v)}`)}</span></Td>
-                      <Td>{displayValue(p.stop, (v) => `$${money(v)}`)}</Td>
-                      <Td>{p.target1 ? `$${money(p.target1)} / ${displayValue(p.target2, (v) => `$${money(v)}`)}` : "not available"}</Td>
-                      <Td>
-                        <button
-                          onClick={() => handleClosePosition(p.symbol)}
-                          disabled={busy}
-                          style={{
-                            padding: "4px 10px",
-                            background: "rgba(239, 68, 68, 0.15)",
-                            color: "#f87171",
-                            border: "1px solid rgba(239, 68, 68, 0.4)",
-                            borderRadius: 4,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            cursor: busy ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          Close
-                        </button>
-                      </Td>
-                    </tr>
-                  ))}
+                  {openPositions.map((p: any, i: number) => {
+                    const isFx = isForexPair(p.symbol);
+                    return (
+                      <tr key={`${p.symbol || "POS"}-${i}`}>
+                        <Td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 800,
+                                padding: "1px 4px",
+                                borderRadius: 3,
+                                background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
+                                color: isFx ? "#34d399" : "#818cf8",
+                                border: `1px solid ${isFx ? "rgba(16, 185, 129, 0.4)" : "rgba(99, 102, 241, 0.4)"}`,
+                              }}
+                            >
+                              {isFx ? "FX" : "CRYPTO"}
+                            </span>
+                            <span style={{ color: "#93c5fd", fontWeight: 800 }}>{formatDisplaySymbol(p.symbol || "-")}</span>
+                          </span>
+                        </Td>
+                        <Td><span style={{ color: p.side === "SELL" ? "#f87171" : "#4ade80", fontWeight: 700 }}>{p.side || "BUY"}</span></Td>
+                        <Td>{displayValue(p.entry_price, (v) => formatPriceBySymbol(v, p.symbol))}</Td>
+                        <Td>{displayValue(p.qty)}</Td>
+                        <Td>{displayValue(p.current_price, (v) => formatPriceBySymbol(v, p.symbol))}</Td>
+                        <Td><span style={signedStyle(p.current_R)}>{displayValue(p.current_R, (v) => `${Number(v).toFixed(3)}R`)}</span></Td>
+                        <Td><span style={signedStyle(p.unrealized_pnl)}>{displayValue(p.unrealized_pnl, (v) => `$${money(v)}`)}</span></Td>
+                        <Td>{displayValue(p.stop, (v) => formatPriceBySymbol(v, p.symbol))}</Td>
+                        <Td>{p.target1 ? `${formatPriceBySymbol(p.target1, p.symbol)} / ${displayValue(p.target2, (v) => formatPriceBySymbol(v, p.symbol))}` : "not available"}</Td>
+                        <Td>
+                          <button
+                            onClick={() => handleClosePosition(p.symbol)}
+                            disabled={busy}
+                            style={{
+                              padding: "4px 10px",
+                              background: "rgba(239, 68, 68, 0.15)",
+                              color: "#f87171",
+                              border: "1px solid rgba(239, 68, 68, 0.4)",
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: busy ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            Close
+                          </button>
+                        </Td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1902,7 +2171,7 @@ export default function PaperTradingPage() {
                 value={(
                   liveConfig.symbols ||
                   selectedSymbols || [status.symbol || "BTCUSDT"]
-                ).join(", ")}
+                ).map(formatDisplaySymbol).join(", ")}
               />
               <SummaryRow
                 label="Timeframe"
@@ -1979,41 +2248,63 @@ export default function PaperTradingPage() {
             </thead>
             <tbody>
               {tradeRows.length ? (
-                tradeRows.map((t, i) => (
-                  <tr key={i}>
-                    <Td>{tradeRows.length - i}</Td>
-                    <Td><span style={{ color: "#93c5fd", fontWeight: 800 }}>{t.symbol || status.symbol || "-"}</span></Td>
-                    <Td>{t.side || "BUY"}</Td>
-                    <Td>{cleanTime(t.entry_time)}</Td>
-                    <Td>${money(t.entry_price)}</Td>
-                    <Td>{t.qty || "-"}</Td>
-                    <Td>
-                      {t.status === "OPEN" ? "-" : cleanTime(t.exit_time)}
-                    </Td>
-                    <Td>
-                      {t.status === "OPEN" ? "-" : `$${money(t.exit_price)}`}
-                    </Td>
-                    <Td><span style={reasonStyle(t.exit_reason)}>{t.exit_reason || "-"}</span></Td>
-                    <Td>
-                      <span
-                        style={resultStyle(
-                          t.status === "OPEN" ? "OPEN" : t.result,
-                        )}
-                      >
-                        {t.status === "OPEN" ? "OPEN" : t.result || "-"}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span style={signedStyle(t.r)}>
-                        {t.r && t.r !== "-" ? Number(t.r).toFixed(3) : "-"}
-                      </span>
-                    </Td>
-                    <Td>{t.stop ? `$${money(t.stop)}` : "-"}</Td>
-                    <Td>
-                      {t.target1
-                        ? `$${money(t.target1)} / $${money(t.target2)}`
-                        : "-"}
-                    </Td>
+                tradeRows.map((t, i) => {
+                  const sym = t.symbol || status.symbol || "-";
+                  const isFx = isForexPair(sym);
+                  return (
+                    <tr key={i}>
+                      <Td>{tradeRows.length - i}</Td>
+                      <Td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {sym !== "-" && (
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 800,
+                                padding: "1px 4px",
+                                borderRadius: 3,
+                                background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
+                                color: isFx ? "#34d399" : "#818cf8",
+                                border: `1px solid ${isFx ? "rgba(16, 185, 129, 0.4)" : "rgba(99, 102, 241, 0.4)"}`,
+                              }}
+                            >
+                              {isFx ? "FX" : "CRYPTO"}
+                            </span>
+                          )}
+                          <span style={{ color: "#93c5fd", fontWeight: 800 }}>{formatDisplaySymbol(sym)}</span>
+                        </span>
+                      </Td>
+                      <Td>{t.side || "BUY"}</Td>
+                      <Td>{cleanTime(t.entry_time)}</Td>
+                      <Td>{formatPriceBySymbol(t.entry_price, sym)}</Td>
+                      <Td>{t.qty || "-"}</Td>
+                      <Td>
+                        {t.status === "OPEN" ? "-" : cleanTime(t.exit_time)}
+                      </Td>
+                      <Td>
+                        {t.status === "OPEN" ? "-" : formatPriceBySymbol(t.exit_price, sym)}
+                      </Td>
+                      <Td><span style={reasonStyle(t.exit_reason)}>{t.exit_reason || "-"}</span></Td>
+                      <Td>
+                        <span
+                          style={resultStyle(
+                            t.status === "OPEN" ? "OPEN" : t.result,
+                          )}
+                        >
+                          {t.status === "OPEN" ? "OPEN" : t.result || "-"}
+                        </span>
+                      </Td>
+                      <Td>
+                        <span style={signedStyle(t.r)}>
+                          {t.r && t.r !== "-" ? Number(t.r).toFixed(3) : "-"}
+                        </span>
+                      </Td>
+                      <Td>{t.stop ? formatPriceBySymbol(t.stop, sym) : "-"}</Td>
+                      <Td>
+                        {t.target1
+                          ? `${formatPriceBySymbol(t.target1, sym)} / ${formatPriceBySymbol(t.target2, sym)}`
+                          : "-"}
+                      </Td>
                     <Td>
                       {(() => {
                         const slip = slippageInTradeDirection(t);
@@ -2025,8 +2316,9 @@ export default function PaperTradingPage() {
                       })()}
                     </Td>
                   </tr>
-                ))
-              ) : (
+                );
+              })
+            ) : (
                 <tr>
                   <Td colSpan={14}>
                     No paper trades yet. The strategy needs enough closed bars

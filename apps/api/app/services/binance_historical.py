@@ -20,8 +20,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List
 
 from app.core.config import settings
-from app.services.live_paper import POPULAR_SYMBOLS
 
+POPULAR_SYMBOLS = [
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+    "DOGEUSDT", "ADAUSDT", "PEPEUSDT", "SUIUSDT", "NEARUSDT",
+    "AVAXUSDT", "LINKUSDT", "TRXUSDT", "SHIBUSDT", "DOTUSDT", "LTCUSDT",
+]
 SUPPORTED_SYMBOLS = POPULAR_SYMBOLS
 SUPPORTED_INTERVALS = [
     "1s", "5s", "10s", "15s", "30s",

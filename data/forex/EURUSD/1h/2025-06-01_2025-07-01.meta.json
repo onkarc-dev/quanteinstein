@@ -1,0 +1,15 @@
+{
+  "symbol": "EURUSD",
+  "asset_class": "forex",
+  "timeframe": "1h",
+  "yf_interval_used": "1h",
+  "rows": 525,
+  "start_date": "2025-06-01",
+  "end_date": "2025-07-01",
+  "cached": false,
+  "real_forex_data": true,
+  "real_binance_data": false,
+  "synthetic_data_used": false,
+  "source": "Yahoo Finance Free v8 Chart API",
+  "note": "Authentic Forex OHLCV candlestick data retrieved from Yahoo Finance with zero API keys required and processed with O(1) PRISM scalar registers."
+}
