@@ -40,9 +40,14 @@ class Settings:
 
         try:
             from dotenv import load_dotenv
-            env_path = self.project_root / ".env"
-            if env_path.exists():
-                load_dotenv(env_path)
+            for candidate in [
+                self.project_root / ".env",
+                self.project_root / "apps" / "web" / ".env.local",
+                self.project_root / "apps" / "web" / ".env",
+                self.api_root / ".env",
+            ]:
+                if candidate.exists():
+                    load_dotenv(candidate, override=False)
         except ImportError:
             pass
 
@@ -90,11 +95,12 @@ class Settings:
         self.access_token_ttl_seconds = _as_int("ACCESS_TOKEN_TTL_SECONDS", self.session_ttl_seconds)
 
         # Email / OTP
-        self.smtp_host = os.getenv("SMTP_HOST", "").strip()
-        self.smtp_port = _as_int("SMTP_PORT", 587)
-        self.smtp_user = os.getenv("SMTP_USER", "").strip()
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.smtp_from = os.getenv("SMTP_FROM", self.smtp_user or "no-reply@quantos.local").strip()
+        self.smtp_user = os.getenv("SMTP_USER", os.getenv("GMAIL_USER", "")).strip()
+        self.smtp_password = os.getenv("SMTP_PASSWORD", os.getenv("GMAIL_APP_PASSWORD", ""))
+        default_smtp_host = "smtp.gmail.com" if (self.smtp_user and self.smtp_user.endswith("@gmail.com")) else ""
+        self.smtp_host = os.getenv("SMTP_HOST", default_smtp_host).strip()
+        self.smtp_port = _as_int("SMTP_PORT", 465 if self.smtp_host == "smtp.gmail.com" else 587)
+        self.smtp_from = os.getenv("SMTP_FROM", f'"Quanteinstein" <{self.smtp_user}>' if self.smtp_user else "no-reply@quantos.local").strip()
         self.smtp_tls = _as_bool(os.getenv("SMTP_TLS", "true"), True)
         otp_default = "false" if self.is_prod else "true"
         self.email_otp_dev_return = _as_bool(os.getenv("EMAIL_OTP_DEV_RETURN", otp_default), not self.is_prod)

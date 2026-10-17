@@ -6,6 +6,7 @@ import hashlib
 import logging
 import secrets
 import smtplib
+import time
 from email.message import EmailMessage
 from typing import Any, Dict
 
@@ -30,7 +31,7 @@ _REDIS_UNAVAILABLE = False
 
 
 def _utcnow() -> datetime.datetime:
-    return datetime.datetime.utcnow()
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def _iso_exp(seconds: int) -> str:
@@ -131,7 +132,7 @@ def _check_login_rate_limit(email: str, request: Request) -> None:
         except Exception:
             pass
 
-    ts = datetime.datetime.utcnow().timestamp()
+    ts = time.time()
     key = _login_key(email, request)
     attempts = [t for t in _LOGIN_ATTEMPTS.get(key, []) if ts - t < _LOGIN_WINDOW_SECONDS]
     if len(attempts) >= _LOGIN_LIMIT:
@@ -152,7 +153,7 @@ def _record_failed_login(email: str, request: Request) -> None:
         except Exception:
             pass
 
-    ts = datetime.datetime.utcnow().timestamp()
+    ts = time.time()
     key = _login_key(email, request)
     attempts = [t for t in _LOGIN_ATTEMPTS.get(key, []) if ts - t < _LOGIN_WINDOW_SECONDS]
     attempts.append(ts)
@@ -223,20 +224,56 @@ def _auth_response(conn, user: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _send_otp_email(to_email: str, otp: str, purpose: str) -> bool:
-    if not settings.smtp_host:
+    if not settings.smtp_host or not settings.smtp_password:
         return False
     msg = EmailMessage()
-    msg["Subject"] = f"QuantOS {purpose} OTP"
+    msg["Subject"] = f"Quanteinstein — Your {purpose.capitalize()} Verification Code"
     msg["From"] = settings.smtp_from
     msg["To"] = to_email
-    msg.set_content(f"Your QuantOS {purpose} OTP is: {otp}\n\nThis OTP expires in 10 minutes. If you did not request it, ignore this email.")
+    text_content = (
+        f"Hello,\n\n"
+        f"Your Quanteinstein {purpose} verification code is: {otp}\n\n"
+        f"This code is valid for 10 minutes. Enter it on the terminal to complete your request.\n"
+        f"If you did not request this code, you can safely ignore this email.\n\n"
+        f"Best regards,\nQuanteinstein Quantitative Research Team"
+    )
+    msg.set_content(text_content)
+    html_content = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #e2e8f0; padding: 40px 20px; text-align: center;">
+      <div style="max-width: 520px; margin: 0 auto; background-color: #111827; border: 1px solid #243044; border-radius: 16px; padding: 36px 28px; text-align: left;">
+        <div style="margin-bottom: 24px; display: flex; align-items: center;">
+          <h2 style="color: #6366f1; margin: 0; font-size: 22px; font-weight: 800; display: inline-block;">Quanteinstein</h2>
+          <span style="font-size: 11px; color: #64748b; border: 1px solid #1e293b; padding: 3px 8px; border-radius: 999px; margin-left: 10px;">Institutional Quant Lab</span>
+        </div>
+        <h3 style="color: #ffffff; margin-top: 0; font-size: 18px;">Account Verification</h3>
+        <p style="color: #94a3b8; font-size: 14px; line-height: 1.6;">
+          Your Quanteinstein {purpose} verification code is:
+        </p>
+        <div style="background-color: #0d121f; border: 1px solid #2a3449; border-radius: 12px; padding: 22px; text-align: center; margin: 26px 0;">
+          <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Verification Code (OTP)</div>
+          <div style="color: #38bdf8; font-size: 34px; font-weight: 900; letter-spacing: 0.25em; font-family: monospace;">{otp}</div>
+          <div style="color: #64748b; font-size: 12px; margin-top: 8px;">Valid for 10 minutes · Do not share this code with anyone</div>
+        </div>
+        <p style="color: #94a3b8; font-size: 13px; line-height: 1.5;">
+          Enter this code on the registration page to activate your terminal account.
+        </p>
+      </div>
+    </div>
+    """
+    msg.add_alternative(html_content, subtype="html")
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
-            if settings.smtp_tls:
-                smtp.starttls()
-            if settings.smtp_user:
-                smtp.login(settings.smtp_user, settings.smtp_password)
-            smtp.send_message(msg)
+        if settings.smtp_port == 465:
+            with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
+                if settings.smtp_user:
+                    smtp.login(settings.smtp_user, settings.smtp_password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
+                if settings.smtp_tls:
+                    smtp.starttls()
+                if settings.smtp_user:
+                    smtp.login(settings.smtp_user, settings.smtp_password)
+                smtp.send_message(msg)
         return True
     except Exception as exc:
         print(f"[QuantOS][email] OTP delivery failed for {to_email}: {exc}")
@@ -303,7 +340,7 @@ def request_registration_otp(payload: RegisterRequest, request: Request):
     if not sent and not settings.email_otp_dev_return:
         raise HTTPException(status_code=503, detail="Email OTP delivery is not configured. Set SMTP_HOST/SMTP_USER/SMTP_PASSWORD/SMTP_FROM or enable EMAIL_OTP_DEV_RETURN=true for local development only.")
     resp = {"message": "OTP sent to your email." if sent else "OTP generated in local-dev mode. Configure SMTP for production email delivery.", "email": email, "email_sent": sent}
-    if not sent and settings.email_otp_dev_return:
+    if settings.email_otp_dev_return:
         resp["otp"] = otp
     return resp
 
@@ -431,7 +468,7 @@ def request_password_reset(payload: PasswordResetRequest, request: Request):
     sent = _send_otp_email(email, otp, "password reset")
     _audit("password_reset_otp_requested", email=email, request=request, outcome="sent" if sent else "dev_generated")
     resp = {"message": "If that email exists, a reset OTP has been sent.", "email_sent": sent}
-    if not sent and settings.email_otp_dev_return:
+    if settings.email_otp_dev_return:
         resp["otp"] = otp
     return resp
 

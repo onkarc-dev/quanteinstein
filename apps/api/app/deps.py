@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import time
 from fastapi import Header, HTTPException
 import jwt
 from app.db import get_conn, row_to_dict
@@ -16,7 +17,7 @@ def current_user(authorization: str | None = Header(default=None)):
     if not token:
         raise HTTPException(status_code=401, detail="Empty bearer token")
 
-    now_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     p = "%s" if settings.is_postgres() else "?"
 
     # 1. Native QuantOS JWT (signed by settings.secret_key)
@@ -55,7 +56,7 @@ def current_user(authorization: str | None = Header(default=None)):
             unverified = jwt.decode(token, options={"verify_signature": False})
 
         exp = unverified.get("exp")
-        now_ts = datetime.datetime.utcnow().timestamp()
+        now_ts = time.time()
         if exp and exp < now_ts:
             raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
 

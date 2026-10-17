@@ -173,7 +173,45 @@ export default function LoginForm() {
     setBusy(true);
     notify(otpRequested ? 'Resending verification code…' : 'Generating verification code…', 'info');
 
-    // 1. Supabase Auth signup
+    // 1. Primary: Server-side registration endpoint with Gmail SMTP OTP delivery
+    try {
+      const res = await fetch('/api/auth/register/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, name: name.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setOtpRequested(true);
+        setResendCooldown(45);
+        setOtp('');
+        notify(
+          `A 6-digit verification code has been dispatched to ${email.trim()}. Please check your inbox and enter the code below to complete registration.`,
+          'info'
+        );
+        setBusy(false);
+        return;
+      }
+
+      if (res.status === 409 || (data.error && data.error.includes('already registered'))) {
+        window.alert('This email address is already registered. Please sign in instead.');
+        setMode('login');
+        notify('This email address is already registered. Please sign in.', 'error');
+        setBusy(false);
+        return;
+      }
+
+      if (data.error) {
+        notify('Registration failed: ' + data.error, 'error');
+        setBusy(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn('Server registration request failed, trying client fallback:', apiErr);
+    }
+
+    // 2. Client-side Supabase Auth fallback
     if (supabase) {
       try {
         const redirectUrl =
@@ -203,39 +241,22 @@ export default function LoginForm() {
           return;
         }
 
-        // Direct session return if email confirmation is disabled/auto-confirmed
-        if (data.session && data.user) {
-          saveAuth({
-            token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-            user: {
-              id: data.user.id,
-              email: data.user.email || email.trim(),
-              name: name.trim(),
-              onboarding_completed: true,
-            },
-          });
-          notify('Account verified! Entering terminal…', 'success');
-          window.location.href = '/dashboard';
-          return;
-        }
-
+        // Always require user to verify the code sent to their email
         setOtpRequested(true);
         setResendCooldown(45);
+        setOtp('');
         notify(
-          `Verification code sent to ${email.trim()}. Enter the OTP below or click the link in your email.`,
+          `Verification code sent to ${email.trim()}. Enter the 6-digit OTP below.`,
           'info'
         );
         setBusy(false);
         return;
       } catch (err: any) {
-        notify('Registration error: ' + (err?.message || 'Failed to sign up'), 'error');
-        setBusy(false);
-        return;
+        console.warn('Client Supabase signup error:', err);
       }
     }
 
-    // 2. Legacy API fallback
+    // 3. QuantOS Core Engine API fallback
     try {
       const data = (await api('/auth/register/request-otp', {
         method: 'POST',
@@ -276,7 +297,49 @@ export default function LoginForm() {
     setBusy(true);
     notify('Validating verification code…', 'info');
 
-    // 1. Supabase Auth verify OTP
+    // 1. Primary: Server-side registration verification route
+    try {
+      const res = await fetch('/api/auth/register/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), password }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        if (data.token) {
+          saveAuth({
+            token: data.token,
+            access_token: data.access_token || data.token,
+            refresh_token: data.refresh_token,
+            user: data.user || {
+              id: data.user?.id || 'usr_' + Date.now(),
+              email: email.trim(),
+              name: name.trim() || email.trim().split('@')[0],
+              onboarding_completed: true,
+            },
+          });
+          notify('Account verified successfully! Entering Quanteinstein Terminal…', 'success');
+          window.location.href = '/dashboard';
+          return;
+        }
+        notify(data.message || 'Email verified successfully! You can now sign in.', 'success');
+        setMode('login');
+        setOtpRequested(false);
+        setBusy(false);
+        return;
+      }
+
+      if (data.error) {
+        notify('Verification failed: ' + data.error, 'error');
+        setBusy(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn('Server registration verify failed, trying fallback:', apiErr);
+    }
+
+    // 2. Client-side Supabase Auth verify OTP fallback
     if (supabase) {
       try {
         let { data, error } = await supabase.auth.verifyOtp({
@@ -297,13 +360,7 @@ export default function LoginForm() {
           }
         }
 
-        if (error) {
-          notify('Verification failed: ' + error.message, 'error');
-          setBusy(false);
-          return;
-        }
-
-        if (data?.session && data?.user) {
+        if (!error && data?.session && data?.user) {
           saveAuth({
             token: data.session.access_token,
             refresh_token: data.session.refresh_token,
@@ -322,7 +379,7 @@ export default function LoginForm() {
           return;
         }
 
-        if (password) {
+        if (!error && password) {
           const signInRes = await supabase.auth.signInWithPassword({
             email: email.trim(),
             password,
@@ -346,27 +403,19 @@ export default function LoginForm() {
             return;
           }
         }
-
-        notify('Email verified successfully! You can now sign in.', 'success');
-        setMode('login');
-        setOtpRequested(false);
-        setBusy(false);
-        return;
       } catch (err: any) {
-        notify('OTP validation error: ' + (err?.message || 'Failed to verify code'), 'error');
-        setBusy(false);
-        return;
+        console.warn('Client Supabase verify exception:', err);
       }
     }
 
-    // 2. Legacy API fallback
+    // 3. QuantOS Core Engine API fallback
     try {
       const data = await api('/auth/register/verify', {
         method: 'POST',
         body: JSON.stringify({ email: email.trim(), otp: otp.trim() }),
       });
       saveAuth(data);
-      notify('Registration complete. Redirecting…', 'success');
+      notify('Registration complete. Redirecting to dashboard…', 'success');
       window.location.href = '/dashboard';
     } catch (e) {
       const text = formatApiError(e);

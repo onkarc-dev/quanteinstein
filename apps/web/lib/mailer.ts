@@ -149,3 +149,151 @@ Sent from ${smtpUser || DEFAULT_SENDER_EMAIL}`;
     reason: `Missing Google App Password for ${smtpUser}. Please provide GMAIL_APP_PASSWORD in environment variables.`,
   };
 }
+
+export async function sendRegistrationOtpEmail(
+  toEmail: string,
+  otp: string,
+  name?: string
+): Promise<{ sent: boolean; reason?: string }> {
+  const gmailPass = (
+    process.env.GMAIL_APP_PASSWORD ||
+    process.env.SMTP_PASSWORD ||
+    ''
+  ).trim();
+
+  const smtpUser = (
+    process.env.GMAIL_USER ||
+    process.env.SMTP_USER ||
+    DEFAULT_SENDER_EMAIL
+  ).trim();
+
+  const smtpHost = (
+    process.env.SMTP_HOST ||
+    (smtpUser.endsWith('@gmail.com') ? 'smtp.gmail.com' : '')
+  ).trim();
+
+  const smtpPort = parseInt(process.env.SMTP_PORT || '465', 10);
+  const smtpSecure = smtpPort === 465;
+
+  const smtpFrom =
+    process.env.SMTP_FROM ||
+    `"${DEFAULT_SENDER_NAME}" <${smtpUser || DEFAULT_SENDER_EMAIL}>`;
+
+  const resendApiKey = process.env.RESEND_API_KEY || '';
+
+  const recipientName = name?.trim() || 'Trader';
+  const subject = 'Quanteinstein — Your Account Verification Code';
+  const textContent = `Hello ${recipientName},
+
+Welcome to Quanteinstein!
+
+Here is your 6-digit one-time password (OTP) to verify your email address and activate your account (${toEmail}):
+
+${otp}
+
+This code is valid for 10 minutes. Enter it on the verification screen to complete your registration.
+If you did not attempt to register an account with Quanteinstein, you can safely ignore this email.
+
+Best regards,
+Quanteinstein Quantitative Research Team
+Sent from ${smtpUser || DEFAULT_SENDER_EMAIL}`;
+
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #e2e8f0; padding: 40px 20px; text-align: center;">
+      <div style="max-width: 520px; margin: 0 auto; background-color: #111827; border: 1px solid #243044; border-radius: 16px; padding: 36px 28px; text-align: left;">
+        <div style="margin-bottom: 24px; display: flex; align-items: center;">
+          <img src="https://www.quanteinstein.com/logo.jpg" alt="Quanteinstein" width="40" height="40" style="vertical-align: middle; border-radius: 50%; margin-right: 12px; border: 1px solid #d4af37;" />
+          <div>
+            <h2 style="color: #6366f1; margin: 0; font-size: 22px; font-weight: 800; display: inline-block;">Quanteinstein</h2>
+            <span style="font-size: 11px; color: #64748b; border: 1px solid #1e293b; padding: 3px 8px; border-radius: 999px; margin-left: 10px;">Institutional Quant Lab</span>
+          </div>
+        </div>
+        
+        <h3 style="color: #ffffff; margin-top: 0; font-size: 18px;">Welcome to Quanteinstein</h3>
+        <p style="color: #94a3b8; font-size: 14px; line-height: 1.6;">
+          Hello ${recipientName},<br /><br />
+          Thank you for joining Quanteinstein. Use the following 6-digit verification code to complete your registration and activate your quantitative paper trading terminal (<strong>${toEmail}</strong>):
+        </p>
+        
+        <div style="background-color: #0d121f; border: 1px solid #2a3449; border-radius: 12px; padding: 22px; text-align: center; margin: 26px 0;">
+          <div style="color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">Your Verification Code (OTP)</div>
+          <div style="color: #38bdf8; font-size: 34px; font-weight: 900; letter-spacing: 0.25em; font-family: monospace;">${otp}</div>
+          <div style="color: #64748b; font-size: 12px; margin-top: 8px;">Valid for 10 minutes · Do not share this code with anyone</div>
+        </div>
+        
+        <p style="color: #94a3b8; font-size: 13px; line-height: 1.5;">
+          Enter this code on the registration page to activate your terminal. If you did not create an account, you can safely ignore this email.
+        </p>
+        
+        <hr style="border: 0; border-top: 1px solid #1e293b; margin: 28px 0;" />
+        
+        <div style="color: #64748b; font-size: 11px; text-align: center; line-height: 1.5;">
+          Sent by <strong>${smtpUser || DEFAULT_SENDER_EMAIL}</strong> for Quanteinstein Platform<br />
+          Paper Trading & Simulation Only · Trade Daily, Trade Smartly
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (gmailPass && smtpHost) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        auth: {
+          user: smtpUser,
+          pass: gmailPass,
+        },
+        tls: { rejectUnauthorized: false },
+      });
+
+      await transporter.sendMail({
+        from: smtpFrom,
+        to: toEmail,
+        subject,
+        text: textContent,
+        html: htmlContent,
+      });
+
+      console.info(`[Mailer] Successfully dispatched registration OTP to ${toEmail} from ${smtpUser}`);
+      return { sent: true };
+    } catch (e: any) {
+      console.warn(`[Mailer] Registration OTP SMTP delivery failed from ${smtpUser}:`, e.message);
+      return { sent: false, reason: e.message };
+    }
+  }
+
+  if (resendApiKey) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: smtpFrom,
+          to: [toEmail],
+          subject,
+          text: textContent,
+          html: htmlContent,
+        }),
+      });
+      if (res.ok) {
+        return { sent: true };
+      }
+      const errData = await res.json().catch(() => ({}));
+      console.warn('[Mailer] Registration Resend delivery failed:', errData);
+      return { sent: false, reason: errData?.message || 'Resend error' };
+    } catch (e: any) {
+      console.warn('[Mailer] Registration Resend exception:', e.message);
+      return { sent: false, reason: e.message };
+    }
+  }
+
+  return {
+    sent: false,
+    reason: `Missing Google App Password for ${smtpUser}. Please provide GMAIL_APP_PASSWORD in environment variables.`,
+  };
+}

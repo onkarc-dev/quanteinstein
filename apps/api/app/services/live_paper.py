@@ -119,6 +119,26 @@ def is_valid_market_symbol(symbol: str) -> bool:
     return is_valid_crypto_symbol(sym)
 
 
+def _round_price(val: float, price_ref: float = 100.0) -> float:
+    """Format price with scale-appropriate decimal precision."""
+    p = abs(price_ref)
+    if p < 0.001:
+        return round(val, 8)
+    if p < 5.0:
+        return round(val, 5)
+    if p < 1000.0:
+        return round(val, 4)
+    return round(val, 2)
+
+
+def _min_risk_unit(price: float) -> float:
+    """Dynamic minimal risk unit that respects Forex pips and micro-cap crypto scales."""
+    p = abs(price)
+    if p <= 0:
+        return 1e-4
+    return max(1e-6, p * 0.0002)
+
+
 def _fetch_market_prices(max_age: float = 1.0, extra_symbols: Optional[List[str]] = None) -> Dict[str, float]:
     """Latest price snapshot for Binance cryptocurrency and Yahoo Finance Forex pairs."""
     now_ts = time.time()
@@ -1372,7 +1392,7 @@ class LivePaperManager:
 
                     if open_trade and open_qty > 0:
                         data["bars_in_trade"] += 1
-                        risk_unit = max(0.01, abs(open_entry - open_stop))
+                        risk_unit = max(_min_risk_unit(price), abs(open_entry - open_stop))
 
                         if open_side == "SELL":
                             cur_r = (open_entry - price) / risk_unit
@@ -1387,11 +1407,11 @@ class LivePaperManager:
                         # Breakeven stop adjustment if enabled and cur_r >= 1.0
                         if data["breakeven_stop"] and cur_r >= 1.0:
                             if open_side == "BUY" and open_stop < open_entry:
-                                open_stop = round(open_entry + 0.05 * risk_unit, 4)
+                                open_stop = _round_price(open_entry + 0.05 * risk_unit, price)
                                 data["open_stop"] = open_stop
                                 st["open_stop"] = open_stop
                             elif open_side == "SELL" and open_stop > open_entry:
-                                open_stop = round(open_entry - 0.05 * risk_unit, 4)
+                                open_stop = _round_price(open_entry - 0.05 * risk_unit, price)
                                 data["open_stop"] = open_stop
                                 st["open_stop"] = open_stop
 
@@ -1493,17 +1513,17 @@ class LivePaperManager:
                             if trade_side == "BUY":
                                 swing_low = min(recent_l[-lb:]) if recent_l else price * 0.996
                                 stop_dist = max(price * 0.0025, min(price * 0.012, price - swing_low))
-                                stop = round(price - stop_dist, 4)
-                                risk_unit = max(0.01, price - stop)
-                                t1 = round(price + t1_r * risk_unit, 4)
-                                t2 = round(price + t2_r * risk_unit, 4)
+                                stop = _round_price(price - stop_dist, price)
+                                risk_unit = max(_min_risk_unit(price), price - stop)
+                                t1 = _round_price(price + t1_r * risk_unit, price)
+                                t2 = _round_price(price + t2_r * risk_unit, price)
                             else:
                                 swing_high = max(recent_h[-lb:]) if recent_h else price * 1.004
                                 stop_dist = max(price * 0.0025, min(price * 0.012, swing_high - price))
-                                stop = round(price + stop_dist, 4)
-                                risk_unit = max(0.01, stop - price)
-                                t1 = round(price - t1_r * risk_unit, 4)
-                                t2 = round(price - t2_r * risk_unit, 4)
+                                stop = _round_price(price + stop_dist, price)
+                                risk_unit = max(_min_risk_unit(price), stop - price)
+                                t1 = _round_price(price - t1_r * risk_unit, price)
+                                t2 = _round_price(price - t2_r * risk_unit, price)
 
                             qty = round(risk_dollars / risk_unit, 4)
 
@@ -1657,16 +1677,16 @@ class LivePaperManager:
 
             if norm_side == "BUY":
                 stop_dist = max(price * 0.003, price * 0.005)
-                stop = round(price - stop_dist, 4)
-                risk_unit = max(0.01, price - stop)
-                t1 = round(price + 1.5 * risk_unit, 4)
-                t2 = round(price + 2.5 * risk_unit, 4)
+                stop = _round_price(price - stop_dist, price)
+                risk_unit = max(_min_risk_unit(price), price - stop)
+                t1 = _round_price(price + 1.5 * risk_unit, price)
+                t2 = _round_price(price + 2.5 * risk_unit, price)
             else:
                 stop_dist = max(price * 0.003, price * 0.005)
-                stop = round(price + stop_dist, 4)
-                risk_unit = max(0.01, stop - price)
-                t1 = round(price - 1.5 * risk_unit, 4)
-                t2 = round(price - 2.5 * risk_unit, 4)
+                stop = _round_price(price + stop_dist, price)
+                risk_unit = max(_min_risk_unit(price), stop - price)
+                t1 = _round_price(price - 1.5 * risk_unit, price)
+                t2 = _round_price(price - 2.5 * risk_unit, price)
 
             trade_qty = _float(qty) if (qty and _float(qty) > 0) else round(risk_dollars / risk_unit, 4)
 
@@ -1727,7 +1747,7 @@ class LivePaperManager:
             open_t1 = _float(st.get("target1"))
             open_t2 = _float(st.get("target2"))
 
-            risk_unit = max(0.01, abs(open_entry - open_stop))
+            risk_unit = max(_min_risk_unit(price), abs(open_entry - open_stop))
             if open_side == "SELL":
                 pnl = (open_entry - price) * open_qty
                 cur_r = (open_entry - price) / risk_unit

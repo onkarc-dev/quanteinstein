@@ -520,7 +520,8 @@ export default function StrategyBuilderPage() {
   function removeSymbol(sym: string) {
     const s = sym.toUpperCase().trim();
     const next = cfg.symbols.filter((x) => x !== s);
-    upd("symbols", next.length ? next : ["BTCUSDT"]);
+    const fallbackSym = marketFilter === "FOREX" ? "EURUSD" : "BTCUSDT";
+    upd("symbols", next.length ? next : [fallbackSym]);
   }
 
   function addAllAvailable() {
@@ -555,7 +556,7 @@ export default function StrategyBuilderPage() {
   }
 
   function clearSymbols() {
-    upd("symbols", ["BTCUSDT"]);
+    upd("symbols", [marketFilter === "FOREX" ? "EURUSD" : "BTCUSDT"]);
   }
 
   function addCustomSymbol() {
@@ -637,12 +638,19 @@ export default function StrategyBuilderPage() {
         setPollJob(j);
         setJob(j);
         const currentStatus = (j.status || "processing").toUpperCase();
+        const hasCrypto = cfg.symbols.some((s) => !isForexPair(s));
+        const hasForex = cfg.symbols.some((s) => isForexPair(s));
+        const feedLabel = hasCrypto && hasForex
+          ? "multi-asset market data (Crypto & Forex)"
+          : hasForex
+          ? "authentic Forex data (Yahoo Finance)"
+          : "authentic Binance market data";
         if (total > 1) {
           setRunProgress(
-            `Executing basket (${total} symbols) on authentic Binance data [${currentStatus}]...`,
+            `Executing basket (${total} symbols) on ${feedLabel} [${currentStatus}]...`,
           );
         } else {
-          setRunProgress(`Processing market data and generating backtest report [${currentStatus}]...`);
+          setRunProgress(`Processing ${feedLabel} and generating backtest report [${currentStatus}]...`);
         }
         if (j.status === "completed" || j.status === "failed") {
           if (j.status === "completed") {
