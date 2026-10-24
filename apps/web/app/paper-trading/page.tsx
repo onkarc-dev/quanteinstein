@@ -521,11 +521,59 @@ function Countdown({ until }: { until?: string }) {
 }
 
 export default function PaperTradingPage() {
-  const [status, setStatus] = useState<LiveStatus>({ status: "loading" });
+  const [status, setStatus] = useState<LiveStatus>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const wasActive = localStorage.getItem("quantos_paper_active") === "1";
+        const savedSessionId = localStorage.getItem("quantos_paper_session_id") || undefined;
+        if (wasActive) {
+          return {
+            status: "running",
+            feed_status: "connected",
+            session_id: savedSessionId,
+            engine_ready: true,
+            process_running: true,
+          };
+        }
+      } catch {}
+    }
+    return { status: "loading" };
+  });
   const [strategies, setStrategies] = useState<StrategyRow[]>([]);
-  const [selectedStrategyId, setSelectedStrategyId] = useState("");
-  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["BTCUSDT"]);
-  const [chartSymbol, setChartSymbol] = useState("BTCUSDT");
+  const [selectedStrategyId, setSelectedStrategyId] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return localStorage.getItem("quantos_paper_strategy") || "";
+      } catch {}
+    }
+    return "";
+  });
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("quantos_paper_symbols");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return ["BTCUSDT"];
+  });
+  const [chartSymbol, setChartSymbol] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("quantos_paper_chart_symbol");
+        if (saved) return saved;
+        const savedSyms = localStorage.getItem("quantos_paper_symbols");
+        if (savedSyms) {
+          const parsed = JSON.parse(savedSyms);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
+        }
+      } catch {}
+    }
+    return "BTCUSDT";
+  });
   const [allSymbols, setAllSymbols] = useState<string[]>(POPULAR_SYMBOLS);
   const [customBalance, setCustomBalance] = useState<number>(100000);
   const [balanceInput, setBalanceInput] = useState<string>("100000");
@@ -538,6 +586,30 @@ export default function PaperTradingPage() {
     "Real-time Multi-Asset (Binance Crypto & Global Forex) live paper mode. No real-money execution.",
   );
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && selectedSymbols.length > 0) {
+      try {
+        localStorage.setItem("quantos_paper_symbols", JSON.stringify(selectedSymbols));
+      } catch {}
+    }
+  }, [selectedSymbols]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && selectedStrategyId) {
+      try {
+        localStorage.setItem("quantos_paper_strategy", selectedStrategyId);
+      } catch {}
+    }
+  }, [selectedStrategyId]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && chartSymbol) {
+      try {
+        localStorage.setItem("quantos_paper_chart_symbol", chartSymbol);
+      } catch {}
+    }
+  }, [chartSymbol]);
 
   useEffect(() => {
     let cancelled = false;
@@ -553,10 +625,48 @@ export default function PaperTradingPage() {
     };
   }, []);
 
-  async function refresh() {
+  async function refresh(isInitial = false) {
     try {
-      const s = (await api("/live-paper/status")) as LiveStatus;
-      setStatus(s);
+      const url = isInitial ? "/live-paper/status?fresh=1" : "/live-paper/status";
+      const s = (await api(url)) as LiveStatus;
+      const wasActive = typeof window !== "undefined" && localStorage.getItem("quantos_paper_active") === "1";
+
+      if (s.status === "running") {
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("quantos_paper_active", "1");
+            if (s.session_id) localStorage.setItem("quantos_paper_session_id", String(s.session_id));
+          } catch {}
+        }
+        if (s.selected_symbols && s.selected_symbols.length > 0) {
+          setSelectedSymbols((prev) => {
+            const same = prev.length === s.selected_symbols!.length && prev.every((v, i) => v === s.selected_symbols![i]);
+            return same ? prev : s.selected_symbols!;
+          });
+        }
+        if (s.selected_strategy_id) {
+          setSelectedStrategyId(s.selected_strategy_id);
+        }
+        setStatus(s);
+      } else if (wasActive && (s.status === "idle" || s.status === "stopped")) {
+        try {
+          const recovered = (await api("/live-paper/start", {
+            method: "POST",
+            body: JSON.stringify({
+              strategy_id: selectedStrategyId || undefined,
+              symbols: selectedSymbols,
+              starting_balance: customBalance,
+            }),
+          })) as LiveStatus;
+          setStatus(recovered);
+          return;
+        } catch {
+          setStatus(s);
+        }
+      } else {
+        setStatus(s);
+      }
+
       if (s.wallet?.starting_balance && s.wallet.starting_balance > 0) {
         setCustomBalance((prev) => (prev === 100000 ? s.wallet!.starting_balance : prev));
       }
@@ -713,14 +823,17 @@ export default function PaperTradingPage() {
           `Loaded strategy "${matched.display_name || matched.name || matched.user_strategy_id || matched.id}" with ${targetSymbols.length} active market${targetSymbols.length > 1 ? "s" : ""}. Live engine parameters updated.`
         );
       } else if (!selectedStrategyId && list.length) {
-        setSelectedStrategyId(list[0].id);
-        const targetSymbols = querySymbolsList.length
-          ? querySymbolsList
-          : list[0].symbols?.length
-          ? list[0].symbols
-          : ["BTCUSDT"];
-        setSelectedSymbols(targetSymbols);
-        if (targetSymbols[0]) setChartSymbol(targetSymbols[0]);
+        const isRunning = typeof window !== "undefined" && localStorage.getItem("quantos_paper_active") === "1";
+        if (!isRunning) {
+          setSelectedStrategyId(list[0].id);
+          const targetSymbols = querySymbolsList.length
+            ? querySymbolsList
+            : list[0].symbols?.length
+            ? list[0].symbols
+            : ["BTCUSDT"];
+          setSelectedSymbols(targetSymbols);
+          if (targetSymbols[0]) setChartSymbol(targetSymbols[0]);
+        }
       } else if (querySymbolsList.length > 0) {
         setSelectedSymbols(querySymbolsList);
         if (querySymbolsList[0]) setChartSymbol(querySymbolsList[0]);
@@ -880,12 +993,12 @@ export default function PaperTradingPage() {
 
   useEffect(() => {
     loadStrategies();
-    refresh();
-    const id = setInterval(refresh, 1500);
+    refresh(true);
+    const id = setInterval(() => refresh(false), 1500);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        refresh();
+        refresh(true);
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);

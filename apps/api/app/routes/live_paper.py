@@ -13,8 +13,8 @@ _live_paper_perf.install_live_paper_wallet_throttle(manager)
 router = APIRouter()
 
 _STATUS_CACHE: dict[str, tuple[float, dict]] = {}
-_RUNNING_STATUS_TTL_SECONDS = 1.0
-_IDLE_STATUS_TTL_SECONDS = 5.0
+_RUNNING_STATUS_TTL_SECONDS = 0.5
+_IDLE_STATUS_TTL_SECONDS = 0.5
 
 
 def _cached_status(user_id: str) -> dict:
@@ -108,8 +108,11 @@ def close_live_position(payload: dict = Body(default={}), user=Depends(current_u
 
 
 @router.get('/status')
-def status_live_paper(user=Depends(current_user)):
-    return _cached_status(str(user['id']))
+def status_live_paper(fresh: bool = False, user=Depends(current_user)):
+    user_id = str(user['id'])
+    if fresh:
+        _invalidate_status_cache(user_id)
+    return _cached_status(user_id)
 
 
 @router.get('/trades')

@@ -1305,10 +1305,34 @@ class LivePaperManager:
                     self._capture_event_from_line(session, line)
         with self._lock:
             if all(p.poll() is not None for p in session.processes.values()) and session.status == "running":
-                session.status = "stopped"
-                session.feed_status = "stopped"
-                session.stopped_at = now()
-                session.report_files = _copy_final_reports(session.user_id, session.session_id)
+                if session.stop_event.is_set():
+                    session.status = "stopped"
+                    session.feed_status = "stopped"
+                    session.stopped_at = now()
+                    session.report_files = _copy_final_reports(session.user_id, session.session_id)
+                    _mark_live_paper_session_stopped(session.user_id)
+                else:
+                    # Processes finished or terminated unexpectedly without user stop request.
+                    # Failover to resilient managed live coordinator so session stays active.
+                    logger.warning(
+                        "Live paper processes terminated unexpectedly for user %s; failing over to managed coordinator",
+                        session.user_id,
+                    )
+                    session.selected_binary_path = "managed_python_live_engine"
+                    session.feed_status = "connected"
+                    target_symbols = list((session.live_config.get("config_paths") or {}).keys()) or (session.live_config or {}).get("symbols") or [DEFAULT_SYMBOL]
+                    config_map = {}
+                    for s in target_symbols:
+                        cfg_path = (session.live_config.get("config_paths") or {}).get(s, session.config_path)
+                        config_map[s] = _read_json_file(Path(cfg_path)) if cfg_path else {}
+                    t = threading.Thread(
+                        target=self._managed_live_engine_worker,
+                        args=(session, target_symbols, config_map),
+                        daemon=True,
+                        name=f"live_coordinator_{session.user_id}",
+                    )
+                    session.threads.append(t)
+                    t.start()
 
     def _capture_event_from_line(self, session: LivePaperSession, line: str) -> None:
         if not (line.startswith("PAPER_BUY_FILL") or line.startswith("PAPER_SELL_FILL") or line.startswith("PRISM_OUTPUT signal=")):
@@ -1345,81 +1369,85 @@ class LivePaperManager:
     def _managed_live_engine_worker(
         self, session: LivePaperSession, target_symbols: List[str], config_map: Dict[str, Any]
     ) -> None:
-        symbol_data: Dict[str, Dict[str, Any]] = {}
-        for sym in target_symbols:
-            cfg = config_map.get(sym) or {}
-            strat = cfg.get("strategy") if isinstance(cfg.get("strategy"), dict) else cfg
-            risk_cfg = strat.get("risk") if isinstance(strat.get("risk"), dict) else {}
-            targets_cfg = strat.get("targets") if isinstance(strat.get("targets"), dict) else {}
-            trade_mgmt = strat.get("trade_management") if isinstance(strat.get("trade_management"), dict) else {}
+        try:
+            symbol_data: Dict[str, Dict[str, Any]] = {}
+            for sym in target_symbols:
+                cfg = config_map.get(sym) or {}
+                strat = cfg.get("strategy") if isinstance(cfg.get("strategy"), dict) else cfg
+                risk_cfg = strat.get("risk") if isinstance(strat.get("risk"), dict) else {}
+                targets_cfg = strat.get("targets") if isinstance(strat.get("targets"), dict) else {}
+                trade_mgmt = strat.get("trade_management") if isinstance(strat.get("trade_management"), dict) else {}
 
-            direction = str(strat.get("direction", "both")).lower()
-            allow_long = direction in {"both", "long_only", "long", "bullish"}
-            allow_short = direction in {"both", "short_only", "short", "bearish", "hedge"}
-            lookback = max(5, min(int(strat.get("breakout_lookback", 20)), 100))
-            retest_tol = _float(strat.get("retest_tolerance_pct"), 0.001)
-            min_score = _float(strat.get("min_setup_score"), 6.5)
-            risk_pct = _float(risk_cfg.get("risk_per_trade_pct"), 1.0)
-            t1_r = _float(targets_cfg.get("target1_R"), 1.5)
-            t2_r = _float(targets_cfg.get("target2_R"), 2.5)
-            ttl_bars = max(10, min(int(strat.get("ttl_bars", 40)), 200))
-            breakeven_stop = bool(trade_mgmt.get("breakeven_stop", True))
-            cooldown_bars = max(2, min(int(strat.get("signal_cooldown_bars", 3)), 20))
+                direction = str(strat.get("direction", "both")).lower()
+                allow_long = direction in {"both", "long_only", "long", "bullish"}
+                allow_short = direction in {"both", "short_only", "short", "bearish", "hedge"}
+                lookback = max(5, min(int(strat.get("breakout_lookback", 20)), 100))
+                retest_tol = _float(strat.get("retest_tolerance_pct"), 0.001)
+                min_score = _float(strat.get("min_setup_score"), 6.5)
+                risk_pct = _float(risk_cfg.get("risk_per_trade_pct"), 1.0)
+                t1_r = _float(targets_cfg.get("target1_R"), 1.5)
+                t2_r = _float(targets_cfg.get("target2_R"), 2.5)
+                ttl_bars = max(10, min(int(strat.get("ttl_bars", 40)), 200))
+                breakeven_stop = bool(trade_mgmt.get("breakeven_stop", True))
+                cooldown_bars = max(2, min(int(strat.get("signal_cooldown_bars", 3)), 20))
 
-            init_p = _float(session.symbol_states.get(sym, {}).get("last_price", 0.0))
-            recent_p: List[float] = []
-            recent_h: List[float] = []
-            recent_l: List[float] = []
+                init_p = _float(session.symbol_states.get(sym, {}).get("last_price", 0.0))
+                recent_p: List[float] = []
+                recent_h: List[float] = []
+                recent_l: List[float] = []
 
-            # Populate from pre-seeded candles if present
-            c_list = session.candles_by_symbol.get(sym, [])
-            for c in c_list:
-                recent_p.append(_float(c.get("close")))
-                recent_h.append(_float(c.get("high")))
-                recent_l.append(_float(c.get("low")))
+                # Populate from pre-seeded candles if present
+                c_list = session.candles_by_symbol.get(sym, [])
+                for c in c_list:
+                    recent_p.append(_float(c.get("close")))
+                    recent_h.append(_float(c.get("high")))
+                    recent_l.append(_float(c.get("low")))
 
-            # Fallback if no candles were fetched
-            if not recent_p and init_p > 0:
-                for i in range(20):
-                    pv = init_p * (1.0 + 0.0001 * (i - 10))
-                    recent_p.append(pv)
-                    recent_h.append(pv * 1.0003)
-                    recent_l.append(pv * 0.9997)
+                # Fallback if no candles were fetched
+                if not recent_p and init_p > 0:
+                    for i in range(20):
+                        pv = init_p * (1.0 + 0.0001 * (i - 10))
+                        recent_p.append(pv)
+                        recent_h.append(pv * 1.0003)
+                        recent_l.append(pv * 0.9997)
 
-            symbol_data[sym] = {
-                "direction": direction,
-                "allow_long": allow_long,
-                "allow_short": allow_short,
-                "lookback": lookback,
-                "retest_tol": retest_tol,
-                "min_score": min_score,
-                "risk_pct": risk_pct,
-                "t1_r": t1_r,
-                "t2_r": t2_r,
-                "ttl_bars": ttl_bars,
-                "breakeven_stop": breakeven_stop,
-                "cooldown_bars": cooldown_bars,
-                "bars_since_trade": 10,
-                "bars_in_trade": 0,
-                "open_trade": False,
-                "open_side": "BUY",
-                "open_entry": 0.0,
-                "open_stop": 0.0,
-                "open_t1": 0.0,
-                "open_t2": 0.0,
-                "open_qty": 0.0,
-                "processed": session.symbol_states.get(sym, {}).get("processed", 0),
-                "recent_prices": recent_p,
-                "recent_highs": recent_h,
-                "recent_lows": recent_l,
-                "recent_latencies": [],
-            }
+                symbol_data[sym] = {
+                    "direction": direction,
+                    "allow_long": allow_long,
+                    "allow_short": allow_short,
+                    "lookback": lookback,
+                    "retest_tol": retest_tol,
+                    "min_score": min_score,
+                    "risk_pct": risk_pct,
+                    "t1_r": t1_r,
+                    "t2_r": t2_r,
+                    "ttl_bars": ttl_bars,
+                    "breakeven_stop": breakeven_stop,
+                    "cooldown_bars": cooldown_bars,
+                    "bars_since_trade": 10,
+                    "bars_in_trade": 0,
+                    "open_trade": False,
+                    "open_side": "BUY",
+                    "open_entry": 0.0,
+                    "open_stop": 0.0,
+                    "open_t1": 0.0,
+                    "open_t2": 0.0,
+                    "open_qty": 0.0,
+                    "processed": session.symbol_states.get(sym, {}).get("processed", 0),
+                    "recent_prices": recent_p,
+                    "recent_highs": recent_h,
+                    "recent_lows": recent_l,
+                    "recent_latencies": [],
+                }
 
-        while not session.stop_event.is_set() and session.status == "running":
-            try:
-                self._managed_live_engine_tick(session, target_symbols, symbol_data)
-            except Exception:
-                time.sleep(1.0)
+            while not session.stop_event.is_set() and session.status == "running":
+                try:
+                    self._managed_live_engine_tick(session, target_symbols, symbol_data)
+                except Exception as tick_err:
+                    logger.warning("Error in _managed_live_engine_tick: %s", tick_err)
+                    time.sleep(1.0)
+        except Exception as worker_err:
+            logger.exception("Fatal error in _managed_live_engine_worker: %s", worker_err)
 
     def _managed_live_engine_tick(
         self, session: LivePaperSession, target_symbols: List[str], symbol_data: Dict[str, Dict[str, Any]]
@@ -1891,9 +1919,11 @@ class LivePaperManager:
     def status(self, user_id: str) -> Dict[str, Any]:
         with self._lock:
             session = self._sessions.get(user_id)
-            if not session:
-                persisted = _get_persisted_live_paper_session(user_id)
-                if persisted and persisted.get("status") == "running":
+            persisted = _get_persisted_live_paper_session(user_id)
+            is_persisted_running = bool(persisted and persisted.get("status") == "running")
+
+            if (not session) or (session.status in {"stopped", "idle"} and is_persisted_running and not session.stop_event.is_set()):
+                if persisted and is_persisted_running:
                     try:
                         syms = json.loads(persisted.get("symbols_json") or "[]")
                     except Exception:
@@ -1904,28 +1934,29 @@ class LivePaperManager:
                         symbols=syms,
                         starting_balance=_float(persisted.get("starting_balance")) or None,
                     )
-                diag = self._binary_diagnostics()
-                sb = _get_starting_balance(user_id)
-                return {
-                    "status": "idle",
-                    "engine_ready": True,
-                    "binary_diagnostics": diag,
-                    "selected_binary_path": diag.get("selected_binary_path"),
-                    "feed_status": "ready",
-                    "process_running": False,
-                    "market_table": _market_table(None),
-                    "markets": _market_table(None),
-                    "wallet": {
-                        "user_id": user_id,
-                        "starting_balance": sb,
-                        "current_balance": sb,
-                        "account_equity": sb,
-                        "cash_balance": sb,
-                        "realized_pnl": 0.0,
-                        "unrealized_pnl": 0.0,
-                        "locked_until": "",
-                    },
-                }
+                if not session:
+                    diag = self._binary_diagnostics()
+                    sb = _get_starting_balance(user_id)
+                    return {
+                        "status": "idle",
+                        "engine_ready": True,
+                        "binary_diagnostics": diag,
+                        "selected_binary_path": diag.get("selected_binary_path"),
+                        "feed_status": "ready",
+                        "process_running": False,
+                        "market_table": _market_table(None),
+                        "markets": _market_table(None),
+                        "wallet": {
+                            "user_id": user_id,
+                            "starting_balance": sb,
+                            "current_balance": sb,
+                            "account_equity": sb,
+                            "cash_balance": sb,
+                            "realized_pnl": 0.0,
+                            "unrealized_pnl": 0.0,
+                            "locked_until": "",
+                        },
+                    }
             wallet = _update_wallet(user_id, session.session_id, session.realized_pnl, session.unrealized_pnl, starting_balance=session.starting_balance)
             metrics = session.metrics or _aggregate_session_metrics(session)
             process_running = (
@@ -1934,11 +1965,11 @@ class LivePaperManager:
             )
             # If session is marked running but background threads/processes died, auto-revive worker
             if session.status == "running" and not process_running and not any(p.poll() is None for p in session.processes.values()):
-                target_symbols = list((session.live_config.get("config_paths") or {}).keys()) or [DEFAULT_SYMBOL]
+                target_symbols = list((session.live_config.get("config_paths") or {}).keys()) or (session.live_config or {}).get("symbols") or [DEFAULT_SYMBOL]
                 config_map = {}
                 for sym in target_symbols:
                     cfg_path = (session.live_config.get("config_paths") or {}).get(sym, session.config_path)
-                    config_map[sym] = _read_json_file(Path(cfg_path))
+                    config_map[sym] = _read_json_file(Path(cfg_path)) if cfg_path else {}
                 t = threading.Thread(
                     target=self._managed_live_engine_worker,
                     args=(session, target_symbols, config_map),
