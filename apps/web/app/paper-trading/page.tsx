@@ -793,6 +793,12 @@ export default function PaperTradingPage() {
         }),
       })) as LiveStatus;
       setStatus(r);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("quantos_paper_active", "1");
+          if (r.session_id) localStorage.setItem("quantos_paper_session_id", String(r.session_id));
+        } catch {}
+      }
       const cfgName =
         r.selected_strategy_name ||
         r.live_config?.name ||
@@ -816,6 +822,12 @@ export default function PaperTradingPage() {
         method: "POST",
       })) as LiveStatus;
       setStatus(r);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.removeItem("quantos_paper_active");
+          localStorage.removeItem("quantos_paper_session_id");
+        } catch {}
+      }
       setMessage(
         "Session stopped. Final live paper report was generated successfully.",
       );
@@ -870,7 +882,18 @@ export default function PaperTradingPage() {
     loadStrategies();
     refresh();
     const id = setInterval(refresh, 1500);
-    return () => clearInterval(id);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1237,20 +1260,193 @@ export default function PaperTradingPage() {
           })}
         </div>
 
+        {/* Active Position HUD directly above the chart */}
+        {(() => {
+          const activePos = openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol);
+          if (!activePos) return null;
+          const isLong = String(activePos.side || "BUY").toUpperCase() === "BUY";
+          return (
+            <div
+              style={{
+                padding: "10px 16px",
+                background: isLong ? "rgba(34, 197, 94, 0.08)" : "rgba(239, 68, 68, 0.08)",
+                border: `1px solid ${isLong ? "rgba(34, 197, 94, 0.4)" : "rgba(239, 68, 68, 0.4)"}`,
+                borderRadius: 8,
+                marginBottom: 12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "3px 10px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 800,
+                    background: isLong ? "rgba(34, 197, 94, 0.2)" : "rgba(239, 68, 68, 0.2)",
+                    color: isLong ? "#4ade80" : "#f87171",
+                    border: `1px solid ${isLong ? "rgba(34, 197, 94, 0.5)" : "rgba(239, 68, 68, 0.5)"}`,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: isLong ? "#22c55e" : "#ef4444",
+                      boxShadow: `0 0 6px ${isLong ? "#22c55e" : "#ef4444"}`,
+                    }}
+                  />
+                  ACTIVE {isLong ? "BUY (LONG)" : "SELL (SHORT)"}
+                </span>
+                <span style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 700 }}>
+                  {formatDisplaySymbol(selectedChartSymbol)}
+                </span>
+                <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                  Entry: <strong style={{ color: isLong ? "#4ade80" : "#f87171" }}>{formatPriceBySymbol(activePos.entry_price, selectedChartSymbol)}</strong>
+                </span>
+                <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                  Qty: <strong style={{ color: "#f8fafc" }}>{activePos.qty}</strong>
+                </span>
+                {Number(activePos.stop) > 0 && (
+                  <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                    Stop: <strong style={{ color: "#ef4444" }}>{formatPriceBySymbol(activePos.stop, selectedChartSymbol)}</strong>
+                  </span>
+                )}
+                {Number(activePos.target1) > 0 && (
+                  <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                    Target 1: <strong style={{ color: "#22c55e" }}>{formatPriceBySymbol(activePos.target1, selectedChartSymbol)}</strong>
+                  </span>
+                )}
+                {Number(activePos.target2) > 0 && (
+                  <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                    Target 2: <strong style={{ color: "#38bdf8" }}>{formatPriceBySymbol(activePos.target2, selectedChartSymbol)}</strong>
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase" }}>Floating PnL</div>
+                  <div
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 800,
+                      color: Number(activePos.unrealized_pnl) >= 0 ? "#4ade80" : "#f87171",
+                    }}
+                  >
+                    {Number(activePos.unrealized_pnl) >= 0 ? "+" : ""}${money(activePos.unrealized_pnl)}
+                    {activePos.current_R != null && (
+                      <span style={{ fontSize: 12, marginLeft: 6, opacity: 0.9 }}>
+                        ({Number(activePos.current_R) >= 0 ? "+" : ""}{Number(activePos.current_R).toFixed(2)}R)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleClosePosition(selectedChartSymbol)}
+                  disabled={busy}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 6,
+                    background: "rgba(239, 68, 68, 0.2)",
+                    color: "#f87171",
+                    border: "1px solid rgba(239, 68, 68, 0.6)",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: busy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  ✕ Close Position
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         {chartCandles.length ? (
           <TradingChart
             candles={chartCandles}
-            markers={tradeRows.filter((t: any) => !t.symbol || String(t.symbol).toUpperCase() === selectedChartSymbol).slice(-8).map((t:any) => ({
-              time: chartCandles[chartCandles.length - 1]?.time,
-              position: t.result === 'LOSS' ? 'aboveBar' : 'belowBar',
-              text: t.status === "OPEN" ? "OPEN" : t.result || 'TRADE',
-              price: Number(t.exit_price || t.entry_price || primaryPrice || 0),
-            }))}
-            lines={openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol) ? [
-              { title: 'Stop', price: Number(openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol)?.stop || 0), color: '#ef4444', style: 'dashed' as const },
-              { title: 'Target 1', price: Number(openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol)?.target1 || 0), color: '#22c55e' },
-              { title: 'Target 2', price: Number(openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol)?.target2 || 0), color: '#38bdf8' },
-            ].filter((x:any)=>Number(x.price)>0) : []}
+            symbol={selectedChartSymbol}
+            markers={(() => {
+              const activePos = openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol);
+              const mList: any[] = [];
+              if (activePos) {
+                const isLong = String(activePos.side || "BUY").toUpperCase() === "BUY";
+                mList.push({
+                  time: chartCandles[chartCandles.length - 1]?.time,
+                  position: isLong ? 'belowBar' : 'aboveBar',
+                  shape: isLong ? 'arrowUp' : 'arrowDown',
+                  color: isLong ? '#22c55e' : '#ef4444',
+                  text: `${isLong ? "▲ BUY (LONG)" : "▼ SELL (SHORT)"} @ ${formatPriceBySymbol(activePos.entry_price, selectedChartSymbol)}`,
+                  price: Number(activePos.entry_price || 0),
+                });
+              }
+              const recentTrades = tradeRows
+                .filter((t: any) => t.status === "CLOSED" && (!t.symbol || String(t.symbol).toUpperCase() === selectedChartSymbol))
+                .slice(0, 4);
+              for (const t of recentTrades) {
+                const isWin = t.result === "WIN";
+                const sideText = String(t.side || "BUY").toUpperCase();
+                mList.push({
+                  time: t.exit_time || chartCandles[chartCandles.length - 1]?.time,
+                  position: isWin ? 'belowBar' : 'aboveBar',
+                  shape: isWin ? 'arrowUp' : 'arrowDown',
+                  color: isWin ? '#22c55e' : '#ef4444',
+                  text: `${sideText} ${t.result || 'CLOSED'} (${Number(t.r) >= 0 ? '+' : ''}${Number(t.r).toFixed(2)}R)`,
+                  price: Number(t.exit_price || t.entry_price || 0),
+                });
+              }
+              return mList;
+            })()}
+            lines={(() => {
+              const activePos = openPositions.find((p: any) => String(p.symbol || "").toUpperCase() === selectedChartSymbol);
+              if (!activePos) return [];
+              const isLong = String(activePos.side || "BUY").toUpperCase() === "BUY";
+              const l: any[] = [
+                {
+                  title: `${isLong ? 'BUY (LONG)' : 'SELL (SHORT)'} Entry`,
+                  price: Number(activePos.entry_price || 0),
+                  color: isLong ? '#22c55e' : '#ef4444',
+                  style: 'solid' as const,
+                  lineWidth: 2 as const,
+                },
+              ];
+              if (Number(activePos.stop) > 0) {
+                l.push({
+                  title: 'Stop Loss',
+                  price: Number(activePos.stop),
+                  color: '#ef4444',
+                  style: 'dashed' as const,
+                  lineWidth: 1 as const,
+                });
+              }
+              if (Number(activePos.target1) > 0) {
+                l.push({
+                  title: 'Target 1 (1.5R)',
+                  price: Number(activePos.target1),
+                  color: '#22c55e',
+                  style: 'dashed' as const,
+                  lineWidth: 1 as const,
+                });
+              }
+              if (Number(activePos.target2) > 0) {
+                l.push({
+                  title: 'Target 2 (2.5R)',
+                  price: Number(activePos.target2),
+                  color: '#38bdf8',
+                  style: 'dashed' as const,
+                  lineWidth: 1 as const,
+                });
+              }
+              return l;
+            })()}
           />
         ) : (
           <div style={{ height: 320, border: "1px dashed #334155", borderRadius: 8, display: "grid", placeItems: "center", color: "#94a3b8", background: "#0f172a" }}>

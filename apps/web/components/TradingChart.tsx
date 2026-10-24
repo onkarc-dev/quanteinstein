@@ -19,8 +19,8 @@ import {
 import { visibleChartCandle } from '../lib/liveChartCandles';
 
 export type TradingCandle = { time: string | number; open: number; high: number; low: number; close: number; volume?: number };
-export type TradingMarker = { time: string | number; position?: 'aboveBar' | 'belowBar'; color?: string; shape?: 'arrowUp' | 'arrowDown' | 'circle'; text?: string; price?: number };
-export type TradingLine = { title: string; price: number; color?: string; style?: 'solid' | 'dashed' };
+export type TradingMarker = { time: string | number; position?: 'aboveBar' | 'belowBar' | 'atPriceMiddle'; color?: string; shape?: 'arrowUp' | 'arrowDown' | 'circle'; text?: string; price?: number };
+export type TradingLine = { title: string; price: number; color?: string; style?: 'solid' | 'dashed'; lineWidth?: 1 | 2; axisLabelVisible?: boolean };
 
 function fallbackCandles(): TradingCandle[] {
   return [
@@ -68,17 +68,21 @@ export default function TradingChart({
   markers = [],
   lines = [],
   height = 320,
+  symbol,
 }: {
   candles: TradingCandle[];
   markers?: TradingMarker[];
   lines?: TradingLine[];
   height?: number;
+  symbol?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick', Time> | null>(null);
   const markerApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  const lastSymbolRef = useRef<string | undefined>(undefined);
+  const hasFittedRef = useRef<boolean>(false);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -112,6 +116,7 @@ export default function TradingChart({
     });
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    hasFittedRef.current = false;
 
     const resizeObserver = new ResizeObserver(entries => {
       const width = Math.floor(entries[0]?.contentRect.width || container.clientWidth);
@@ -126,6 +131,7 @@ export default function TradingChart({
       candleSeriesRef.current = null;
       markerApiRef.current = null;
       priceLinesRef.current = [];
+      hasFittedRef.current = false;
     };
   }, [height]);
 
@@ -133,6 +139,11 @@ export default function TradingChart({
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
     if (!chart || !candleSeries) return;
+
+    if (symbol !== lastSymbolRef.current) {
+      lastSymbolRef.current = symbol;
+      hasFittedRef.current = false;
+    }
 
     const sourceCandles = candles.length ? candles : fallbackCandles();
     const {data, timeByInput} = buildChartData(sourceCandles);
@@ -145,11 +156,18 @@ export default function TradingChart({
         color: marker.color || (marker.position === 'aboveBar' ? '#ef4444' : '#22c55e'),
         shape: marker.shape || (marker.position === 'aboveBar' ? 'arrowDown' : 'arrowUp'),
         text: marker.text || '',
-      } as const;
-      if (marker.price) {
-        return {...base, position: 'atPriceMiddle', price: marker.price};
+      };
+      if (marker.price != null && Number.isFinite(marker.price)) {
+        return {
+          ...base,
+          position: 'atPriceMiddle' as const,
+          price: marker.price,
+        };
       }
-      return {...base, position: marker.position || 'belowBar'};
+      return {
+        ...base,
+        position: (marker.position === 'aboveBar' ? 'aboveBar' : 'belowBar') as 'aboveBar' | 'belowBar',
+      };
     });
     if (!markerApiRef.current) {
       markerApiRef.current = createSeriesMarkers(candleSeries, chartMarkers);
@@ -163,15 +181,19 @@ export default function TradingChart({
       const priceLine = candleSeries.createPriceLine({
         price: line.price,
         color: line.color || '#38bdf8',
-        lineWidth: 1,
+        lineWidth: (line.lineWidth ?? 1) as 1 | 2,
         lineStyle: line.style === 'dashed' ? LineStyle.Dashed : LineStyle.Solid,
-        axisLabelVisible: true,
+        axisLabelVisible: line.axisLabelVisible !== false,
         title: line.title,
       });
       priceLinesRef.current.push(priceLine);
     });
-    chart.timeScale().fitContent();
-  }, [candles, markers, lines]);
+
+    if (!hasFittedRef.current && data.length > 0) {
+      chart.timeScale().fitContent();
+      hasFittedRef.current = true;
+    }
+  }, [candles, markers, lines, symbol]);
 
   return (
     <div

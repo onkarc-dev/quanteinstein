@@ -257,6 +257,18 @@ CREATE TABLE IF NOT EXISTS live_wallets (
     locked_until TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS live_paper_sessions (
+    user_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    session_number INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'running',
+    strategy_id TEXT,
+    symbols_json TEXT NOT NULL DEFAULT '["BTCUSDT"]',
+    starting_balance REAL NOT NULL DEFAULT 100000,
+    started_at TEXT NOT NULL,
+    stopped_at TEXT,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS live_trades (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
