@@ -12,8 +12,7 @@ export const NAV_ITEMS = [
   { href: '/paper-trading', label: 'Paper Trading', icon: '⚡' },
   { href: '/charting', label: 'Charting', icon: '📉' },
   { href: '/beta-status', label: 'Alpha Feed', icon: '📡' },
-  { href: '/trade-journal', label: 'Journal', icon: '📓' },
-  { href: '/analytics', label: 'Analytics', icon: '🔬' },
+  { href: '/trade-journal', label: 'Journal & Analytics', icon: '📓' },
 ];
 
 export default function NavLinks() {
@@ -32,7 +31,10 @@ export default function NavLinks() {
       }}
     >
       {NAV_ITEMS.map(({ href, label }) => {
-        const isActive = pathname === href || (href !== '/' && pathname.startsWith(href));
+        const isActive =
+          pathname === href ||
+          (href !== '/' && pathname.startsWith(href)) ||
+          (href === '/trade-journal' && pathname.startsWith('/analytics'));
 
         return (
           <Link

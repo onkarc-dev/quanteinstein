@@ -8,8 +8,8 @@ const FEATURES = [
   { icon: '⚡', title: 'C++ Backtest Engine', desc: 'Sub-microsecond C++ engine replays historical data with full audit trail and event log.', href: '/backtests' },
   { icon: '🧠', title: 'Quant Coach', desc: 'Expectancy, Monte Carlo risk, walk-forward stability, stress testing, and objective pass/fail.', href: '/quant-coach' },
   { icon: '📊', title: 'Paper Trading', desc: 'Deterministic CSV replay simulates live paper trading. Zero real money, full analytics.', href: '/paper-trading' },
-  { icon: '📓', title: 'Trade Journal', desc: 'Log every override, emotional state, and rule break. Behavioral intelligence analytics.', href: '/trade-journal' },
-  { icon: '📈', title: 'Analytics', desc: 'R-multiple distribution, equity curve, drawdown, and benchmark comparison.', href: '/analytics' },
+  { icon: '📡', title: 'Alpha Feed', desc: 'Real-time breaking market signals, trader vlogs, and community strategy ideas.', href: '/beta-status' },
+  { icon: '📓', title: 'Journal & Analytics', desc: 'Unified execution ledger, equity curves, drawdown analysis, R-multiple distributions, and behavioral tracking.', href: '/trade-journal' },
 ];
 
 const DEMO_STEPS = [
