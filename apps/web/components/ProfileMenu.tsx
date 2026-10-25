@@ -20,6 +20,11 @@ export default function ProfileMenu() {
   }
 
   const displayName = user.name?.trim() || user.email;
+  const emailLower = (user.email || '').toLowerCase();
+  const isOwnerAdmin =
+    emailLower === 'onkarchouguletrader@gmail.com' ||
+    emailLower.includes('admin') ||
+    (typeof window !== 'undefined' && Boolean(sessionStorage.getItem('quanteinstein_admin_auth')));
 
   return (
     <div style={{ position: 'relative', marginLeft: 10 }}>
@@ -53,26 +58,28 @@ export default function ProfileMenu() {
         }}>
           <div style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>Name</div>
           <div style={{ color: '#ffffff', fontWeight: 800, marginTop: 4, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
-          <Link
-            href="/admin"
-            onClick={() => setOpen(false)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              textDecoration: 'none',
-              color: '#f8fafc',
-              background: 'rgba(99, 102, 241, 0.15)',
-              border: '1px solid rgba(99, 102, 241, 0.35)',
-              borderRadius: 8,
-              padding: '8px 10px',
-              fontSize: 12,
-              fontWeight: 700,
-              marginBottom: 8,
-            }}
-          >
-            <span>🛡️</span> Admin Dashboard
-          </Link>
+          {isOwnerAdmin && (
+            <Link
+              href="/admin"
+              onClick={() => setOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                textDecoration: 'none',
+                color: '#f8fafc',
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 8,
+                padding: '8px 10px',
+                fontSize: 12,
+                fontWeight: 700,
+                marginBottom: 8,
+              }}
+            >
+              <span>🛡️</span> Admin Dashboard
+            </Link>
+          )}
           <button
             onClick={logout}
             style={{
