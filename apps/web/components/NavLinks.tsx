@@ -11,7 +11,7 @@ export const NAV_ITEMS = [
   { href: '/quant-coach', label: 'Quant Coach', icon: '🧠' },
   { href: '/paper-trading', label: 'Paper Trading', icon: '⚡' },
   { href: '/charting', label: 'Charting', icon: '📉' },
-  { href: '/beta-status', label: 'Beta Status', icon: '🛡️' },
+  { href: '/beta-status', label: 'Alpha Feed', icon: '📡' },
   { href: '/trade-journal', label: 'Journal', icon: '📓' },
   { href: '/analytics', label: 'Analytics', icon: '🔬' },
 ];

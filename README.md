@@ -5,7 +5,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.2.9-black.svg)](https://nextjs.org/)
 [![C++20](https://img.shields.io/badge/C++-20-00599C.svg)](https://isocpp.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LEGAL_DISCLAIMER.md)
-[![Tests Passing](https://img.shields.io/badge/Tests-141%2F141%20Passed-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-144%2F144%20Passed-brightgreen.svg)]()
 [![Throughput](https://img.shields.io/badge/Throughput-6.68M%20msgs%2Fsec-orange.svg)]()
 [![Median Latency](https://img.shields.io/badge/Latency%20(p50)-7.6%20%C2%B5s-purple.svg)]()
 
@@ -27,6 +27,7 @@ Quanteinstein combines a modern **Next.js 16 (Turbopack) frontend**, an asynchro
   - [4. High-Performance C++20 Execution Core](#4-high-performance-c20-execution-core)
   - [5. Quant Coach & Behavioral Journal](#5-quant-coach--behavioral-journal)
   - [6. Quantitative Analytics Suite](#6-quantitative-analytics-suite)
+  - [7. Alpha Feed: Real-Time News Signals & Trader Vlogs](#7-alpha-feed-real-time-news-signals--trader-vlogs)
 - [Multi-Tenant Scalability: 50+ Concurrent Traders](#-multi-tenant-scalability-50-concurrent-traders)
   - [Centralized Tick Multiplexer Architecture](#centralized-tick-multiplexer-architecture)
   - [SQLite High-Concurrency WAL Engine](#sqlite-high-concurrency-wal-engine)
@@ -274,6 +275,13 @@ Comprehensive institutional analytics visualized through Recharts and SVG sparkl
 - **Trade Statistics:** Win Rate, Profit Factor, Expectancy per Trade, Average Win/Loss Ratio, and Maximum Consecutive Losses.
 - **Drawdown Analysis:** Underwater equity curves, maximum peak-to-trough drawdown duration, and recovery factor.
 - **R-Multiple Distribution:** Histograms showing real trade returns expressed as multiples of initial dollar risk ($R$).
+
+### 7. Alpha Feed: Real-Time News Signals & Trader Vlogs
+Community-driven quantitative intelligence and video recap feed:
+- **Real-Time News Signals Stream:** Live macroeconomic alerts, exchange liquidity notices, and high-confidence setups across Crypto, Forex, and Futures markets.
+- **Trader Vlogs & Video Walkthroughs:** Video uploads and embeds with custom player, chapter timestamps, and risk breakdowns.
+- **Strategy Idea Sharing:** Quantitative blueprints with verified Sharpe ratios, win rates, and one-click **"Import to Strategy Builder"** and **"Execute in Paper Trading"** shortcuts.
+- **Internal Social Engagement:** Likes, nested comment discussions, and community trader leaderboards.
 
 ---
 
