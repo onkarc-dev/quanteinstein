@@ -5,6 +5,16 @@ import Link from "next/link";
 import { api, getUser, getToken } from "../../lib/api";
 import BacktestAnalytics from "../../components/BacktestAnalytics";
 import InfoTip, { LabelWithInfo } from "../../components/InfoTip";
+import UniverseSelector from "../../components/strategy/UniverseSelector";
+import NestedConditionCanvas from "../../components/strategy/NestedConditionCanvas";
+import PropFirmMatrix from "../../components/strategy/PropFirmMatrix";
+import MonteCarloViewer from "../../components/strategy/MonteCarloViewer";
+import {
+  DynamicUniverseFilter,
+  PortfolioAllocationConfig,
+  RuleGroup,
+  PropFirmRiskConfig,
+} from "../../types/strategy_v3";
 
 type Cfg = {
   strategyCode: string;
@@ -452,6 +462,55 @@ export default function StrategyBuilderPage() {
   const [endDate, setEndDate] = useState(yesterdayIso());
   const resultsRef = useRef<HTMLDivElement>(null);
 
+  // Institutional Quant Mode (v3.0)
+  const [editorMode, setEditorMode] = useState<"STANDARD" | "INSTITUTIONAL">("STANDARD");
+  const [dynamicUniverseFilter, setDynamicUniverseFilter] = useState<DynamicUniverseFilter>({
+    assetClass: "CRYPTO",
+    minAdvUsd: 50_000_000,
+    minRealizedVol20d: 0.15,
+    maxRealizedVol20d: 2.0,
+    topNByAdv: 15,
+  });
+  const [portfolioAllocation, setPortfolioAllocation] = useState<PortfolioAllocationConfig>({
+    weighting: "INVERSE_VOLATILITY",
+    rebalanceSchedule: "DAILY_CLOSE",
+    driftThresholdPct: 0.05,
+    volatilityLookbackBars: 20,
+    volatilityMetric: "ATR",
+    maxLeverageGross: 2.0,
+    maxAssetWeightPct: 0.25,
+  });
+  const [astEntryRules, setAstEntryRules] = useState<RuleGroup>({
+    id: "root_entry",
+    type: "GROUP",
+    logicalOperator: "AND",
+    conditions: [
+      {
+        id: "rule_1",
+        type: "RULE",
+        leftOperand: { type: "INDICATOR", timeframe: "1h", indicator: "EMA", params: { period: 20 }, field: "close" },
+        operator: ">",
+        rightOperand: { type: "INDICATOR", timeframe: "1h", indicator: "EMA", params: { period: 50 }, field: "close" },
+      },
+      {
+        id: "rule_2",
+        type: "RULE",
+        leftOperand: { type: "INDICATOR", timeframe: "5m", indicator: "RSI", params: { period: 14 }, field: "close" },
+        operator: ">",
+        rightOperand: { type: "CONSTANT", value: 50 },
+      },
+    ],
+  });
+  const [propFirmRisk, setPropFirmRisk] = useState<PropFirmRiskConfig>({
+    drawdownMode: "INTRADAY_EQUITY_PEAK_HWM",
+    maxTrailingDrawdownPct: 8.0,
+    maxDailyLossPct: 4.0,
+    dailyResetUtcHour: 0,
+    hardBreakerAction: "FLATTEN_AND_HALT",
+    newsRiskEmbargoMinutes: 15,
+    maxSimultaneousTrades: 5,
+  });
+
   const heavyLowTimeframe = cfg.symbols.length > 3 && timeframeToSeconds(cfg.timeframe) <= 5;
 
   useEffect(() => {
@@ -848,6 +907,135 @@ export default function StrategyBuilderPage() {
       </div>
 
       <div style={{ maxWidth: 1400, margin: "0 auto", padding: "28px 32px 0" }}>
+        {/* ─── Institutional Quant Studio Mode Switcher ─── */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.7) 100%)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+            borderRadius: 14,
+            padding: "12px 20px",
+            marginBottom: 24,
+            flexWrap: "wrap",
+            gap: 12,
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.2)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Strategy Studio View:
+            </span>
+            <button
+              type="button"
+              onClick={() => setEditorMode("STANDARD")}
+              style={{
+                padding: "8px 18px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+                background: editorMode === "STANDARD" ? "#38bdf8" : "#1e293b",
+                color: editorMode === "STANDARD" ? "#0f172a" : "#94a3b8",
+                transition: "all 0.2s ease",
+              }}
+            >
+              ⚡ PRISM Breakout Builder
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditorMode("INSTITUTIONAL")}
+              style={{
+                padding: "8px 18px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+                background: editorMode === "INSTITUTIONAL" ? "linear-gradient(135deg, #a855f7 0%, #6366f1 100%)" : "#1e293b",
+                color: editorMode === "INSTITUTIONAL" ? "#ffffff" : "#94a3b8",
+                boxShadow: editorMode === "INSTITUTIONAL" ? "0 4px 16px rgba(168, 85, 247, 0.4)" : "none",
+                transition: "all 0.2s ease",
+              }}
+            >
+              🏛️ Institutional Quant OS v3 (Universe · AST Rules · Prop Firm · Monte Carlo)
+            </button>
+          </div>
+
+          <div style={{ fontSize: 12, color: "#94a3b8", display: "flex", alignItems: "center", gap: 6 }}>
+            <span>🔒 Mode:</span>
+            <strong style={{ color: editorMode === "INSTITUTIONAL" ? "#c084fc" : "#38bdf8" }}>
+              {editorMode === "INSTITUTIONAL" ? "Multi-Asset Risk Parity & AST Engine" : "Rule Parameter Matrix"}
+            </strong>
+          </div>
+        </div>
+
+        {editorMode === "INSTITUTIONAL" && (
+          <div
+            style={{
+              background: "linear-gradient(180deg, rgba(22, 32, 51, 0.85) 0%, rgba(16, 24, 39, 0.98) 100%)",
+              border: "1px solid rgba(168, 85, 247, 0.25)",
+              borderRadius: 18,
+              padding: 28,
+              boxShadow: "0 12px 36px rgba(168, 85, 247, 0.08)",
+              marginBottom: 28,
+              display: "flex",
+              flexDirection: "column",
+              gap: 24,
+            }}
+          >
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 20 }}>🏛️</span>
+                <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#f8fafc" }}>
+                  Institutional Quant Architecture &amp; Prop-Firm Engine
+                </h2>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>
+                Multi-Asset Dynamic Universe Screening, Risk Parity / Inverse Volatility Allocation, Recursive AST Logic Tree, and Intraday Peak Trailing Drawdown Circuit Breakers.
+              </p>
+            </div>
+
+            <UniverseSelector
+              filter={dynamicUniverseFilter}
+              onFilterChange={setDynamicUniverseFilter}
+              allocation={portfolioAllocation}
+              onAllocationChange={setPortfolioAllocation}
+              selectedSymbols={cfg.symbols}
+              onSelectSymbols={(syms) => upd("symbols", syms)}
+            />
+
+            <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <span style={{ fontSize: 16 }}>🌿</span>
+                <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: "#38bdf8" }}>
+                  Module 2: Visual Logic Builder (Recursive AST Condition Tree)
+                </h3>
+              </div>
+              <NestedConditionCanvas
+                group={astEntryRules}
+                onChange={setAstEntryRules}
+                availableSymbols={cfg.symbols.length ? cfg.symbols : POPULAR_SYMBOLS}
+              />
+            </div>
+
+            <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: 20 }}>
+              <PropFirmMatrix
+                config={propFirmRisk}
+                onChange={setPropFirmRisk}
+              />
+            </div>
+
+            <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: 20 }}>
+              <MonteCarloViewer
+                propLimitPct={propFirmRisk.maxTrailingDrawdownPct}
+              />
+            </div>
+          </div>
+        )}
+
         {/* ─── Main Configuration Card ─── */}
         <div
           style={{

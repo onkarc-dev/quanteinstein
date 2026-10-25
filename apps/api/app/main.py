@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db import init_db
-from app.routes import auth, strategies, jobs, reports, analytics, coach, journal, live_paper, engine, ai, backtests
+from app.routes import auth, strategies, jobs, reports, analytics, coach, journal, live_paper, engine, ai, backtests, quant_engine
 from app.routes.system import router as system_router
 from app.services.job_queue import build_queue
 import app.services.job_queue as jq_module
@@ -154,3 +154,4 @@ app.include_router(live_paper.router, prefix="/live-paper", tags=["live-paper"])
 app.include_router(engine.router, prefix="/engine", tags=["local-engine"])
 app.include_router(ai.router, prefix="/ai", tags=["ai"])
 app.include_router(backtests.router, prefix="/backtests", tags=["backtests"])
+app.include_router(quant_engine.router, prefix="/quant-engine", tags=["quant-engine"])
