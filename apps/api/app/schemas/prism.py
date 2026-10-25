@@ -78,6 +78,11 @@ class StrategyRules(BaseModel):
     trade_management: TradeManagementConfig = Field(default_factory=TradeManagementConfig)
     execution_friction: ExecutionFrictionConfig = Field(default_factory=ExecutionFrictionConfig)
     timing_filter: TimingFilterConfig = Field(default_factory=TimingFilterConfig)
+    mode: Optional[str] = "STANDARD"
+    universe_filter: Optional[dict] = None
+    portfolio_allocation: Optional[dict] = None
+    entry_rules_ast: Optional[dict] = None
+    prop_firm_circuit_breaker: Optional[dict] = None
 
 class StrategyCreate(BaseModel):
     # User-defined strategy code shown in UI/live session; DB id remains UUID for safety.
@@ -86,6 +91,7 @@ class StrategyCreate(BaseModel):
     symbols: List[str] = ["BTCUSDT"]
     timeframe: str = "1m"
     bar_seconds: int = 60
+    mode: Optional[str] = None
     strategy: StrategyRules = Field(default_factory=StrategyRules)
 
 class JobCreate(BaseModel):

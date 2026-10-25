@@ -13,6 +13,8 @@ import {
   DynamicUniverseFilter,
   PortfolioAllocationConfig,
   RuleGroup,
+  SingleRule,
+  ConditionOperand,
   PropFirmRiskConfig,
 } from "../../types/strategy_v3";
 
@@ -391,6 +393,36 @@ function buildPayload(c: Cfg) {
   };
 }
 
+function buildQuantPayload(
+  c: Cfg,
+  universeFilter: DynamicUniverseFilter,
+  allocation: PortfolioAllocationConfig,
+  astRules: RuleGroup,
+  propRisk: PropFirmRiskConfig
+) {
+  const fallback = buildPayload(c);
+  const resolvedId =
+    c.strategyCode && c.strategyCode !== "PRISM_BREAKOUT_RETEST"
+      ? c.strategyCode.trim()
+      : "QUANT_OS_V3_PORTFOLIO";
+
+  return {
+    ...fallback,
+    user_strategy_id: resolvedId,
+    name: resolvedId,
+    mode: "INSTITUTIONAL_QUANT_OS_V3",
+    strategy: {
+      ...fallback.strategy,
+      name: resolvedId,
+      mode: "INSTITUTIONAL_QUANT_OS_V3",
+      universe_filter: universeFilter,
+      portfolio_allocation: allocation,
+      entry_rules_ast: astRules,
+      prop_firm_circuit_breaker: propRisk,
+    },
+  };
+}
+
 export default function StrategyBuilderPage() {
   const [cfg, setCfg] = useState<Cfg>({
     strategyCode: "PRISM_BREAKOUT_RETEST",
@@ -658,7 +690,12 @@ export default function StrategyBuilderPage() {
     return cfg.symbols.filter((s) => s.includes(q) || formatDisplaySymbol(s).toUpperCase().includes(q));
   }, [cfg.symbols, selectedSearchQuery]);
 
-  const payload = useMemo(() => buildPayload(cfg), [cfg]);
+  const payload = useMemo(() => {
+    if (editorMode === "INSTITUTIONAL") {
+      return buildQuantPayload(cfg, dynamicUniverseFilter, portfolioAllocation, astEntryRules, propFirmRisk);
+    }
+    return buildPayload(cfg);
+  }, [editorMode, cfg, dynamicUniverseFilter, portfolioAllocation, astEntryRules, propFirmRisk]);
 
   // Smoothly scroll to Backtest Execution Performance as soon as backtest finishes
   useEffect(() => {
@@ -740,7 +777,11 @@ export default function StrategyBuilderPage() {
       return;
     }
     const activeCfg = overrideCfg || cfg;
-    const activePayload = overrideCfg ? buildPayload(overrideCfg) : payload;
+    const activePayload = overrideCfg
+      ? (editorMode === "INSTITUTIONAL"
+          ? buildQuantPayload(overrideCfg, dynamicUniverseFilter, portfolioAllocation, astEntryRules, propFirmRisk)
+          : buildPayload(overrideCfg))
+      : payload;
     const selectedSymbols = activePayload.symbols;
     try {
       setRunning(true);
@@ -823,7 +864,10 @@ export default function StrategyBuilderPage() {
     }
   }
 
-  const deployTargetId = strategyId || cfg.strategyCode || "PRISM_BREAKOUT_RETEST";
+  const deployTargetId =
+    strategyId ||
+    payload.user_strategy_id ||
+    (editorMode === "INSTITUTIONAL" ? "QUANT_OS_V3_PORTFOLIO" : "PRISM_BREAKOUT_RETEST");
 
   return (
     <div style={{ background: "#0b0f19", minHeight: "100vh", color: "#e2e8f0", paddingBottom: 60, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -1074,7 +1118,9 @@ export default function StrategyBuilderPage() {
             marginBottom: 28,
           }}
         >
-          {/* Section 1: Identification & Trade Direction */}
+          {editorMode === "STANDARD" && (
+            <>
+              {/* Section 1: Identification & Trade Direction */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
             <span style={{ fontSize: 16 }}>⚙️</span>
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
@@ -2380,9 +2426,11 @@ export default function StrategyBuilderPage() {
               </div>
             </div>
           </div>
+        </>
+      )}
 
           {/* ─── Section 9: Historical Range & Execution ─── */}
-          <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.06)", paddingTop: 24 }}>
+          <div style={{ borderTop: editorMode === "STANDARD" ? "1px solid rgba(255, 255, 255, 0.06)" : "none", paddingTop: editorMode === "STANDARD" ? 24 : 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
               <span style={{ fontSize: 16 }}>📅</span>
               <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc" }}>
@@ -2437,6 +2485,23 @@ export default function StrategyBuilderPage() {
                   onChange={(e) => setEndDate(e.target.value)}
                 />
               </label>
+
+              {editorMode === "INSTITUTIONAL" && (
+                <label style={labelStyle}>
+                  <LabelWithInfo title="Execution Timeframe" info="Base candle resolution for portfolio simulation" />
+                  <select
+                    style={inputStyle}
+                    value={cfg.timeframe}
+                    onChange={(e) => upd("timeframe", e.target.value)}
+                  >
+                    {Object.keys(TIMEFRAME_LABELS).map((tf) => (
+                      <option key={tf} value={tf}>
+                        {TIMEFRAME_LABELS[tf] || tf}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -2568,62 +2633,137 @@ export default function StrategyBuilderPage() {
 
         {/* ─── Real-Time Strategy Mechanics Cards ─── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, marginBottom: 28 }}>
-          <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
-              <span>Stop Logic</span>
-              <InfoTip text="Protects capital on invalidations. Triggered dynamically in tick simulation." size="sm" />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#f87171", marginTop: 6 }}>
-              {cfg.stop === "atr"
-                ? `ATR × ${cfg.atr}`
-                : cfg.stop === "structure"
-                  ? "Recent Structure Level"
-                  : `ATR × ${cfg.atr} or Structure`}
-            </div>
-          </div>
+          {editorMode === "INSTITUTIONAL" ? (
+            <>
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(56, 189, 248, 0.25)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Universe &amp; Basket</span>
+                  <InfoTip text="Dynamic multi-asset universe filtered by 30d liquidity ADV and realized volatility." size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#38bdf8", marginTop: 6 }}>
+                  {cfg.symbols.length} Assets · {dynamicUniverseFilter.assetClass}
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                  Min ADV ${(dynamicUniverseFilter.minAdvUsd / 1e6).toFixed(0)}M · Top {dynamicUniverseFilter.topNByAdv ?? 15}
+                </div>
+              </div>
 
-          <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
-              <span>Target & Breakeven Exits</span>
-              <InfoTip text={cfg.breakevenStop ? "Locks in gains at T1 and moves stop to entry." : "Fixed targets without breakeven move."} size="sm" />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#4ade80", marginTop: 6 }}>
-              T1 {cfg.t1}R ({cfg.partialTpPct}%) {cfg.breakevenStop ? "→ BE Lock" : ""} → T2 {cfg.t2}R
-            </div>
-          </div>
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(168, 85, 247, 0.25)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Weighting &amp; Rebalancing</span>
+                  <InfoTip text="Cross-sectional risk parity sizing inversely proportional to realized volatility." size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#c084fc", marginTop: 6 }}>
+                  {portfolioAllocation.weighting === "INVERSE_VOLATILITY"
+                    ? "Risk Parity (1/σ)"
+                    : portfolioAllocation.weighting === "EQUAL_WEIGHT"
+                    ? "Equal Weight (1/N)"
+                    : "Dollar Risk Parity"}
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                  {portfolioAllocation.rebalanceSchedule} · {((portfolioAllocation.driftThresholdPct || 0.05) * 100).toFixed(0)}% Drift
+                </div>
+              </div>
 
-          <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
-              <span>Prop Firm & Risk Circuit Breaker</span>
-              <InfoTip text={`${cfg.maxOpen} max positions · ${payload.strategy.reentry.enabled ? `${payload.strategy.reentry.max_reentries} re-entries` : "No re-entries"}`} size="sm" />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginTop: 6 }}>
-              {cfg.risk}% Risk · {cfg.maxDailyLoss}% Daily Loss Halt
-            </div>
-          </div>
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(52, 211, 153, 0.25)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Recursive AST Logic</span>
+                  <InfoTip text="Abstract Syntax Tree boolean evaluation across indicators and relative spreads." size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#34d399", marginTop: 6 }}>
+                  {astEntryRules.conditions.length} Root Rules ({astEntryRules.logicalOperator})
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                  Cross-Asset Spreads &amp; Multi-TF Indicators
+                </div>
+              </div>
 
-          <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
-              <span>Direction & Macro Guard</span>
-              <InfoTip text={`${cfg.feePct}% taker fee · ${cfg.slippagePct}% slippage · ${cfg.tradingHours === "all_day" ? "24/7 Hours" : "Session Filtered"}`} size="sm" />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#c084fc", marginTop: 6 }}>
-              {cfg.direction === "both" ? "Both (Long & Short)" : cfg.direction === "long_only" ? "Long Only" : "Short Only"} · {payload.strategy.trend_filter.use_trend_filter ? `${payload.strategy.trend_filter.higher_timeframe} EMA` : "No Filter"}
-            </div>
-          </div>
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(251, 113, 133, 0.25)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Prop-Firm Trailing Floor</span>
+                  <InfoTip text="Peak high-water mark trailing drawdown circuit breaker with automatic position flattening." size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#fb7185", marginTop: 6 }}>
+                  {propFirmRisk.maxTrailingDrawdownPct}% Trailing Floor
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                  {propFirmRisk.maxDailyLossPct}% Daily Limit · {propFirmRisk.hardBreakerAction === "FLATTEN_AND_HALT" ? "Flatten & Halt" : "Notify"}
+                </div>
+              </div>
 
-          <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
-              <span>RSI &amp; MACD Indicator Guard</span>
-              <InfoTip
-                text={`${cfg.rsiFilter === "enabled" ? (cfg.rsiCondition === "two_bottom_bull_two_top_bear" ? "Two-Bottom/Top Divergence" : cfg.rsiCondition) : "RSI inactive"} · ${cfg.macdFilter === "enabled" ? (cfg.macdCondition === "two_top_bear_two_bottom_bull" ? "Two-Top/Bottom Reversal" : cfg.macdCondition) : "MACD inactive"}`}
-                size="sm"
-              />
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#38bdf8", marginTop: 6 }}>
-              {cfg.rsiFilter === "enabled" ? `RSI (${cfg.rsiPeriod})` : "RSI Off"} · {cfg.macdFilter === "enabled" ? `MACD (${cfg.macdFastPeriod}/${cfg.macdSlowPeriod})` : "MACD Off"}
-            </div>
-          </div>
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(251, 191, 36, 0.25)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Microstructure &amp; Bootstrap</span>
+                  <InfoTip text="Pessimistic tick collision simulation with Politis-Romano stationary block bootstrap." size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginTop: 6 }}>
+                  Pessimistic Tick Collision
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
+                  1,000 Block Bootstrap Resamples
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Stop Logic</span>
+                  <InfoTip text="Protects capital on invalidations. Triggered dynamically in tick simulation." size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#f87171", marginTop: 6 }}>
+                  {cfg.stop === "atr"
+                    ? `ATR × ${cfg.atr}`
+                    : cfg.stop === "structure"
+                      ? "Recent Structure Level"
+                      : `ATR × ${cfg.atr} or Structure`}
+                </div>
+              </div>
+
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Target & Breakeven Exits</span>
+                  <InfoTip text={cfg.breakevenStop ? "Locks in gains at T1 and moves stop to entry." : "Fixed targets without breakeven move."} size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#4ade80", marginTop: 6 }}>
+                  T1 {cfg.t1}R ({cfg.partialTpPct}%) {cfg.breakevenStop ? "→ BE Lock" : ""} → T2 {cfg.t2}R
+                </div>
+              </div>
+
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Prop Firm & Risk Circuit Breaker</span>
+                  <InfoTip text={`${cfg.maxOpen} max positions · ${payload.strategy?.reentry?.enabled ? `${payload.strategy.reentry.max_reentries} re-entries` : "No re-entries"}`} size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginTop: 6 }}>
+                  {cfg.risk}% Risk · {cfg.maxDailyLoss}% Daily Loss Halt
+                </div>
+              </div>
+
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>Direction & Macro Guard</span>
+                  <InfoTip text={`${cfg.feePct}% taker fee · ${cfg.slippagePct}% slippage · ${cfg.tradingHours === "all_day" ? "24/7 Hours" : "Session Filtered"}`} size="sm" />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#c084fc", marginTop: 6 }}>
+                  {cfg.direction === "both" ? "Both (Long & Short)" : cfg.direction === "long_only" ? "Long Only" : "Short Only"} · {payload.strategy?.trend_filter?.use_trend_filter ? `${payload.strategy.trend_filter.higher_timeframe} EMA` : "No Filter"}
+                </div>
+              </div>
+
+              <div style={{ background: "rgba(17, 24, 39, 0.7)", border: "1px solid rgba(255, 255, 255, 0.07)", borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>RSI &amp; MACD Indicator Guard</span>
+                  <InfoTip
+                    text={`${cfg.rsiFilter === "enabled" ? (cfg.rsiCondition === "two_bottom_bull_two_top_bear" ? "Two-Bottom/Top Divergence" : cfg.rsiCondition) : "RSI inactive"} · ${cfg.macdFilter === "enabled" ? (cfg.macdCondition === "two_top_bear_two_bottom_bull" ? "Two-Top/Bottom Reversal" : cfg.macdCondition) : "MACD inactive"}`}
+                    size="sm"
+                  />
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#38bdf8", marginTop: 6 }}>
+                  {cfg.rsiFilter === "enabled" ? `RSI (${cfg.rsiPeriod})` : "RSI Off"} · {cfg.macdFilter === "enabled" ? `MACD (${cfg.macdFastPeriod}/${cfg.macdSlowPeriod})` : "MACD Off"}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* ─── Backtest Results Section ─── */}
@@ -2642,7 +2782,17 @@ export default function StrategyBuilderPage() {
         </div>
 
         {/* ─── Strategy Configuration Summary ─── */}
-        <StrategyPreview payload={payload} strategyId={strategyId} strategyDisplayName={strategyDisplayName} />
+        <StrategyPreview
+          payload={payload}
+          strategyId={strategyId}
+          strategyDisplayName={strategyDisplayName}
+          editorMode={editorMode}
+          universeFilter={dynamicUniverseFilter}
+          portfolioAllocation={portfolioAllocation}
+          astRules={astEntryRules}
+          propFirmRisk={propFirmRisk}
+          cfg={cfg}
+        />
       </div>
       <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
     </div>
@@ -3923,18 +4073,136 @@ function BacktestResult({
   );
 }
 
+function formatOperandSummary(op?: ConditionOperand): string {
+  if (!op) return "N/A";
+  if (op.type === "CONSTANT") {
+    return String(op.value);
+  }
+  if (op.type === "INDICATOR") {
+    const sym = op.symbol ? `[${op.symbol}] ` : "";
+    const p = op.params ? Object.entries(op.params).map(([k, v]) => `${k}:${v}`).join(",") : "";
+    return `${sym}${op.timeframe} ${op.indicator}${p ? `(${p})` : ""}${op.field && op.field !== "close" ? `.${op.field}` : ""}`;
+  }
+  if (op.type === "RELATIVE_VALUE_SPREAD") {
+    return `${op.assetA}/${op.assetB} Spread (${op.metric}${op.zScoreLookback ? ` lb:${op.zScoreLookback}` : ""})`;
+  }
+  return "Unknown";
+}
+
+function formatSingleRuleSummary(rule: SingleRule): string {
+  return `${formatOperandSummary(rule.leftOperand)} ${rule.operator} ${formatOperandSummary(rule.rightOperand)}`;
+}
+
+function formatAstRuleSummary(group?: RuleGroup, depth = 0): string {
+  if (!group || !Array.isArray(group.conditions) || group.conditions.length === 0) {
+    return "None configured";
+  }
+  const parts = group.conditions
+    .map((c) => {
+      if (c.type === "RULE") {
+        return formatSingleRuleSummary(c);
+      }
+      if (c.type === "GROUP") {
+        return `(${formatAstRuleSummary(c, depth + 1)})`;
+      }
+      return "";
+    })
+    .filter(Boolean);
+
+  const op = group.logicalOperator ? ` ${group.logicalOperator} ` : " AND ";
+  return parts.join(op);
+}
+
 function StrategyPreview({
   payload,
   strategyId,
   strategyDisplayName,
+  editorMode,
+  universeFilter,
+  portfolioAllocation,
+  astRules,
+  propFirmRisk,
+  cfg,
 }: {
   payload: any;
   strategyId: string;
   strategyDisplayName?: string;
+  editorMode?: "STANDARD" | "INSTITUTIONAL";
+  universeFilter?: DynamicUniverseFilter;
+  portfolioAllocation?: PortfolioAllocationConfig;
+  astRules?: RuleGroup;
+  propFirmRisk?: PropFirmRiskConfig;
+  cfg?: Cfg;
 }) {
-  const s = payload.strategy;
-  const activeLabel = strategyDisplayName || payload.name || payload.user_strategy_id || "PRISM";
-  const rows = [
+  const isInstitutional = editorMode === "INSTITUTIONAL";
+  const s = payload.strategy || {};
+  const activeLabel =
+    strategyDisplayName ||
+    payload.name ||
+    payload.user_strategy_id ||
+    (isInstitutional ? "QUANT_OS_V3_PORTFOLIO" : "PRISM");
+
+  const institutionalRows: [string, any][] = [
+    ["Strategy Architecture", "🏛️ Institutional Quant OS v3.0 (Multi-Asset AST & Prop-Firm Engine)"],
+    ["Strategy Identifier", activeLabel],
+    [
+      "Dynamic Universe Filter",
+      `${universeFilter?.assetClass ?? "CRYPTO"} · Min ADV $${((universeFilter?.minAdvUsd ?? 50_000_000) / 1e6).toFixed(0)}M · Top ${universeFilter?.topNByAdv ?? 15} pairs by ADV`,
+    ],
+    ["Active Basket Universe", `${payload.symbols?.length || 0} pairs (${payload.symbols?.join(", ")})`],
+    [
+      "Portfolio Weighting Math",
+      portfolioAllocation?.weighting === "INVERSE_VOLATILITY"
+        ? "Inverse Volatility / Risk Parity (w_i ∝ 1/σ_i)"
+        : portfolioAllocation?.weighting === "EQUAL_WEIGHT"
+          ? "Equal Weighting (w_i = 1/N)"
+          : "Fixed Unit Sizing (Dollar Risk Parity)",
+    ],
+    [
+      "Rebalancing Discipline",
+      `${portfolioAllocation?.rebalanceSchedule === "DAILY_CLOSE" ? "Daily Close (00:00 UTC)" : portfolioAllocation?.rebalanceSchedule === "DRIFT_THRESHOLD" ? "Drift Gated (> 5% drift)" : "Weekly Close (Sunday)"} · ${((portfolioAllocation?.driftThresholdPct ?? 0.05) * 100).toFixed(0)}% Drift Threshold`,
+    ],
+    [
+      "Leverage & Allocation Constraints",
+      `Max Single Asset: ${((portfolioAllocation?.maxAssetWeightPct ?? 0.25) * 100).toFixed(0)}% · Max Gross Leverage: ${portfolioAllocation?.maxLeverageGross ?? 2.0}x`,
+    ],
+    ["AST Entry Condition Tree", astRules ? formatAstRuleSummary(astRules) : "No AST conditions configured"],
+    ["Execution Timeframe", `${payload.timeframe} (${payload.bar_seconds}s bars)`],
+    [
+      "Prop-Firm Circuit Breaker Mode",
+      propFirmRisk?.drawdownMode === "INTRADAY_EQUITY_PEAK_HWM"
+        ? "Intraday Equity Peak HWM (Prop Trailing Floor)"
+        : "Closed Balance EOD",
+    ],
+    [
+      "Trailing Drawdown Floor Limit",
+      `${propFirmRisk?.maxTrailingDrawdownPct ?? 8.0}% trailing equity floor from intraday peak`,
+    ],
+    [
+      "Daily Loss Limit & Reset",
+      `${propFirmRisk?.maxDailyLossPct ?? 4.0}% intraday max daily loss (Hard reset at ${String(propFirmRisk?.dailyResetUtcHour ?? 0).padStart(2, "0")}:00 UTC)`,
+    ],
+    [
+      "Hard Breaker Enforcement Action",
+      propFirmRisk?.hardBreakerAction === "FLATTEN_AND_HALT"
+        ? "FLATTEN_AND_HALT (Immediate position liquidation & session lock)"
+        : "NOTIFY_ONLY",
+    ],
+    [
+      "Macro News Risk Embargo",
+      `${propFirmRisk?.newsRiskEmbargoMinutes ?? 15} min embargo window around high-impact economic releases`,
+    ],
+    [
+      "Microstructure Friction Simulation",
+      `Pessimistic intra-bar tick collision · ${cfg?.feePct ?? 0.04}% taker fee · ${cfg?.slippagePct ?? 0.01}% slippage`,
+    ],
+    [
+      "Monte Carlo Statistical Suite",
+      "Politis-Romano Stationary Block Bootstrap (1,000 resamples with replacement, ruin probability calculation)",
+    ],
+  ];
+
+  const prismRows: [string, any][] = [
     ["Strategy Identifier", activeLabel],
     ["Active Markets", payload.symbols?.join(", ")],
     ["Trade Direction", s.direction === "both" ? "Both (Long & Short)" : s.direction === "long_only" ? "Long Only" : "Short Only"],
@@ -3944,25 +4212,25 @@ function StrategyPreview({
     ["Minimum Setup Score", `${s.min_setup_score} / 10`],
     [
       "Stop-Loss Rule",
-      `${s.stop_loss.type} · ATR Multiplier ${s.stop_loss.atr_multiplier}`,
+      `${s.stop_loss?.type} · ATR Multiplier ${s.stop_loss?.atr_multiplier}`,
     ],
     [
       "Target Architecture",
-      `Target 1: ${s.targets.target1_R}R (${s.trade_management?.partial_tp_pct ?? 50}% closed) · Target 2: ${s.targets.target2_R}R`,
+      `Target 1: ${s.targets?.target1_R}R (${s.trade_management?.partial_tp_pct ?? 50}% closed) · Target 2: ${s.targets?.target2_R}R`,
     ],
     ["Breakeven Stop at T1", s.trade_management?.breakeven_stop ? "Enabled (Stop moves to Entry at T1)" : "Disabled"],
-    ["Risk Per Trade", `${s.risk.risk_per_trade_pct}% of equity`],
-    ["Max Daily Loss Halt", `${s.risk.max_daily_loss_pct}% (Circuit Breaker)`],
-    ["Max Open Positions", `${s.risk.max_open_positions} concurrent positions`],
+    ["Risk Per Trade", `${s.risk?.risk_per_trade_pct}% of equity`],
+    ["Max Daily Loss Halt", `${s.risk?.max_daily_loss_pct}% (Circuit Breaker)`],
+    ["Max Open Positions", `${s.risk?.max_open_positions} concurrent positions`],
     ["Setup TTL Expiry", `${s.ttl_bars} bars`],
-    ["Re-Entry Discipline", s.reentry.enabled ? "Enabled" : "Disabled"],
-    ["Max Allowed Re-Entries", s.reentry.max_reentries],
-    ["Re-Entry Cooldown", `${s.reentry.cooldown_bars} bars`],
+    ["Re-Entry Discipline", s.reentry?.enabled ? "Enabled" : "Disabled"],
+    ["Max Allowed Re-Entries", s.reentry?.max_reentries],
+    ["Re-Entry Cooldown", `${s.reentry?.cooldown_bars} bars`],
     ["Exchange Fee Model", `${s.execution_friction?.fee_pct ?? 0.04}% per side · ${s.execution_friction?.slippage_pct ?? 0.01}% slippage`],
     ["Session Timing Filter", s.timing_filter?.trading_hours === "all_day" ? "24/7 Global" : s.timing_filter?.trading_hours],
     [
       "HTF Trend Filter",
-      s.trend_filter.use_trend_filter
+      s.trend_filter?.use_trend_filter
         ? `${s.trend_filter.higher_timeframe} EMA${s.trend_filter.fast_ema} > EMA${s.trend_filter.slow_ema}`
         : "Disabled",
     ],
@@ -3979,6 +4247,8 @@ function StrategyPreview({
         : "Disabled",
     ],
   ];
+
+  const rows = isInstitutional ? institutionalRows : prismRows;
 
   return (
     <div
@@ -4001,13 +4271,19 @@ function StrategyPreview({
           />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {activeLabel && (
-            <span style={{ fontSize: 11, color: "#a5b4fc", background: "rgba(99, 102, 241, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(99, 102, 241, 0.3)", fontWeight: 700 }}>
-              {activeLabel}
+          {isInstitutional ? (
+            <span style={{ fontSize: 11, color: "#c084fc", background: "rgba(168, 85, 247, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(168, 85, 247, 0.3)", fontWeight: 700 }}>
+              🏛️ Institutional Quant OS v3
             </span>
+          ) : (
+            activeLabel && (
+              <span style={{ fontSize: 11, color: "#a5b4fc", background: "rgba(99, 102, 241, 0.15)", padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(99, 102, 241, 0.3)", fontWeight: 700 }}>
+                {activeLabel}
+              </span>
+            )
           )}
           <Link
-            href={`/paper-trading?strategy_id=${encodeURIComponent(strategyId || payload.user_strategy_id || payload.name || "PRISM")}`}
+            href={`/paper-trading?strategy_id=${encodeURIComponent(strategyId || payload.user_strategy_id || payload.name || (isInstitutional ? "QUANT_OS_V3_PORTFOLIO" : "PRISM"))}`}
             style={{
               background: "rgba(34, 197, 94, 0.15)",
               color: "#4ade80",
