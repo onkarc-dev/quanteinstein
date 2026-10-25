@@ -5,7 +5,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16.2.9-black.svg)](https://nextjs.org/)
 [![C++20](https://img.shields.io/badge/C++-20-00599C.svg)](https://isocpp.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LEGAL_DISCLAIMER.md)
-[![Tests Passing](https://img.shields.io/badge/Tests-144%2F144%20Passed-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/Tests-149%2F149%20Passed-brightgreen.svg)]()
 [![Throughput](https://img.shields.io/badge/Throughput-6.68M%20msgs%2Fsec-orange.svg)]()
 [![Median Latency](https://img.shields.io/badge/Latency%20(p50)-7.6%20%C2%B5s-purple.svg)]()
 
@@ -401,6 +401,16 @@ FastAPI automatically generates interactive OpenAPI/Swagger documentation at `ht
 | `GET` | `/coach/{job_id}/coach-report` | Generates rule-based analysis and strengths/weaknesses. |
 | `POST` | `/journal/entry` | Creates a new qualitative and emotional trade journal entry. |
 | `GET` | `/journal/` | Retrieves historical journal entries and cognitive bias stats. |
+
+### 7. Admin & Platform Telemetry
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/admin/overview` | Platform-wide KPIs: active users, backtests, paper trading volume, and system health. |
+| `GET` | `/admin/users` | Complete user accounts ledger with individual compute & paper trading volume. |
+| `GET` | `/admin/backtests` | Global ledger of every backtest executed across all accounts. |
+| `GET` | `/admin/paper-sessions` | Real-time monitoring of all active paper portfolios and open positions. |
+| `GET` | `/admin/activity` | Streaming real-time audit log of user registrations, backtests, and fills. |
+| `POST` | `/admin/users/{id}/toggle-status` | Administrator toggle to suspend or activate a trader account. |
 
 ---
 

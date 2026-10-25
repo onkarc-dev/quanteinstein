@@ -13,6 +13,7 @@ export const NAV_ITEMS = [
   { href: '/charting', label: 'Charting', icon: '📉' },
   { href: '/beta-status', label: 'Alpha Feed', icon: '📡' },
   { href: '/trade-journal', label: 'Journal & Analytics', icon: '📓' },
+  { href: '/admin', label: 'Admin', icon: '🛡️' },
 ];
 
 export default function NavLinks() {
