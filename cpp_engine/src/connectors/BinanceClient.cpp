@@ -8,8 +8,11 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
-#include <string>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <thread>
+#endif
 
 namespace {
 
@@ -96,7 +99,11 @@ void BinanceClient::run() {
     std::cout << "Connecting QuantOS market data client path=" << path_ << "\n";
     while (running.load(std::memory_order_relaxed)) {
         if (!wsi_ && !connect()) {
+#ifdef _WIN32
+            Sleep(2000);
+#else
             std::this_thread::sleep_for(std::chrono::seconds(2));
+#endif
             continue;
         }
         if (context_) lws_service(context_, 50);

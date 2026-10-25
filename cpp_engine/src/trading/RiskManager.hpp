@@ -14,6 +14,10 @@ struct RiskConfig {
     double max_daily_loss = 2000.0;
     int max_open_positions = 6;
     int max_orders_per_minute = 120;
+    // Institutional Quant OS v3: Prop-Firm Circuit Breakers
+    double max_trailing_drawdown_pct = 0.08;    // 8.0% intraday peak trailing drawdown
+    bool hard_breaker_enabled = true;
+    int news_risk_embargo_minutes = 15;
 };
 
 struct RiskDecision {
@@ -25,7 +29,7 @@ struct RiskDecision {
 class RiskManager {
 public:
     explicit RiskManager(RiskConfig cfg = {}, EventStore* store = nullptr)
-        : cfg_(cfg), equity_(cfg.starting_equity), store_(store) {}
+        : cfg_(cfg), equity_(cfg.starting_equity), peak_equity_(cfg.starting_equity), store_(store) {}
 
     void set_event_store(EventStore* store) { store_ = store; }
 
@@ -33,6 +37,9 @@ public:
                           const std::unordered_map<std::string, Position>& positions) {
         if (order.quantity <= 0.0) return publish(order, {false, "quantity must be positive", 0.0});
         if (reference_price <= 0.0) return publish(order, {false, "reference price invalid", 0.0});
+        if (hard_breaker_tripped_ && !order.reduce_only) {
+            return publish(order, {false, "prop-firm trailing drawdown floor breached: hard breaker active", 0.0});
+        }
         if (daily_realized_pnl_ <= -std::abs(cfg_.max_daily_loss)) return publish(order, {false, "daily loss limit reached", 0.0});
         if (orders_this_minute_ >= cfg_.max_orders_per_minute) return publish(order, {false, "orders per minute limit reached", 0.0});
 
@@ -74,8 +81,26 @@ public:
 
     void reset_rate_window() { orders_this_minute_ = 0; }
     double max_risk_amount() const { return equity_ * cfg_.max_risk_per_trade_pct; }
-    void on_realized_pnl(double pnl) { daily_realized_pnl_ += pnl; equity_ += pnl; }
+    void on_realized_pnl(double pnl) {
+        daily_realized_pnl_ += pnl;
+        update_equity(equity_ + pnl);
+    }
+    void update_equity(double current_equity) {
+        equity_ = current_equity;
+        if (equity_ > peak_equity_) {
+            peak_equity_ = equity_;
+        }
+        if (peak_equity_ > 0.0) {
+            const double current_dd = (peak_equity_ - equity_) / peak_equity_;
+            if (cfg_.hard_breaker_enabled && current_dd >= cfg_.max_trailing_drawdown_pct) {
+                hard_breaker_tripped_ = true;
+            }
+        }
+    }
     double equity() const { return equity_; }
+    double peak_equity() const { return peak_equity_; }
+    bool is_hard_breaker_tripped() const { return hard_breaker_tripped_; }
+    void reset_hard_breaker() { hard_breaker_tripped_ = false; peak_equity_ = equity_; }
     double daily_realized_pnl() const { return daily_realized_pnl_; }
     double daily_loss_utilization() const { return std::abs(daily_realized_pnl_) / std::max(1.0, std::abs(cfg_.max_daily_loss)); }
     const RiskConfig& config() const { return cfg_; }
@@ -125,6 +150,8 @@ private:
 
     RiskConfig cfg_;
     double equity_ = 0.0;
+    double peak_equity_ = 0.0;
+    bool hard_breaker_tripped_ = false;
     double daily_realized_pnl_ = 0.0;
     int orders_this_minute_ = 0;
     EventStore* store_ = nullptr;
