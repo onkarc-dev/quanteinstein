@@ -59,7 +59,10 @@ th { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
 .pill-green { color:#86efac; background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.3); }
 .pill-blue { color:#93c5fd; background:rgba(59,130,246,.12); border:1px solid rgba(59,130,246,.3); }
 .pill-white { color:#e5e7eb; background:rgba(148,163,184,.08); border:1px solid rgba(148,163,184,.25); }
-.symbol-picker { display:grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap:8px; margin-top:8px; }
-.symbol-chip { display:flex; align-items:center; gap:8px; border:1px solid #334155; border-radius:10px; padding:8px 10px; background:#0b1020; }
-.symbol-chip input { width:auto; }
+.symbol-picker { display:grid; grid-template-columns: repeat(auto-fill, minmax(134px, 1fr)); gap:6px; margin-top:8px; width:100%; box-sizing:border-box; }
+.symbol-chip { display:flex; align-items:center; gap:7px; border:1px solid #1e293b; border-radius:8px; padding:6px 9px; background:#090e17; cursor:pointer; min-width:0; overflow:hidden; box-sizing:border-box; transition:all 0.15s ease; user-select:none; }
+.symbol-chip:hover { border-color:#38bdf8; background:#0f172a; }
+.symbol-chip input[type="checkbox"] { width:14px !important; height:14px !important; padding:0 !important; margin:0 !important; flex-shrink:0; accent-color:#38bdf8; cursor:pointer; }
+.symbol-chip span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 @media (max-width: 720px){ .card{margin:12px 10px;} .hero{padding:20px 12px 6px;} }
+

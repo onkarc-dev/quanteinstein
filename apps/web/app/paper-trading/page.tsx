@@ -579,7 +579,8 @@ export default function PaperTradingPage() {
   const [balanceInput, setBalanceInput] = useState<string>("100000");
   const [symbolSearchQuery, setSymbolSearchQuery] = useState("");
   const [customSymbolInput, setCustomSymbolInput] = useState("");
-  const [paperMarketFilter, setPaperMarketFilter] = useState<"ALL" | "CRYPTO" | "FOREX">("ALL");
+  const [paperMarketFilter, setPaperMarketFilter] = useState<"ALL" | "CRYPTO" | "FOREX" | "SELECTED">("ALL");
+  const [marketSearchFilter, setMarketSearchFilter] = useState<string>("");
   const [telemetryCandles, setTelemetryCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [initialCandles, setInitialCandles] = useState<Record<string, LiveChartCandle[]>>({});
   const [message, setMessage] = useState(
@@ -878,6 +879,10 @@ export default function PaperTradingPage() {
     setSelectedSymbols(symbols);
   }
 
+  function clearAllSymbols() {
+    setSelectedSymbols(["BTCUSDT"]);
+  }
+
   function addCustomSymbol() {
     const raw = customSymbolInput.trim().toUpperCase().replace(/[\/-]/g, "");
     if (!raw) return;
@@ -1129,11 +1134,17 @@ export default function PaperTradingPage() {
 
   const filteredMarketList = useMemo(() => {
     return allAvailableMarkets.filter((sym) => {
-      if (paperMarketFilter === "CRYPTO") return !isForexPair(sym);
-      if (paperMarketFilter === "FOREX") return isForexPair(sym);
+      if (paperMarketFilter === "CRYPTO" && isForexPair(sym)) return false;
+      if (paperMarketFilter === "FOREX" && !isForexPair(sym)) return false;
+      if (paperMarketFilter === "SELECTED" && !selectedSymbols.includes(sym)) return false;
+      if (marketSearchFilter.trim()) {
+        const q = marketSearchFilter.trim().toUpperCase();
+        const display = formatDisplaySymbol(sym).toUpperCase();
+        if (!sym.includes(q) && !display.includes(q)) return false;
+      }
       return true;
     });
-  }, [allAvailableMarkets, paperMarketFilter]);
+  }, [allAvailableMarkets, paperMarketFilter, selectedSymbols, marketSearchFilter]);
 
   const displayedMarketRows = useMemo(() => {
     const list = marketRows.filter((m: any) => 
@@ -1314,9 +1325,11 @@ export default function PaperTradingPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
             gap: 8,
             marginBottom: 14,
+            width: "100%",
+            boxSizing: "border-box",
           }}
         >
           {Array.from(new Set([
@@ -1346,26 +1359,31 @@ export default function PaperTradingPage() {
                   display: "flex",
                   flexDirection: "column",
                   gap: 3,
+                  minWidth: 0,
+                  overflow: "hidden",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontWeight: isSelected ? 800 : 600, fontSize: 13 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontWeight: isSelected ? 800 : 600, fontSize: 13, minWidth: 0, overflow: "hidden", width: "100%" }}>
                   {isTradeActive && (
-                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", display: "inline-block", boxShadow: "0 0 6px #22c55e" }} />
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e", display: "inline-block", flexShrink: 0, boxShadow: "0 0 6px #22c55e" }} />
                   )}
                   <span style={{
                     fontSize: 9,
                     fontWeight: 800,
                     padding: "1px 4px",
                     borderRadius: 3,
+                    flexShrink: 0,
                     background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
                     color: isFx ? "#34d399" : "#818cf8",
                     border: `1px solid ${isFx ? "rgba(16, 185, 129, 0.4)" : "rgba(99, 102, 241, 0.4)"}`
                   }}>
                     {isFx ? "FX" : "CRYPTO"}
                   </span>
-                  <span>{formatDisplaySymbol(sym)}</span>
+                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+                    {formatDisplaySymbol(sym)}
+                  </span>
                 </div>
-                <div style={{ fontSize: 11, color: isSelected ? "#e0f2fe" : "#94a3b8" }}>
+                <div style={{ fontSize: 11, color: isSelected ? "#e0f2fe" : "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {formatPriceBySymbol(symPrice, sym)}
                 </div>
               </button>
@@ -1819,71 +1837,81 @@ export default function PaperTradingPage() {
             marginTop: 14,
             borderTop: "1px solid #243044",
             paddingTop: 14,
+            width: "100%",
+            boxSizing: "border-box",
           }}
         >
+          {/* Header Row */}
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
-              gap: 10,
+              gap: 12,
               alignItems: "center",
               flexWrap: "wrap",
+              marginBottom: 10,
             }}
           >
             <div>
-              <b>Activate paper markets</b>
-              <span style={{ marginLeft: 10, fontSize: 12, color: "#94a3b8" }}>
-                ({selectedSymbols.filter((s) => !isForexPair(s)).length} Crypto · {selectedSymbols.filter(isForexPair).length} Forex)
-              </span>
-              <span
-                style={{
-                  marginLeft: 8,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  background:
-                    selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
-                      ? "rgba(168, 85, 247, 0.2)"
-                      : selectedSymbols.every(isForexPair)
-                      ? "rgba(16, 185, 129, 0.2)"
-                      : "rgba(99, 102, 241, 0.2)",
-                  color:
-                    selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
-                      ? "#c084fc"
-                      : selectedSymbols.every(isForexPair)
-                      ? "#34d399"
-                      : "#818cf8",
-                  border: `1px solid ${
-                    selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
-                      ? "rgba(168, 85, 247, 0.4)"
-                      : selectedSymbols.every(isForexPair)
-                      ? "rgba(16, 185, 129, 0.4)"
-                      : "rgba(99, 102, 241, 0.4)"
-                  }`,
-                }}
-              >
-                {selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
-                  ? "🌐 Hybrid Multi-Asset Basket"
-                  : selectedSymbols.every(isForexPair)
-                  ? "💱 Forex Only Basket"
-                  : "🪙 Crypto Only Basket"}
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <b style={{ fontSize: 15, color: "#f8fafc" }}>Activate Paper Markets</b>
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    background:
+                      selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                        ? "rgba(168, 85, 247, 0.18)"
+                        : selectedSymbols.every(isForexPair)
+                        ? "rgba(16, 185, 129, 0.18)"
+                        : "rgba(56, 189, 248, 0.18)",
+                    color:
+                      selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                        ? "#c084fc"
+                        : selectedSymbols.every(isForexPair)
+                        ? "#34d399"
+                        : "#38bdf8",
+                    border: `1px solid ${
+                      selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                        ? "rgba(168, 85, 247, 0.4)"
+                        : selectedSymbols.every(isForexPair)
+                        ? "rgba(16, 185, 129, 0.4)"
+                        : "rgba(56, 189, 248, 0.4)"
+                    }`,
+                  }}
+                >
+                  {selectedSymbols.some(isForexPair) && selectedSymbols.some((s) => !isForexPair(s))
+                    ? "🌐 Hybrid Multi-Asset Basket"
+                    : selectedSymbols.every(isForexPair)
+                    ? "💱 Forex Only Basket"
+                    : "🪙 Crypto Only Basket"}
+                </span>
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                  ({selectedSymbols.filter((s) => !isForexPair(s)).length} Crypto · {selectedSymbols.filter(isForexPair).length} Forex · {selectedSymbols.length} Total Selected)
+                </span>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+
+            {/* Quick Presets Strip */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               <button
                 type="button"
+                className="secondary"
                 onClick={selectAllLiveSymbols}
                 disabled={!canStart}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6 }}
                 title="Select all popular markets"
               >
-                Select All Popular
+                Select All ({POPULAR_SYMBOLS.length})
               </button>
               <button
                 type="button"
                 className="secondary"
                 onClick={() => setSelectedSymbols([...POPULAR_CRYPTO_SYMBOLS])}
                 disabled={!canStart}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6 }}
               >
                 🪙 Crypto Only ({POPULAR_CRYPTO_SYMBOLS.length})
               </button>
@@ -1892,6 +1920,7 @@ export default function PaperTradingPage() {
                 className="secondary"
                 onClick={selectForexMajors}
                 disabled={!canStart}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6 }}
               >
                 💱 Forex Majors ({FOREX_MAJOR_SYMBOLS.length})
               </button>
@@ -1900,6 +1929,7 @@ export default function PaperTradingPage() {
                 className="secondary"
                 onClick={selectHybridBasket}
                 disabled={!canStart}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6 }}
               >
                 🌐 Hybrid Basket (5)
               </button>
@@ -1908,96 +1938,320 @@ export default function PaperTradingPage() {
                 className="secondary"
                 onClick={useStrategySymbols}
                 disabled={!canStart}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6 }}
               >
-                Use strategy symbols
+                🎯 Strategy Pairs
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={clearAllSymbols}
+                disabled={!canStart}
+                style={{ padding: "5px 10px", fontSize: 11, fontWeight: 600, borderRadius: 6, color: "#f87171", borderColor: "rgba(239, 68, 68, 0.4)" }}
+              >
+                Reset
               </button>
             </div>
           </div>
 
-          {/* Segmented Market Filter Tabs */}
-          <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 8 }}>
-            {[
-              { id: "ALL", label: `🌐 All Markets (${allAvailableMarkets.length})` },
-              { id: "CRYPTO", label: `🪙 Crypto Only (${allAvailableMarkets.filter((s) => !isForexPair(s)).length})` },
-              { id: "FOREX", label: `💱 Forex Only (${allAvailableMarkets.filter(isForexPair).length})` },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setPaperMarketFilter(tab.id as any)}
+          {/* Dedicated Filter & Search Toolbar */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 8,
+              background: "#090e17",
+              border: "1px solid #1e293b",
+              borderRadius: "8px 8px 0 0",
+              padding: "8px 12px",
+            }}
+          >
+            {/* Filter Tabs */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              {[
+                { id: "ALL", label: `🌐 All (${allAvailableMarkets.length})` },
+                { id: "CRYPTO", label: `🪙 Crypto (${allAvailableMarkets.filter((s) => !isForexPair(s)).length})` },
+                { id: "FOREX", label: `💱 Forex (${allAvailableMarkets.filter(isForexPair).length})` },
+                { id: "SELECTED", label: `✓ Active Basket (${selectedSymbols.length})` },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setPaperMarketFilter(tab.id as any)}
+                  style={{
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    borderRadius: 6,
+                    border: paperMarketFilter === tab.id ? "1px solid #38bdf8" : "1px solid #243044",
+                    background: paperMarketFilter === tab.id ? "rgba(56, 189, 248, 0.15)" : "#0f172a",
+                    color: paperMarketFilter === tab.id ? "#38bdf8" : "#94a3b8",
+                    cursor: "pointer",
+                    fontWeight: paperMarketFilter === tab.id ? 800 : 500,
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Quick Search */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="text"
+                placeholder="Filter pairs (e.g. BTC, JPY, EUR)..."
+                value={marketSearchFilter}
+                onChange={(e) => setMarketSearchFilter(e.target.value.toUpperCase())}
                 style={{
-                  padding: "5px 12px",
-                  fontSize: 12,
+                  background: "#0d131f",
+                  border: "1px solid #243044",
                   borderRadius: 6,
-                  border: paperMarketFilter === tab.id ? "1px solid #38bdf8" : "1px solid #334155",
-                  background: paperMarketFilter === tab.id ? "rgba(56, 189, 248, 0.15)" : "#0f172a",
-                  color: paperMarketFilter === tab.id ? "#38bdf8" : "#94a3b8",
-                  cursor: "pointer",
-                  fontWeight: paperMarketFilter === tab.id ? 700 : 500,
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  color: "#f8fafc",
+                  width: 170,
+                  textTransform: "uppercase",
+                }}
+              />
+              {marketSearchFilter && (
+                <button
+                  type="button"
+                  onClick={() => setMarketSearchFilter("")}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#94a3b8",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    padding: "2px 4px",
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Contained Symbol Chips Box (Scrollable, Guaranteed Never to Overflow) */}
+          <div
+            style={{
+              background: "#060913",
+              border: "1px solid #1e293b",
+              borderTop: "none",
+              borderRadius: "0 0 8px 8px",
+              padding: "10px",
+              maxHeight: 220,
+              overflowY: "auto",
+              overflowX: "hidden",
+            }}
+          >
+            {filteredMarketList.length > 0 ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(136px, 1fr))",
+                  gap: 6,
+                  width: "100%",
                 }}
               >
-                {tab.label}
-              </button>
-            ))}
+                {filteredMarketList.map((sym) => {
+                  const isFx = isForexPair(sym);
+                  const isChecked = selectedSymbols.includes(sym);
+                  const isCurrentChart = sym === selectedChartSymbol;
+                  return (
+                    <label
+                      key={sym}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 7,
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        border: isChecked ? "1px solid rgba(56, 189, 248, 0.55)" : "1px solid #1e293b",
+                        background: isChecked ? "rgba(56, 189, 248, 0.12)" : "#0c1322",
+                        cursor: canStart ? "pointer" : "not-allowed",
+                        boxShadow: isChecked ? "0 0 10px rgba(56, 189, 248, 0.08)" : "none",
+                        transition: "all 0.12s ease",
+                        minWidth: 0,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={!canStart}
+                        onChange={() => toggleLiveSymbol(sym)}
+                        style={{
+                          width: 14,
+                          height: 14,
+                          margin: 0,
+                          padding: 0,
+                          flexShrink: 0,
+                          accentColor: "#38bdf8",
+                          cursor: canStart ? "pointer" : "not-allowed",
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 800,
+                          padding: "1px 5px",
+                          borderRadius: 3,
+                          flexShrink: 0,
+                          background: isFx ? "rgba(16, 185, 129, 0.18)" : "rgba(168, 85, 247, 0.18)",
+                          color: isFx ? "#34d399" : "#c084fc",
+                          border: `1px solid ${isFx ? "rgba(16, 185, 129, 0.35)" : "rgba(168, 85, 247, 0.35)"}`,
+                          letterSpacing: "0.03em",
+                        }}
+                      >
+                        {isFx ? "FX" : "CRYPTO"}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: isChecked ? 800 : 600,
+                          color: isChecked ? "#f8fafc" : "#cbd5e1",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                        title={formatDisplaySymbol(sym)}
+                      >
+                        {formatDisplaySymbol(sym)}
+                      </span>
+                      {isCurrentChart && (
+                        <span style={{ fontSize: 9, color: "#38bdf8", flexShrink: 0 }} title="Viewing on chart">
+                          📈
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "18px 0", color: "#64748b", fontSize: 13 }}>
+                No markets match the filter &quot;{marketSearchFilter}&quot;.
+              </div>
+            )}
           </div>
 
-          <div className="symbol-picker">
-            {filteredMarketList.map((sym) => {
-              const isFx = isForexPair(sym);
-              return (
-                <label key={sym} className="symbol-chip">
-                  <input
-                    type="checkbox"
-                    checked={selectedSymbols.includes(sym)}
-                    disabled={!canStart}
-                    onChange={() => toggleLiveSymbol(sym)}
-                  />
+          {/* Custom Market Adder & Active Basket Summary */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 12,
+              marginTop: 10,
+            }}
+          >
+            {/* Quick Add Custom Pair */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder="Add custom pair (e.g. PEPE, SUI, GBPJPY)..."
+                value={customSymbolInput}
+                onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomSymbol();
+                  }
+                }}
+                style={{
+                  background: "#090e17",
+                  border: "1px solid #334155",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  color: "#f8fafc",
+                  width: 230,
+                  textTransform: "uppercase",
+                }}
+              />
+              <button
+                type="button"
+                onClick={addCustomSymbol}
+                disabled={!canStart || !customSymbolInput.trim()}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  background: "#38bdf8",
+                  color: "#0f172a",
+                }}
+              >
+                + Add
+              </button>
+            </div>
+
+            {/* Active Selected Markets Tags Strip */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", flex: 1, justifyContent: "flex-end", minWidth: 260 }}>
+              <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700 }}>
+                Active Basket ({selectedSymbols.length}):
+              </span>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxHeight: 56, overflowY: "auto", overflowX: "hidden" }}>
+                {selectedSymbols.slice(0, 10).map((sym) => (
                   <span
+                    key={sym}
                     style={{
-                      fontSize: 9,
-                      fontWeight: 800,
-                      padding: "1px 4px",
-                      borderRadius: 3,
-                      marginRight: 4,
-                      background: isFx ? "rgba(16, 185, 129, 0.2)" : "rgba(99, 102, 241, 0.2)",
-                      color: isFx ? "#34d399" : "#818cf8",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: "rgba(56, 189, 248, 0.12)",
+                      border: "1px solid rgba(56, 189, 248, 0.35)",
+                      color: "#38bdf8",
+                      padding: "2px 7px",
+                      borderRadius: 4,
                     }}
                   >
-                    {isFx ? "FX" : "CRYPTO"}
+                    <span>{formatDisplaySymbol(sym)}</span>
+                    {canStart && selectedSymbols.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => toggleLiveSymbol(sym)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#94a3b8",
+                          cursor: "pointer",
+                          padding: 0,
+                          fontSize: 10,
+                          fontWeight: 800,
+                          lineHeight: 1,
+                        }}
+                        title="Remove from basket"
+                      >
+                        ×
+                      </button>
+                    )}
                   </span>
-                  <span>{formatDisplaySymbol(sym)}</span>
-                </label>
-              );
-            })}
+                ))}
+                {selectedSymbols.length > 10 && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: "#94a3b8",
+                      alignSelf: "center",
+                      padding: "2px 5px",
+                      background: "#1e293b",
+                      borderRadius: 4,
+                      fontWeight: 700,
+                    }}
+                  >
+                    +{selectedSymbols.length - 10} more
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="Add pair (e.g. EURUSD, GBPJPY, PEPE, SUI)..."
-              value={customSymbolInput}
-              onChange={(e) => setCustomSymbolInput(e.target.value.toUpperCase())}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addCustomSymbol();
-                }
-              }}
-              style={{ ...inputStyle, width: 280, textTransform: "uppercase" }}
-            />
-            <button
-              type="button"
-              onClick={addCustomSymbol}
-              disabled={!canStart || !customSymbolInput.trim()}
-              style={{ padding: "6px 14px", fontSize: 13 }}
-            >
-              + Add to Markets
-            </button>
-          </div>
-
-          <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 8 }}>
-            Selected active markets ({selectedSymbols.length}): {selectedSymbols.join(", ")}. Multi-symbol live paper mode executes real-time Binance market simulation on all selected pairs.
-          </p>
         </div>
 
         <div
