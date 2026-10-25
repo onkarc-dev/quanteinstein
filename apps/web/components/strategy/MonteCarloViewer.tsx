@@ -21,13 +21,13 @@ export default function MonteCarloViewer({
   async function handleRunMonteCarlo() {
     setLoading(true);
     try {
-      // Use provided returns or generate authentic test sample if none provided
       const sampleReturns =
         strategyReturns.length >= 10
           ? strategyReturns
           : [
               0.008, -0.004, 0.012, 0.003, -0.007, 0.015, -0.002, 0.009, -0.005, 0.011,
               -0.008, 0.014, -0.003, 0.006, 0.002, -0.009, 0.018, -0.004, 0.007, -0.006,
+              0.011, -0.005, 0.004, -0.002, 0.016, -0.008, 0.013, 0.002, -0.004, 0.007,
             ];
 
       const res: any = await api("/quant-engine/monte-carlo/run", {
@@ -51,23 +51,48 @@ export default function MonteCarloViewer({
     }
   }
 
+  const selectStyle: React.CSSProperties = {
+    background: "#080c14",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
+    color: "#f8fafc",
+    borderRadius: 8,
+    padding: "6px 12px",
+    fontSize: 12,
+    outline: "none",
+    cursor: "pointer",
+  };
+
   return (
-    <div className="space-y-3 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wide flex items-center gap-1.5">
-            <span>🎲</span> Stationary Block Bootstrap Monte Carlo Suite
-          </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Preserves autocorrelated volatility clusters (Politis-Romano) to compute authentic prop-firm failure probabilities.
-          </p>
+    <div
+      style={{
+        background: "rgba(14, 18, 30, 0.85)",
+        border: "1px solid rgba(245, 158, 11, 0.25)",
+        borderRadius: 14,
+        padding: "16px 18px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      {/* ─── Header & Control Bar ─── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 16 }}>🎲</span>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 800, margin: 0, color: "#fbbf24", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Stationary Block Bootstrap Monte Carlo Suite
+            </h3>
+            <p style={{ margin: "2px 0 0 0", fontSize: 11, color: "#64748b" }}>
+              Politis-Romano resampling preserves serial autocorrelation and volatility clustering to compute authentic prop-firm failure probabilities.
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <select
             value={iterations}
             onChange={(e) => setIterations(Number(e.target.value))}
-            className="bg-slate-950 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs"
+            style={selectStyle}
           >
             <option value={1000}>1,000 Resamples</option>
             <option value={2500}>2,500 Resamples</option>
@@ -78,89 +103,242 @@ export default function MonteCarloViewer({
             type="button"
             disabled={loading}
             onClick={handleRunMonteCarlo}
-            className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all shadow-md shadow-amber-500/20 disabled:opacity-50"
+            style={{
+              background: loading
+                ? "rgba(245, 158, 11, 0.3)"
+                : "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+              color: "#0f172a",
+              border: "none",
+              borderRadius: 8,
+              padding: "7px 16px",
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: loading ? "not-allowed" : "pointer",
+              boxShadow: "0 2px 10px rgba(245, 158, 11, 0.3)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              transition: "all 0.12s ease",
+            }}
           >
-            {loading ? "Simulating..." : "▶ Run Stress Test"}
+            {loading ? "Simulating Resamples..." : "▶ Run Stress Test"}
           </button>
         </div>
       </div>
 
-      {report && (
-        <div className="pt-2 space-y-3">
+      {/* ─── Results Dashboard ─── */}
+      {report ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 4 }}>
           {/* Key Metric Gauges */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-              <div className="text-slate-400 text-[11px]">Prop Challenge Breach Risk</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            {/* Metric 1: Prop Breach Risk */}
+            <div
+              style={{
+                background: "rgba(8, 12, 22, 0.8)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 10,
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>Prop Challenge Breach Risk</div>
               <div
-                className={`text-lg font-bold mt-0.5 ${
-                  report.prob_breaching_prop_limit_pct > 15
-                    ? "text-rose-400"
-                    : report.prob_breaching_prop_limit_pct > 5
-                    ? "text-amber-400"
-                    : "text-emerald-400"
-                }`}
+                style={{
+                  fontSize: 22,
+                  fontWeight: 900,
+                  marginTop: 4,
+                  color:
+                    report.prob_breaching_prop_limit_pct > 15
+                      ? "#f87171"
+                      : report.prob_breaching_prop_limit_pct > 5
+                      ? "#fbbf24"
+                      : "#4ade80",
+                }}
               >
-                {report.prob_breaching_prop_limit_pct}%
+                {report.prob_breaching_prop_limit_pct.toFixed(1)}%
               </div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Limit: {report.prop_firm_limit_pct}% DD</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
+                Target: &lt; 5% for funded accounts
+              </div>
             </div>
 
-            <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-              <div className="text-slate-400 text-[11px]">P95 Worst-Case Drawdown</div>
-              <div className="text-lg font-bold text-slate-200 mt-0.5">
-                {report.p95_max_drawdown_pct}%
+            {/* Metric 2: Max Drawdown (Median vs P95) */}
+            <div
+              style={{
+                background: "rgba(8, 12, 22, 0.8)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 10,
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>Max Drawdown (P50 / P95)</div>
+              <div style={{ fontSize: 22, fontWeight: 900, marginTop: 4, color: "#e2e8f0" }}>
+                <span style={{ color: "#38bdf8" }}>{report.median_max_drawdown_pct.toFixed(1)}%</span>
+                <span style={{ fontSize: 14, color: "#64748b", margin: "0 6px" }}>/</span>
+                <span style={{ color: "#f87171" }}>{report.p95_max_drawdown_pct.toFixed(1)}%</span>
               </div>
-              <div className="text-[10px] text-slate-500 mt-0.5">P99: {report.p99_max_drawdown_pct}%</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
+                P95 Worst-case vs {report.prop_firm_limit_pct}% ceiling
+              </div>
             </div>
 
-            <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-              <div className="text-slate-400 text-[11px]">Median Sharpe Ratio</div>
-              <div className="text-lg font-bold text-sky-400 mt-0.5">{report.median_sharpe}</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">5th %ile: {report.p5_sharpe}</div>
+            {/* Metric 3: Final Equity Median */}
+            <div
+              style={{
+                background: "rgba(8, 12, 22, 0.8)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 10,
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>Expected Final Capital (P50)</div>
+              <div style={{ fontSize: 22, fontWeight: 900, marginTop: 4, color: "#4ade80" }}>
+                ${report.median_final_equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
+                P5 Floor: ${report.p5_final_equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
             </div>
 
-            <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-              <div className="text-slate-400 text-[11px]">Ruin Probability (&lt;50% Cap)</div>
-              <div
-                className={`text-lg font-bold mt-0.5 ${
-                  report.prob_ruin_50pct > 1.0 ? "text-rose-400" : "text-emerald-400"
-                }`}
-              >
-                {report.prob_ruin_50pct}%
+            {/* Metric 4: Ruin Probability */}
+            <div
+              style={{
+                background: "rgba(8, 12, 22, 0.8)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 10,
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>Probability of Ruin (50% DD)</div>
+              <div style={{ fontSize: 22, fontWeight: 900, marginTop: 4, color: report.prob_ruin_50pct > 0 ? "#f87171" : "#4ade80" }}>
+                {report.prob_ruin_50pct.toFixed(1)}%
               </div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Across {report.iterations} runs</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
+                Annualized Sharpe: {report.median_sharpe.toFixed(2)}
+              </div>
             </div>
           </div>
 
           {/* Drawdown Distribution Histogram */}
-          {report.drawdown_distribution_bins?.length > 0 && (
-            <div className="p-3 bg-slate-950 rounded-lg border border-slate-800">
-              <div className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wide">
-                Simulated Drawdown Density Distribution
+          {report.drawdown_distribution_bins && report.drawdown_distribution_bins.length > 0 && (
+            <div
+              style={{
+                background: "rgba(8, 12, 22, 0.7)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 10,
+                padding: "12px 16px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Max Drawdown Probability Distribution ({iterations.toLocaleString()} Resample Paths)
+                </span>
+                <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 700 }}>
+                  Red line indicates {report.prop_firm_limit_pct}% Challenge Invalidation
+                </span>
               </div>
-              <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5 items-end h-16 pt-2">
-                {report.drawdown_distribution_bins.map((b: any, idx: number) => {
-                  const maxCount = Math.max(...report.drawdown_distribution_bins.map((x: any) => x.count), 1);
-                  const heightPct = Math.round((b.count / maxCount) * 100);
-                  const isExceeded = parseFloat(b.range) >= report.prop_firm_limit_pct;
 
-                  return (
-                    <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 90, paddingTop: 10 }}>
+                {(() => {
+                  const maxCount = Math.max(...report.drawdown_distribution_bins.map((b: any) => b.count), 1);
+                  return report.drawdown_distribution_bins.map((bin: any, idx: number) => {
+                    const heightPct = Math.max(8, (bin.count / maxCount) * 100);
+                    const rangeNum = parseFloat(bin.range);
+                    const isBreachZone = rangeNum >= report.prop_firm_limit_pct;
+                    const barColor = isBreachZone ? "#f43f5e" : "#0284c7";
+
+                    return (
                       <div
-                        style={{ height: `${Math.max(4, heightPct)}%` }}
-                        className={`w-full rounded-t transition-all ${
-                          isExceeded ? "bg-rose-500/80" : "bg-sky-500/70"
-                        }`}
-                      />
-                      <span className="text-[8px] text-slate-500 truncate w-full text-center mt-1">
-                        {b.range.split("-")[0]}
-                      </span>
-                    </div>
-                  );
-                })}
+                        key={idx}
+                        style={{
+                          flex: 1,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          height: "100%",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <div
+                          title={`${bin.range}: ${bin.count} simulations`}
+                          style={{
+                            width: "100%",
+                            height: `${heightPct}%`,
+                            background: barColor,
+                            borderRadius: "3px 3px 0 0",
+                            transition: "height 0.2s ease",
+                            opacity: 0.85,
+                          }}
+                        />
+                        <span style={{ fontSize: 9, color: "#64748b", marginTop: 4, transform: "scale(0.85)", whiteSpace: "nowrap" }}>
+                          {bin.range.split("-")[0]}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           )}
+
+          {/* Percentile Table */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(5, 1fr)",
+              gap: 8,
+              background: "rgba(8, 12, 22, 0.6)",
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: "1px solid rgba(255, 255, 255, 0.05)",
+              textAlign: "center",
+              fontSize: 11,
+            }}
+          >
+            <div>
+              <div style={{ color: "#64748b" }}>P5 (Best Case)</div>
+              <div style={{ color: "#4ade80", fontWeight: 700, marginTop: 2 }}>
+                ${report.p5_final_equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#64748b" }}>P50 (Median)</div>
+              <div style={{ color: "#38bdf8", fontWeight: 700, marginTop: 2 }}>
+                ${report.median_final_equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#64748b" }}>P90 Max DD</div>
+              <div style={{ color: "#fbbf24", fontWeight: 700, marginTop: 2 }}>
+                {report.p90_max_drawdown_pct.toFixed(1)}%
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#64748b" }}>P95 Worst DD</div>
+              <div style={{ color: "#f87171", fontWeight: 700, marginTop: 2 }}>
+                {report.p95_max_drawdown_pct.toFixed(1)}%
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "#64748b" }}>P99 Black Swan</div>
+              <div style={{ color: "#f43f5e", fontWeight: 700, marginTop: 2 }}>
+                {report.p99_max_drawdown_pct.toFixed(1)}%
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            background: "rgba(255, 255, 255, 0.02)",
+            border: "1px dashed rgba(245, 158, 11, 0.2)",
+            borderRadius: 10,
+            padding: "20px",
+            textAlign: "center",
+            color: "#94a3b8",
+            fontSize: 12,
+          }}
+        >
+          Click <strong>▶ Run Stress Test</strong> above to execute a 2,500-iteration stationary block bootstrap on this strategy.
         </div>
       )}
     </div>

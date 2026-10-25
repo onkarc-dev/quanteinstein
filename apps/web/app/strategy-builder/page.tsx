@@ -986,32 +986,56 @@ export default function StrategyBuilderPage() {
               gap: 24,
             }}
           >
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 20 }}>🏛️</span>
-                <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#f8fafc" }}>
-                  Institutional Quant Architecture &amp; Prop-Firm Engine
-                </h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 20 }}>🏛️</span>
+                  <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, color: "#f8fafc" }}>
+                    Institutional Quant Architecture &amp; Prop-Firm Engine
+                  </h2>
+                </div>
+                <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
+                  Multi-Asset Dynamic Universe Screening, Risk Parity / Inverse Volatility Allocation, Recursive AST Logic Tree, and Intraday Peak Trailing Drawdown Circuit Breakers.
+                </p>
               </div>
-              <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>
-                Multi-Asset Dynamic Universe Screening, Risk Parity / Inverse Volatility Allocation, Recursive AST Logic Tree, and Intraday Peak Trailing Drawdown Circuit Breakers.
-              </p>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", border: "1px solid rgba(56, 189, 248, 0.3)" }}>
+                  Universe: {dynamicUniverseFilter.assetClass}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "rgba(168, 85, 247, 0.15)", color: "#c084fc", border: "1px solid rgba(168, 85, 247, 0.3)" }}>
+                  Weighting: {portfolioAllocation.weighting}
+                </span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, background: "rgba(244, 63, 94, 0.15)", color: "#fb7185", border: "1px solid rgba(244, 63, 94, 0.3)" }}>
+                  DD Limit: {propFirmRisk.maxTrailingDrawdownPct}%
+                </span>
+              </div>
             </div>
 
-            <UniverseSelector
-              filter={dynamicUniverseFilter}
-              onFilterChange={setDynamicUniverseFilter}
-              allocation={portfolioAllocation}
-              onAllocationChange={setPortfolioAllocation}
-              selectedSymbols={cfg.symbols}
-              onSelectSymbols={(syms) => upd("symbols", syms)}
-            />
+            {/* Module 1: Dynamic Universe & Cross-Sectional Allocation */}
+            <div style={{ background: "rgba(10, 15, 26, 0.4)", borderRadius: 14, padding: 16, border: "1px solid rgba(56, 189, 248, 0.15)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                <span style={{ fontSize: 15 }}>🌐</span>
+                <h3 style={{ fontSize: 14, fontWeight: 800, margin: 0, color: "#38bdf8", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Module 1: Dynamic Universe &amp; Cross-Sectional Allocation Engine
+                </h3>
+              </div>
+              <UniverseSelector
+                filter={dynamicUniverseFilter}
+                onFilterChange={setDynamicUniverseFilter}
+                allocation={portfolioAllocation}
+                onAllocationChange={setPortfolioAllocation}
+                selectedSymbols={cfg.symbols}
+                onSelectSymbols={(syms) => upd("symbols", syms)}
+              />
+            </div>
 
-            <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 16 }}>🌿</span>
-                <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: "#38bdf8" }}>
-                  Module 2: Visual Logic Builder (Recursive AST Condition Tree)
+            {/* Module 2: Visual Logic Builder (AST) */}
+            <div style={{ background: "rgba(10, 15, 26, 0.4)", borderRadius: 14, padding: 16, border: "1px solid rgba(168, 85, 247, 0.15)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                <span style={{ fontSize: 15 }}>🌿</span>
+                <h3 style={{ fontSize: 14, fontWeight: 800, margin: 0, color: "#c084fc", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Module 2: Visual Logic Builder (Nested Condition Tree)
                 </h3>
               </div>
               <NestedConditionCanvas
@@ -1021,20 +1045,23 @@ export default function StrategyBuilderPage() {
               />
             </div>
 
-            <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: 20 }}>
+            {/* Module 3: Prop-Firm Circuit Breaker */}
+            <div style={{ background: "rgba(10, 15, 26, 0.4)", borderRadius: 14, padding: 16, border: "1px solid rgba(244, 63, 94, 0.15)" }}>
               <PropFirmMatrix
                 config={propFirmRisk}
                 onChange={setPropFirmRisk}
               />
             </div>
 
-            <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: 20 }}>
+            {/* Module 4: Stationary Block Bootstrap Monte Carlo */}
+            <div style={{ background: "rgba(10, 15, 26, 0.4)", borderRadius: 14, padding: 16, border: "1px solid rgba(245, 158, 11, 0.15)" }}>
               <MonteCarloViewer
                 propLimitPct={propFirmRisk.maxTrailingDrawdownPct}
               />
             </div>
           </div>
         )}
+
 
         {/* ─── Main Configuration Card ─── */}
         <div
