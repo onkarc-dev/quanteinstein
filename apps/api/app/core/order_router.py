@@ -289,6 +289,18 @@ class InstitutionalOrderRouter:
                 qty=qty,
                 reason=reason,
             )
+            if not paper_res.get("ok") and "already open" in str(paper_res.get("error", "")).lower():
+                try:
+                    paper_manager.close_position(user_id, symbol=sym)
+                    paper_res = paper_manager.execute_order(
+                        user_id=user_id,
+                        symbol=sym,
+                        side=norm_side,
+                        qty=qty,
+                        reason=reason,
+                    )
+                except Exception:
+                    pass
             if not paper_res.get("ok"):
                 return paper_res
 
