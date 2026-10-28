@@ -12,6 +12,7 @@ from app.core.config import settings
 def current_user(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_user_tier: str | None = Header(default=None, alias="X-User-Tier"),
 ):
     """Resolve API key or bearer token → user dict. Supports Headless API keys, HS256 JWT, and session tokens."""
     from app.core.api_key_auth import validate_api_key
@@ -20,6 +21,12 @@ def current_user(
         if not user_data:
             return None
         d = row_to_dict(user_data)
+        if x_user_tier:
+            norm_tier = str(x_user_tier).strip().upper()
+            if norm_tier in ("RETAIL", "PRO", "ENTERPRISE"):
+                d["tier"] = norm_tier
+                if norm_tier == "ENTERPRISE" and not d.get("role"):
+                    d["role"] = "ORGANIZATION_ADMIN"
         try:
             from app.core.tenant_context import set_current_tenant
             if d.get("tier") == "ENTERPRISE" and d.get("tenant_db_url"):
@@ -133,31 +140,35 @@ def current_user(
                 name = email.split("@")[0]
 
             with get_primary_conn() as conn:
-                row = conn.execute(f"SELECT id, email, name, onboarding_completed FROM users WHERE id = {p}", (sub,)).fetchone()
+                row = conn.execute(f"SELECT {_USER_FIELDS} FROM users u WHERE u.id = {p}", (sub,)).fetchone()
                 if row:
-                    return row_to_dict(row)
+                    return _bind_tenant(row)
 
                 if email:
-                    row = conn.execute(f"SELECT id, email, name, onboarding_completed FROM users WHERE email = {p}", (email,)).fetchone()
+                    row = conn.execute(f"SELECT {_USER_FIELDS} FROM users u WHERE u.email = {p}", (email,)).fetchone()
                     if row:
-                        return row_to_dict(row)
+                        return _bind_tenant(row)
 
                 # Provision user record in local DB for relational integrity
                 user_email = email or f"{sub}@supabase.user"
+                init_tier = "ENTERPRISE" if (x_user_tier and str(x_user_tier).upper() == "ENTERPRISE") else "RETAIL"
+                init_role = "ORGANIZATION_ADMIN" if init_tier == "ENTERPRISE" else "TRADER"
                 conn.execute(
                     f"""
-                    INSERT INTO users (id, email, name, password_hash, onboarding_completed, created_at)
-                    VALUES ({p}, {p}, {p}, {p}, 1, {p})
+                    INSERT INTO users (id, email, name, password_hash, tier, role, onboarding_completed, created_at)
+                    VALUES ({p}, {p}, {p}, {p}, {p}, {p}, 1, {p})
                     """,
-                    (sub, user_email, name or "Trader", "supabase_auth", now_iso),
+                    (sub, user_email, name or "Trader", "supabase_auth", init_tier, init_role, now_iso),
                 )
                 conn.commit()
-                return {
+                return _bind_tenant({
                     "id": sub,
                     "email": user_email,
                     "name": name or "Trader",
+                    "tier": init_tier,
+                    "role": init_role,
                     "onboarding_completed": True,
-                }
+                })
     except HTTPException:
         raise
     except Exception:

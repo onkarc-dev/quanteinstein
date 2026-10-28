@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getUser, logout, type AuthUser } from '../lib/api';
+import { getUser, logout, setTierOverride, type AuthUser } from '../lib/api';
 
 export default function ProfileMenu() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -29,13 +29,8 @@ export default function ProfileMenu() {
 
   const handleToggleTier = () => {
     const nextTier = (user.tier === 'ENTERPRISE' ? 'RETAIL' : 'ENTERPRISE') as 'RETAIL' | 'ENTERPRISE';
-    const updatedUser = { ...user, tier: nextTier };
-    const serialized = JSON.stringify(updatedUser);
-    localStorage.setItem('prismflow_user', serialized);
-    localStorage.setItem('quanteinstein_user', serialized);
-    localStorage.setItem('user', serialized);
+    const updatedUser = setTierOverride(nextTier);
     setUser(updatedUser);
-    window.dispatchEvent(new Event('storage'));
   };
 
   return (

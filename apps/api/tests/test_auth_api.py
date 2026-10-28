@@ -92,6 +92,26 @@ class AuthApiIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(revoked_refresh.status_code, 401)
 
+    def test_switch_tier_endpoint(self):
+        registered = self._register_user()
+        token = registered["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Check /auth/me
+        me_res = self.client.get("/auth/me", headers=headers)
+        self.assertEqual(me_res.status_code, 200)
+
+        # Switch to ENTERPRISE
+        switch_res = self.client.post("/auth/tier", json={"tier": "ENTERPRISE"}, headers=headers)
+        self.assertEqual(switch_res.status_code, 200)
+        self.assertEqual(switch_res.json()["tier"], "ENTERPRISE")
+        self.assertEqual(switch_res.json()["role"], "ORGANIZATION_ADMIN")
+
+        # Verify /auth/me reflects ENTERPRISE
+        me_after = self.client.get("/auth/me", headers=headers)
+        self.assertEqual(me_after.json()["tier"], "ENTERPRISE")
+        self.assertEqual(me_after.json()["role"], "ORGANIZATION_ADMIN")
+
     def test_register_rejects_weak_password(self):
         resp = self.client.post(
             "/auth/register/request-otp",

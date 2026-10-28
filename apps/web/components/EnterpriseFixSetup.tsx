@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   getUser,
+  setTierOverride,
   getFixConnections,
   connectFixBroker,
   uploadFixCertificate,
@@ -115,9 +116,14 @@ export default function EnterpriseFixSetup() {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   useEffect(() => {
-    const u = getUser();
-    setUser(u);
+    const update = () => {
+      const u = getUser();
+      setUser(u);
+    };
+    update();
     fetchFixConnections();
+    window.addEventListener('storage', update);
+    return () => window.removeEventListener('storage', update);
   }, []);
 
   const fetchFixConnections = async () => {
@@ -328,26 +334,28 @@ export default function EnterpriseFixSetup() {
         <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
           <button
             onClick={() => {
-              if (typeof window !== 'undefined') {
-                const updated = { ...(user || {}), tier: 'ENTERPRISE', role: 'ORGANIZATION_ADMIN' };
-                localStorage.setItem('prismflow_user', JSON.stringify(updated));
-                localStorage.setItem('user', JSON.stringify(updated));
-                window.location.reload();
-              }
+              const updated = setTierOverride('ENTERPRISE');
+              setUser(updated);
+              setToastMessage({
+                text: 'Switched to Institutional Enterprise Mode! Prime Brokerage FIX access unlocked.',
+                type: 'success',
+              });
+              fetchFixConnections();
             }}
             style={{
               background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
               border: '1px solid #818cf8',
               color: '#ffffff',
-              padding: '10px 20px',
+              padding: '12px 24px',
               borderRadius: 10,
               fontSize: 13,
-              fontWeight: 700,
+              fontWeight: 800,
               cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(99, 102, 241, 0.3)',
+              boxShadow: '0 4px 16px rgba(99, 102, 241, 0.4)',
+              transition: 'all 0.15s ease',
             }}
           >
-            Switch to Enterprise Test Mode
+            ⚡ Switch to Enterprise Test Mode (Instant Unlock)
           </button>
         </div>
       </div>
@@ -422,6 +430,25 @@ export default function EnterpriseFixSetup() {
               >
                 Enterprise Tier DMA
               </span>
+              <button
+                onClick={() => {
+                  const updated = setTierOverride('RETAIL');
+                  setUser(updated);
+                }}
+                title="Switch back to Retail tier for testing"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#94a3b8',
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Switch to Retail
+              </button>
             </div>
             <p style={{ margin: 0, color: '#94a3b8', fontSize: 13, maxWidth: 680, lineHeight: 1.5 }}>
               Configure institutional low-latency FIX 4.4 and FIX 5.0SP2 Direct Market Access gateways. Provision

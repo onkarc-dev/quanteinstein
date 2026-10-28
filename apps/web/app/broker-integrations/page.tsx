@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getUser, type AuthUser } from '../../lib/api';
+import { getUser, setTierOverride, type AuthUser } from '../../lib/api';
 import RetailBrokerHub from '../../components/RetailBrokerHub';
 import EnterpriseFixSetup from '../../components/EnterpriseFixSetup';
 
@@ -11,12 +11,12 @@ export default function BrokerIntegrationsPage() {
   const [activeTab, setActiveTab] = useState<'retail' | 'enterprise'>('retail');
 
   useEffect(() => {
-    const u = getUser();
-    setUser(u);
-    // If user is enterprise, default to enterprise tab if preferred, or allow switching
-    if (u?.tier === 'ENTERPRISE') {
-      // User can view either retail or enterprise
-    }
+    const update = () => {
+      setUser(getUser());
+    };
+    update();
+    window.addEventListener('storage', update);
+    return () => window.removeEventListener('storage', update);
   }, []);
 
   const isEnterprise = user?.tier === 'ENTERPRISE' || user?.role === 'ORGANIZATION_ADMIN';
@@ -54,23 +54,31 @@ export default function BrokerIntegrationsPage() {
             ⚡ Open Paper Trading Simulator
           </Link>
 
-          {/* User Tier Pill */}
-          <div
+          {/* User Tier Pill & Interactive Switcher */}
+          <button
+            onClick={() => {
+              const nextTier = isEnterprise ? 'RETAIL' : 'ENTERPRISE';
+              const updated = setTierOverride(nextTier);
+              setUser(updated);
+            }}
+            title={`Click to switch to ${isEnterprise ? 'Retail Trader' : 'Institutional Enterprise'} tier`}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 6,
               background: isEnterprise ? 'rgba(99, 102, 241, 0.15)' : 'rgba(56, 189, 248, 0.15)',
               border: isEnterprise ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid rgba(56, 189, 248, 0.4)',
-              padding: '3px 10px',
+              padding: '4px 12px',
               borderRadius: 6,
               fontSize: 11,
               fontWeight: 700,
               color: isEnterprise ? '#c7d2fe' : '#7dd3fc',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
-            <span>{isEnterprise ? 'INSTITUTIONAL TIER' : 'RETAIL TRADER'}</span>
-          </div>
+            <span>{isEnterprise ? '🏛️ INSTITUTIONAL TIER (Switch)' : '⚡ RETAIL TRADER (Switch)'}</span>
+          </button>
         </div>
       </div>
 

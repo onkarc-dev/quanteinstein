@@ -79,6 +79,44 @@ export function getToken(): string {
   return 'demo_enterprise_dev_token';
 }
 
+export const TIER_OVERRIDE_KEY = 'quanteinstein_tier_override';
+
+export function getTierOverride(): 'RETAIL' | 'PRO' | 'ENTERPRISE' | null {
+  if (typeof window === 'undefined') return null;
+  const val = localStorage.getItem(TIER_OVERRIDE_KEY) || localStorage.getItem('prismflow_tier');
+  if (val && ['RETAIL', 'PRO', 'ENTERPRISE'].includes(val.toUpperCase())) {
+    return val.toUpperCase() as 'RETAIL' | 'PRO' | 'ENTERPRISE';
+  }
+  return null;
+}
+
+export function setTierOverride(tier: 'RETAIL' | 'ENTERPRISE'): AuthUser {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(TIER_OVERRIDE_KEY, tier);
+    localStorage.setItem('prismflow_tier', tier);
+    const existing = getUser() || DEFAULT_DEMO_USER;
+    const updated: AuthUser = {
+      ...existing,
+      tier,
+      role: tier === 'ENTERPRISE' ? 'ORGANIZATION_ADMIN' : 'TRADER',
+    };
+    const serialized = JSON.stringify(updated);
+    localStorage.setItem(USER_KEY, serialized);
+    localStorage.setItem('quanteinstein_user', serialized);
+    localStorage.setItem('user', serialized);
+
+    // Synchronize to backend if endpoint available
+    api('/auth/tier', {
+      method: 'POST',
+      body: JSON.stringify({ tier }),
+    }).catch(() => {});
+
+    window.dispatchEvent(new Event('storage'));
+    return updated;
+  }
+  return { ...DEFAULT_DEMO_USER, tier };
+}
+
 export function getUser(): AuthUser | null {
   if (typeof window === 'undefined') return DEFAULT_DEMO_USER;
   try {
@@ -86,9 +124,21 @@ export function getUser(): AuthUser | null {
       localStorage.getItem(USER_KEY) ||
       localStorage.getItem('quanteinstein_user') ||
       localStorage.getItem('user');
+    const override = getTierOverride();
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
+      if (parsed && typeof parsed === 'object') {
+        if (override) {
+          parsed.tier = override;
+          if (override === 'ENTERPRISE' && !parsed.role) {
+            parsed.role = 'ORGANIZATION_ADMIN';
+          }
+        }
+        return parsed;
+      }
+    }
+    if (override) {
+      return { ...DEFAULT_DEMO_USER, tier: override, role: override === 'ENTERPRISE' ? 'ORGANIZATION_ADMIN' : 'TRADER' };
     }
   } catch {}
   return DEFAULT_DEMO_USER;
@@ -104,7 +154,15 @@ export function saveAuth(data: { token?: string; access_token?: string; refresh_
   }
   if (data?.refresh_token) localStorage.setItem(REFRESH_KEY, data.refresh_token);
   if (data?.user) {
-    const serialized = JSON.stringify(data.user);
+    const override = getTierOverride();
+    const userToSave = { ...data.user };
+    if (override) {
+      userToSave.tier = override;
+      if (override === 'ENTERPRISE' && !userToSave.role) {
+        userToSave.role = 'ORGANIZATION_ADMIN';
+      }
+    }
+    const serialized = JSON.stringify(userToSave);
     localStorage.setItem(USER_KEY, serialized);
     localStorage.setItem('quanteinstein_user', serialized);
     localStorage.setItem('user', serialized);
@@ -238,11 +296,17 @@ export async function fetchMe(): Promise<AuthUser> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
+        const override = getTierOverride();
+        const existing = getUser();
+        const tier = override || (user.user_metadata?.tier as any) || existing?.tier || 'ENTERPRISE';
+        const role = tier === 'ENTERPRISE' ? 'ORGANIZATION_ADMIN' : (existing?.role || 'TRADER');
         const authUser: AuthUser = {
           id: user.id,
           email: user.email || '',
           name: (user.user_metadata?.name as string) || (user.user_metadata?.full_name as string) || (user.email ? user.email.split('@')[0] : 'Trader'),
           onboarding_completed: true,
+          tier,
+          role,
         };
         saveAuth({ user: authUser });
         return authUser;
@@ -279,11 +343,17 @@ export async function restoreSession(): Promise<AuthUser | null> {
       }
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
+        const override = getTierOverride();
+        const existing = getUser();
+        const tier = override || (session.user.user_metadata?.tier as any) || existing?.tier || 'ENTERPRISE';
+        const role = tier === 'ENTERPRISE' ? 'ORGANIZATION_ADMIN' : (existing?.role || 'TRADER');
         const authUser: AuthUser = {
           id: session.user.id,
           email: session.user.email || '',
           name: (session.user.user_metadata?.name as string) || (session.user.user_metadata?.full_name as string) || (session.user.email ? session.user.email.split('@')[0] : 'Trader'),
           onboarding_completed: true,
+          tier,
+          role,
         };
         saveAuth({ token: session.access_token, refresh_token: session.refresh_token, user: authUser });
         return authUser;
@@ -311,6 +381,8 @@ export async function api(path: string, options: RequestInit = {}, retries = 2):
   const incomingHeaders = (options.headers as Record<string, string>) || {};
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...incomingHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
+  const currentTier = getUser()?.tier;
+  if (currentTier) headers['X-User-Tier'] = currentTier;
 
   let res: Response;
   try {

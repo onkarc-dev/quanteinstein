@@ -12,9 +12,9 @@ from typing import Any, Dict
 
 import jwt
 from fastapi import APIRouter, HTTPException, Depends, Header, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
-from app.db import get_conn, hash_password, now, row_to_dict, verify_password
+from app.db import get_conn, get_primary_conn, hash_password, now, row_to_dict, verify_password
 from app.core.config import settings
 from app.deps import current_user
 
@@ -555,4 +555,31 @@ def me(user=Depends(current_user)):
         "tier": user.get("tier") or "RETAIL",
         "organization_id": user.get("organization_id"),
         "role": user.get("role") or "TRADER",
+    }
+
+
+class SwitchTierPayload(BaseModel):
+    tier: str = Field(..., description="'RETAIL', 'PRO', or 'ENTERPRISE'")
+
+
+@router.post("/tier", summary="Update or switch current user tier for testing/licensing")
+def update_user_tier(payload: SwitchTierPayload, user=Depends(current_user)):
+    target_tier = str(payload.tier).strip().upper()
+    if target_tier not in ("RETAIL", "PRO", "ENTERPRISE"):
+        raise HTTPException(status_code=400, detail="Invalid tier. Must be 'RETAIL', 'PRO', or 'ENTERPRISE'.")
+    user_id = str(user["id"])
+    target_role = "ORGANIZATION_ADMIN" if target_tier == "ENTERPRISE" else "TRADER"
+    p = _p()
+    with get_primary_conn() as conn:
+        conn.execute(
+            f"UPDATE users SET tier = {p}, role = {p} WHERE id = {p}",
+            (target_tier, target_role, user_id),
+        )
+        conn.commit()
+    return {
+        "ok": True,
+        "id": user_id,
+        "tier": target_tier,
+        "role": target_role,
+        "message": f"User tier updated to {target_tier}",
     }
