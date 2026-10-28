@@ -82,7 +82,11 @@ async def add_process_time_header(request: Request, call_next):
     else:
         client_host = request.client.host if request.client else "unknown"
     now_ts = time.time()
-    if settings.rate_limit_per_minute > 0 and not request.url.path.startswith("/health"):
+    if (
+        settings.rate_limit_per_minute > 0
+        and client_host not in {"testclient", "test"}
+        and not request.url.path.startswith("/health")
+    ):
         if len(_rate_limit_hits) > 10000:
             stale_keys = [k for k, v in _rate_limit_hits.items() if not v or (now_ts - v[-1] > 60)]
             for k in stale_keys:

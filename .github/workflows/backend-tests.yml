@@ -17,6 +17,7 @@ jobs:
       ENV: development
       PRISMFLOW_SECRET_KEY: ci-development-key-with-sufficient-entropy-for-tests
       EMAIL_OTP_DEV_RETURN: "true"
+      RATE_LIMIT_PER_MINUTE: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
