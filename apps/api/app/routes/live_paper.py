@@ -99,6 +99,7 @@ def execute_live_order(payload: dict = Body(default={}), user=Depends(current_us
         order_type=order_type,
         limit_price=limit_price,
         reason=str(payload.get('reason') or 'MANUAL_ORDER'),
+        mode=payload.get('mode') or payload.get('account_mode'),
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to execute order."))

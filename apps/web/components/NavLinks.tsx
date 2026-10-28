@@ -11,6 +11,7 @@ export const NAV_ITEMS = [
   { href: '/backtests', label: 'Backtests', icon: '📈' },
   { href: '/quant-coach', label: 'Coach', icon: '🧠' },
   { href: '/paper-trading', label: 'Paper Trade', icon: '⚡' },
+  { href: '/broker-integrations', label: 'Brokers', icon: '🔗', badge: 'LIVE' },
   { href: '/charting', label: 'Charting', icon: '📉' },
   { href: '/beta-status', label: 'Feed', icon: '📡' },
   { href: '/trade-journal', label: 'Journal', icon: '📓' },
@@ -100,6 +101,8 @@ export default function NavLinks() {
                   borderRadius: 3,
                   background: badge === 'ADMIN'
                     ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+                    : badge === 'LIVE'
+                    ? 'linear-gradient(135deg, #10b981, #059669)'
                     : 'linear-gradient(135deg, #0ea5e9, #6366f1)',
                   color: '#ffffff',
                   letterSpacing: 0.5,

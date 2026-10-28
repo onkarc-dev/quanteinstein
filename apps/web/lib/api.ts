@@ -471,3 +471,195 @@ export async function ssoTestLogin(payload: { email: string; name?: string; orga
     body: JSON.stringify(payload),
   });
 }
+
+
+// ─── Broker & Exchange Integration Interfaces ───────────────────────────────
+
+export interface RetailConnection {
+  id: string;
+  exchange_name: string;
+  account_label: string;
+  key_prefix: string;
+  is_testnet: boolean;
+  is_active: boolean;
+  status: string;
+  last_ping_at?: string;
+  ping_status?: string;
+  ping_latency_ms?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface EnterpriseFixConnection {
+  id: string;
+  prime_broker_name: string;
+  sender_comp_id: string;
+  target_comp_id: string;
+  host_ip: string;
+  port: number;
+  fix_version: string;
+  tls_enabled: boolean;
+  tls_certificate_name?: string;
+  has_certificate?: boolean;
+  heartbeat_interval_sec: number;
+  account_identifier?: string;
+  is_active: boolean;
+  status: string;
+  last_heartbeat_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface BrokerCatalogItem {
+  id: string;
+  name: string;
+  category: 'crypto' | 'forex' | 'prime';
+  requires_passphrase?: boolean;
+  default_target_comp_id?: string;
+  default_host?: string;
+  default_port?: number;
+  default_version?: string;
+}
+
+export interface BrokerCatalogResponse {
+  crypto_exchanges: BrokerCatalogItem[];
+  forex_brokers: BrokerCatalogItem[];
+  prime_brokers: BrokerCatalogItem[];
+  total_retail: number;
+  total_prime: number;
+}
+
+export interface RetailPingTestResult {
+  ok: boolean;
+  status: string;
+  exchange_name: string;
+  is_testnet: boolean;
+  ping_latency_ms: number;
+  server_time: string;
+  message: string;
+}
+
+export interface FixSessionTestResult {
+  ok: boolean;
+  status: string;
+  fix_version: string;
+  handshake_latency_us: number;
+  tls_cipher: string;
+  heartbeat_interval_sec: number;
+  logon_msg_type: string;
+  heartbeat_msg_type: string;
+  session_state: string;
+  message: string;
+}
+
+export async function getBrokerCatalog(): Promise<BrokerCatalogResponse> {
+  return api('/api/v1/brokers/catalog') as any;
+}
+
+export async function getRetailConnections(): Promise<{ ok: boolean; connections: RetailConnection[]; count: number }> {
+  return api('/api/v1/brokers/retail') as any;
+}
+
+export async function testRetailConnection(payload: {
+  exchange_name: string;
+  api_key?: string;
+  api_secret?: string;
+  passphrase?: string;
+  is_testnet?: boolean;
+  connection_id?: string;
+}): Promise<RetailPingTestResult> {
+  return api('/api/v1/brokers/retail/test', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as any;
+}
+
+export async function connectRetailBroker(payload: {
+  exchange_name: string;
+  account_label?: string;
+  api_key: string;
+  api_secret: string;
+  passphrase?: string;
+  is_testnet?: boolean;
+}): Promise<{ ok: boolean; connection_id: string; exchange_name: string; key_prefix: string; message: string }> {
+  return api('/api/v1/brokers/retail/connect', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as any;
+}
+
+export async function deleteRetailConnection(connectionId: string): Promise<{ ok: boolean; message: string }> {
+  return api(`/api/v1/brokers/retail/${connectionId}`, {
+    method: 'DELETE',
+  }) as any;
+}
+
+export async function toggleRetailConnection(connectionId: string): Promise<{ ok: boolean; is_active: boolean }> {
+  return api(`/api/v1/brokers/retail/${connectionId}/toggle`, {
+    method: 'POST',
+  }) as any;
+}
+
+export async function getFixConnections(): Promise<{ ok: boolean; connections: EnterpriseFixConnection[]; supported_prime_brokers: any[]; count: number }> {
+  return api('/api/v1/brokers/fix') as any;
+}
+
+export async function connectFixBroker(payload: {
+  prime_broker_name: string;
+  sender_comp_id: string;
+  target_comp_id: string;
+  host_ip: string;
+  port: number;
+  fix_version: string;
+  tls_enabled: boolean;
+  tls_certificate_path?: string;
+  password?: string;
+  heartbeat_interval_sec: number;
+  account_identifier?: string;
+}): Promise<{ ok: boolean; connection_id: string; status: string; message: string }> {
+  return api('/api/v1/brokers/fix/connect', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as any;
+}
+
+export async function uploadFixCertificate(file: File): Promise<{ ok: boolean; filename: string; stored_path: string; sha256_fingerprint: string; size_bytes: number; message: string }> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/api/v1/brokers/fix/upload-cert`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new ApiError(errData.detail || 'Certificate upload failed', res.status);
+  }
+
+  return res.json();
+}
+
+export async function testFixSession(payload: {
+  connection_id?: string;
+  prime_broker_name?: string;
+  target_comp_id?: string;
+  host_ip?: string;
+  port?: number;
+  fix_version?: string;
+}): Promise<FixSessionTestResult> {
+  return api('/api/v1/brokers/fix/test-session', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as any;
+}
+
+export async function deleteFixConnection(connectionId: string): Promise<{ ok: boolean; message: string }> {
+  return api(`/api/v1/brokers/fix/${connectionId}`, {
+    method: 'DELETE',
+  }) as any;
+}

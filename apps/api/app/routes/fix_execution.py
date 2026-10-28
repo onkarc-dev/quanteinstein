@@ -23,6 +23,7 @@ class FixOrderRequest(BaseModel):
     order_type: str = Field("MARKET", description="'MARKET' or 'LIMIT'")
     limit_price: Optional[float] = Field(None, description="Limit price if LIMIT order")
     reason: str = Field("MANUAL_ORDER", description="Execution rationale or strategy tag")
+    mode: Optional[str] = Field(None, description="Optional override: 'SIMULATED', 'PAPER', or 'LIVE'")
 
 
 @router.get("/status")
@@ -65,6 +66,7 @@ def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
         order_type=payload.order_type,
         limit_price=payload.limit_price,
         reason=payload.reason,
+        mode=payload.mode,
     )
 
 
