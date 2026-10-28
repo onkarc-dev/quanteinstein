@@ -9,6 +9,7 @@ python-multipart==0.0.9
 
 # ─── Auth / security ─────────────────────────────────────────────────────────
 PyJWT==2.8.0
+cryptography>=42.0.0
 
 # ─── Database (SQLite is stdlib; psycopg2 only needed for PostgreSQL) ─────────
 # psycopg2-binary==2.9.9  # Uncomment for PostgreSQL production

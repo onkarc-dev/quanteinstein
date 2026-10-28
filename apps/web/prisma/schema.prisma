@@ -10,3 +10,90 @@ datasource db {
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
+
+model User {
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  name                String?
+  tier                String   @default("RETAIL") // RETAIL, PRO, ENTERPRISE
+  role                String   @default("TRADER") // TRADER, ORGANIZATION_ADMIN, QUANT_RESEARCHER, RISK_OFFICER, COMPLIANCE_OFFICER
+  organizationId      String?  @map("organization_id")
+  tenantDbUrl         String?  @map("tenant_db_url")
+  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  retailConnections       RetailConnection[]
+  enterpriseFixConnections EnterpriseFixConnection[]
+
+  @@map("users")
+}
+
+model RetailConnection {
+  id                  String    @id @default(uuid())
+  userId              String    @map("user_id")
+  exchangeName        String    @map("exchange_name") // e.g. "binance", "coinbase", "oanda", "ig"
+  accountLabel        String    @default("Primary Account") @map("account_label")
+  
+  // AES-256-GCM Encrypted credentials (stored with nonce and auth tag)
+  encryptedApiKey     String    @map("encrypted_api_key") @db.Text
+  encryptedApiSecret  String    @map("encrypted_api_secret") @db.Text
+  encryptedPassphrase String?   @map("encrypted_passphrase") @db.Text
+  keyPrefix           String    @default("") @map("key_prefix")
+  
+  // Connection states
+  isTestnet           Boolean   @default(false) @map("is_testnet")
+  isActive            Boolean   @default(true) @map("is_active")
+  status              String    @default("CONNECTED") // CONNECTED, ERROR, DISCONNECTED, TESTING
+  
+  // Telemetry & Health ping
+  lastPingAt          DateTime? @map("last_ping_at")
+  pingStatus          String?   @map("ping_status")
+  pingLatencyMs       Float?    @map("ping_latency_ms")
+  pingError           String?   @map("ping_error") @db.Text
+  
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_retail_conn_user_id")
+  @@index([userId, exchangeName], map: "idx_retail_conn_user_exchange")
+  @@map("retail_connections")
+}
+
+model EnterpriseFixConnection {
+  id                   String    @id @default(uuid())
+  userId               String    @map("user_id")
+  organizationId       String?   @map("organization_id")
+  
+  // Prime Broker details
+  primeBrokerName      String    @map("prime_broker_name") // "Goldman Sachs GSET", "Morgan Stanley", etc.
+  senderCompId         String    @map("sender_comp_id")
+  targetCompId         String    @map("target_comp_id")
+  hostIp               String    @map("host_ip")
+  port                 Int       @default(9800)
+  fixVersion           String    @default("FIX.4.4") @map("fix_version") // FIX.4.2, FIX.4.4, FIX.5.0
+  
+  // Security & Certificates
+  tlsEnabled           Boolean   @default(true) @map("tls_enabled")
+  tlsCertificatePath   String?   @map("tls_certificate_path") @db.Text
+  tlsCaPath            String?   @map("tls_ca_path") @db.Text
+  encryptedPassword    String?   @map("encrypted_password") @db.Text
+  
+  // Protocol configuration
+  heartbeatIntervalSec Int       @default(30) @map("heartbeat_interval_sec")
+  accountIdentifier    String?   @map("account_identifier")
+  
+  isActive             Boolean   @default(true) @map("is_active")
+  status               String    @default("CONNECTED") // CONNECTED, LOGGED_OUT, ERROR
+  lastHeartbeatAt      DateTime? @map("last_heartbeat_at")
+  
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_enterprise_fix_user_id")
+  @@index([organizationId], map: "idx_enterprise_fix_org_id")
+  @@map("enterprise_fix_connections")
+}
