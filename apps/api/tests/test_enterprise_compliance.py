@@ -182,6 +182,14 @@ def test_immutable_audit_log_recording():
         assert len(row[2]) == 64  # valid SHA-256 hex digest
         assert row[3] == 1
 
+        # Verify database engine triggers enforce write-once immutability (WORM compliance)
+        import sqlite3
+        with pytest.raises((sqlite3.IntegrityError, sqlite3.OperationalError, Exception)):
+            conn.execute("UPDATE audit_logs SET action = 'TAMPERED' WHERE actor_email = 'trader@tier1alpha.com'")
+
+        with pytest.raises((sqlite3.IntegrityError, sqlite3.OperationalError, Exception)):
+            conn.execute("DELETE FROM audit_logs WHERE actor_email = 'trader@tier1alpha.com'")
+
 
 # ─── Task 3: Granular RBAC & Organization Tests ───────────────────────────
 

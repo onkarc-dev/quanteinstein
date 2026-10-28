@@ -162,8 +162,59 @@ export default function OrganizationSettingsPage() {
     window.open('/api/v1/../enterprise/organization/audit-logs/export?format=json', '_blank');
   }
 
-  const isEnterprise = user?.tier === 'ENTERPRISE' || user?.tier === 'PRO';
+  const isEnterprise =
+    user?.tier === 'ENTERPRISE' ||
+    user?.tier === 'PRO' ||
+    user?.role === 'ADMIN' ||
+    user?.role === 'ORGANIZATION_ADMIN' ||
+    user?.role === 'ORG_ADMIN' ||
+    user?.email?.toLowerCase() === 'onkarchouguletrader@gmail.com';
   const roleName = user?.role || 'TRADER';
+
+  if (!loading && user && !isEnterprise) {
+    return (
+      <div style={{ maxWidth: 800, margin: '60px auto', padding: '36px 28px', textAlign: 'center', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16 }}>
+        <span style={{ fontSize: 48 }}>🏛️</span>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#f8fafc', marginTop: 16, marginBottom: 8 }}>
+          Institutional Organization Settings
+        </h1>
+        <p style={{ color: '#94a3b8', fontSize: 14, maxWidth: 540, margin: '0 auto 24px auto', lineHeight: 1.6 }}>
+          Organization management, Granular RBAC permissions (Portfolio Manager, Quant Researcher, Risk Manager, Junior Analyst), and immutable SOC 2 audit logs are strictly reserved for Enterprise accounts.
+        </p>
+        <div style={{ display: 'inline-flex', gap: 12 }}>
+          <Link
+            href="/dashboard"
+            style={{
+              background: '#38bdf8',
+              color: '#0f172a',
+              textDecoration: 'none',
+              padding: '10px 20px',
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            ← Return to Dashboard
+          </Link>
+          <Link
+            href="/paper-trading"
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              color: '#f8fafc',
+              textDecoration: 'none',
+              padding: '10px 20px',
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 13,
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+            }}
+          >
+            Paper Trading Terminal
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{

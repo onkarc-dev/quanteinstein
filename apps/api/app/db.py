@@ -486,6 +486,20 @@ def _init_sqlite():
     with _get_sqlite_conn() as conn:
         conn.executescript(_SQLITE_DDL)
         _migrate_users_table_sqlite(conn)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_audit_logs_no_update
+            BEFORE UPDATE ON audit_logs
+            BEGIN
+                SELECT RAISE(ABORT, 'audit_logs entries are immutable and cannot be modified');
+            END;
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_audit_logs_no_delete
+            BEFORE DELETE ON audit_logs
+            BEGIN
+                SELECT RAISE(ABORT, 'audit_logs entries are immutable and cannot be deleted');
+            END;
+        """)
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(?,?)",
             (SCHEMA_VERSION, now()),
