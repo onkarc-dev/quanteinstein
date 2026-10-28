@@ -368,3 +368,101 @@ export async function selectPrimeBroker(broker_id: string) {
 export async function getFixAuditTrail(limit = 50) {
   return api('/api/v1/execution/audit-trail?limit=' + limit);
 }
+
+
+export type MemberRole = 'ORGANIZATION_ADMIN' | 'QUANT_RESEARCHER' | 'RISK_OFFICER' | 'COMPLIANCE_OFFICER';
+
+export interface OrgMember {
+  id: string;
+  email: string;
+  name: string;
+  role: MemberRole;
+  permissions: string[];
+  created_at: string;
+}
+
+export interface OrgDetails {
+  id: string;
+  name: string;
+  slug: string;
+  tier: string;
+  isolation_mode: string;
+  database_status: string;
+  database_url_masked: string;
+  created_at: string;
+  member_count: number;
+  sso_configured: boolean;
+  sso_provider: string;
+  compliance: {
+    soc2_type2: string;
+    sec_rule_15c3_5: string;
+    finra_4511_audit: string;
+  };
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_id?: string;
+  organization_id?: string;
+  actor_email?: string;
+  actor_role?: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  client_ip: string;
+  request_method: string;
+  request_path: string;
+  status_code: number;
+  payload_digest: string;
+  details?: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function getOrganizationDetails(): Promise<{ status: string; organization: OrgDetails }> {
+  return api('/enterprise/organization/details') as any;
+}
+
+export async function getOrganizationMembers(): Promise<{ status: string; count: number; members: OrgMember[] }> {
+  return api('/enterprise/organization/members') as any;
+}
+
+export async function inviteOrganizationMember(payload: { email: string; name: string; role: MemberRole; password?: string }) {
+  return api('/enterprise/organization/members/invite', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateMemberRole(memberId: string, role: MemberRole) {
+  return api('/enterprise/organization/members/' + memberId + '/role', {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeOrganizationMember(memberId: string) {
+  return api('/enterprise/organization/members/' + memberId, {
+    method: 'DELETE',
+  });
+}
+
+export async function getOrganizationAuditLogs(limit = 50, offset = 0, action?: string, actor?: string): Promise<{ status: string; total: number; limit: number; offset: number; logs: AuditLogEntry[] }> {
+  let url = '/enterprise/organization/audit-logs?limit=' + limit + '&offset=' + offset;
+  if (action) url += '&action=' + encodeURIComponent(action);
+  if (actor) url += '&actor=' + encodeURIComponent(actor);
+  return api(url) as any;
+}
+
+export async function initiateSso(params: { domain?: string; email?: string; provider?: string }) {
+  return api('/auth/sso/initiate', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function ssoTestLogin(payload: { email: string; name?: string; organization_name?: string; role?: string; provider?: string }) {
+  return api('/auth/sso/test-login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

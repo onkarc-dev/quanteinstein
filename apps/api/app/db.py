@@ -217,6 +217,46 @@ CREATE TABLE IF NOT EXISTS fix_audit_trail (
 );
 CREATE INDEX IF NOT EXISTS idx_fix_audit_user ON fix_audit_trail(user_id);
 CREATE INDEX IF NOT EXISTS idx_fix_audit_clord ON fix_audit_trail(cl_ord_id);
+CREATE TABLE IF NOT EXISTS sso_configurations (
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    domain TEXT UNIQUE NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'OKTA',
+    idp_entity_id TEXT NOT NULL,
+    idp_sso_url TEXT NOT NULL,
+    idp_certificate TEXT NOT NULL,
+    sp_entity_id TEXT NOT NULL DEFAULT 'https://quanteinstein.com/auth/sso/metadata',
+    acs_url TEXT NOT NULL DEFAULT 'https://quanteinstein.com/auth/sso/acs',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(organization_id) REFERENCES organizations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_sso_org ON sso_configurations(organization_id);
+CREATE INDEX IF NOT EXISTS idx_sso_domain ON sso_configurations(domain);
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    organization_id TEXT,
+    actor_email TEXT,
+    actor_role TEXT,
+    action TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT,
+    client_ip TEXT NOT NULL,
+    user_agent TEXT,
+    request_path TEXT NOT NULL,
+    request_method TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    payload_digest TEXT,
+    details_json TEXT,
+    is_immutable INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_org_created ON audit_logs(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_user_created ON audit_logs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL

@@ -89,26 +89,48 @@ export default function ProfileMenu() {
           </div>
           <div style={{ color: '#ffffff', fontWeight: 800, marginTop: 4, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
           {isEnterprise && (
-            <Link
-              href="/api-management"
-              onClick={() => setOpen(false)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                textDecoration: 'none',
-                color: '#38bdf8',
-                background: 'rgba(56, 189, 248, 0.12)',
-                border: '1px solid rgba(56, 189, 248, 0.35)',
-                borderRadius: 8,
-                padding: '8px 10px',
-                fontSize: 12,
-                fontWeight: 700,
-                marginBottom: 8,
-              }}
-            >
-              <span>🔑</span> API Management
-            </Link>
+            <>
+              <Link
+                href="/organization-settings"
+                onClick={() => setOpen(false)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  textDecoration: 'none',
+                  color: '#38bdf8',
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  marginBottom: 8,
+                }}
+              >
+                <span>🏛️</span> Organization Settings
+              </Link>
+              <Link
+                href="/api-management"
+                onClick={() => setOpen(false)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  textDecoration: 'none',
+                  color: '#a5b4fc',
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  marginBottom: 8,
+                }}
+              >
+                <span>🔑</span> API Management
+              </Link>
+            </>
           )}
           {isOwnerAdmin && (
             <Link

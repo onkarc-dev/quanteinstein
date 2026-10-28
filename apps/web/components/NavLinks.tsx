@@ -30,6 +30,7 @@ export default function NavLinks() {
   const items = [...NAV_ITEMS];
   if (user?.tier === 'ENTERPRISE' || user?.tier === 'PRO') {
     items.push({ href: '/api-management', label: 'API Keys', icon: '🔑' });
+    items.push({ href: '/organization-settings', label: 'Organization', icon: '🏛️' });
   }
 
   return (

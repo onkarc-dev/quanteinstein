@@ -29,7 +29,7 @@ def get_tenant_conn(tenant_db_url: str):
     parsed = urllib.parse.urlparse(tenant_db_url)
     scheme = parsed.scheme.lower()
 
-    if scheme.startswith("sqlite"):
+    if scheme.startswith("sqlite") or scheme == "file" or tenant_db_url.startswith("file:"):
         return _get_sqlite_tenant_conn(tenant_db_url)
     elif scheme.startswith("postgres"):
         return _get_postgres_tenant_conn(tenant_db_url)
@@ -39,8 +39,8 @@ def get_tenant_conn(tenant_db_url: str):
 
 def _get_sqlite_tenant_conn(tenant_db_url: str):
     """Handle isolated SQLite single-tenant database file."""
-    # sqlite:///path/to/tenant.db
-    path_part = tenant_db_url.replace("sqlite:///", "", 1).replace("sqlite://", "", 1)
+    # sqlite:///path/to/tenant.db or file:path/to/tenant.db
+    path_part = tenant_db_url.replace("sqlite:///", "", 1).replace("sqlite://", "", 1).replace("file://", "", 1).replace("file:", "", 1)
     db_path = Path(path_part)
     if not db_path.is_absolute():
         db_path = settings.api_root / db_path
@@ -55,44 +55,37 @@ def _get_sqlite_tenant_conn(tenant_db_url: str):
 
 
 def _get_postgres_tenant_conn(tenant_db_url: str):
-    """Handle isolated PostgreSQL / Supabase single-tenant instance or dedicated schema."""
-    try:
-        import psycopg2
-        import psycopg2.extras
-    except ImportError:
-        raise RuntimeError(
-            "psycopg2 is required for Enterprise PostgreSQL single-tenant routing. "
-            "Install with: pip install psycopg2-binary"
-        )
+    """Handle isolated PostgreSQL dedicated database or dedicated schema."""
+    import psycopg2
+    import psycopg2.extras
 
-    # Check for dedicated schema query parameter: e.g. postgresql://...?schema=tenant_hedgefund_a
     parsed = urllib.parse.urlparse(tenant_db_url)
-    qs = urllib.parse.parse_qs(parsed.query)
-    schema_name = qs.get("schema", [None])[0]
+    query_params = urllib.parse.parse_qs(parsed.query)
 
-    # Clean URL without custom query params for psycopg2 connect
-    clean_url = tenant_db_url
-    if schema_name:
-        # Reconstruct base URL without the custom 'schema' param to prevent psycopg2 driver error
-        clean_qs = {k: v for k, v in qs.items() if k != "schema"}
-        new_query = urllib.parse.urlencode(clean_qs, doseq=True)
-        clean_url = urllib.parse.urlunparse((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            parsed.params,
-            new_query,
-            parsed.fragment
-        ))
+    # Dedicated schema isolation (search_path)
+    target_schema = None
+    if "currentSchema" in query_params:
+        target_schema = query_params["currentSchema"][0]
+    elif "options" in query_params:
+        for opt in query_params["options"]:
+            if "-c search_path=" in opt:
+                target_schema = opt.split("-c search_path=", 1)[1].strip()
 
-    conn = psycopg2.connect(clean_url, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn = psycopg2.connect(tenant_db_url, cursor_factory=psycopg2.extras.RealDictCursor)
     conn.autocommit = False
 
-    if schema_name:
-        # Set the PostgreSQL search_path to the isolated enterprise tenant schema
+    if target_schema:
         cur = conn.cursor()
-        safe_schema = "".join(c for c in schema_name if c.isalnum() or c == "_")
-        cur.execute(f'SET search_path TO "{safe_schema}", public;')
-        cur.close()
+        # Sanitize schema identifier to alphanumeric/underscore
+        clean_schema = "".join(c for c in target_schema if c.isalnum() or c == "_")
+        if clean_schema:
+            cur.execute(f"SET search_path TO {clean_schema}, public;")
+            cur.close()
 
     return conn
+
+
+def evict_tenant_pool(tenant_db_url: str):
+    """Remove cached connections when a tenant is reconfigured or decommissioned."""
+    if tenant_db_url in _TENANT_POOLS:
+        del _TENANT_POOLS[tenant_db_url]
