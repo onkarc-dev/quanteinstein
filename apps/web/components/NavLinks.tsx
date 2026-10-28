@@ -14,6 +14,8 @@ export const NAV_ITEMS = [
   { href: '/charting', label: 'Charting', icon: '📉' },
   { href: '/beta-status', label: 'Alpha Feed', icon: '📡' },
   { href: '/trade-journal', label: 'Journal & Analytics', icon: '📓' },
+  { href: '/api-management', label: 'API Keys', icon: '🔑', badge: 'INSTITUTIONAL' },
+  { href: '/organization-settings', label: 'Organization', icon: '🏛️', badge: 'INSTITUTIONAL' },
 ];
 
 export default function NavLinks() {
@@ -28,10 +30,6 @@ export default function NavLinks() {
   }, []);
 
   const items = [...NAV_ITEMS];
-  if (user?.tier === 'ENTERPRISE' || user?.tier === 'PRO') {
-    items.push({ href: '/api-management', label: 'API Keys', icon: '🔑' });
-    items.push({ href: '/organization-settings', label: 'Organization', icon: '🏛️' });
-  }
 
   return (
     <div
@@ -45,7 +43,7 @@ export default function NavLinks() {
         scrollbarWidth: 'none',
       }}
     >
-      {items.map(({ href, label }) => {
+      {items.map(({ href, label, icon, badge }) => {
         const isActive =
           pathname === href ||
           (href !== '/' && pathname.startsWith(href)) ||
@@ -66,13 +64,13 @@ export default function NavLinks() {
               display: 'inline-flex',
               alignItems: 'center',
               gap: 7,
-              color: isActive ? '#ffffff' : '#94a3b8',
+              color: isActive ? '#ffffff' : (badge ? '#c7d2fe' : '#94a3b8'),
               background: isActive
                 ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.16) 100%)'
-                : 'transparent',
+                : (badge ? 'rgba(99, 102, 241, 0.08)' : 'transparent'),
               border: isActive
                 ? '1px solid rgba(129, 140, 248, 0.45)'
-                : '1px solid transparent',
+                : (badge ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent'),
               boxShadow: isActive
                 ? '0 0 14px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
                 : 'none',
@@ -90,7 +88,24 @@ export default function NavLinks() {
                 }}
               />
             )}
-            {label}
+            <span>{icon}</span>
+            <span>{label}</span>
+            {badge && (
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  padding: '1px 5px',
+                  borderRadius: 4,
+                  background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                  color: '#ffffff',
+                  letterSpacing: 0.5,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {badge}
+              </span>
+            )}
           </Link>
         );
       })}

@@ -1332,8 +1332,8 @@ export default function PaperTradingPage() {
 
   return (
     <main style={{ padding: 24, maxWidth: 1280, margin: "0 auto" }}>
-      {/* Enterprise Tier Institutional FIX Execution Switcher */}
-      {(currentUser?.tier === 'ENTERPRISE' || currentUser?.tier === 'PRO') && (
+      {/* Institutional Multi-Tier FIX Execution Control Bar */}
+      {true && (
         <section
           style={{
             ...panelStyle,
