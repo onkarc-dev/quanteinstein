@@ -506,6 +506,30 @@ class InstitutionalOrderRouter:
                 detail=f"Order rejected by Institutional Pre-Trade Risk Filter: notional ${notional:,.2f} exceeds fat-finger limit ${max_notional:,.2f}.",
             )
 
+        # SEC Rule 15c3-5 Pre-Trade Risk Gateway validation
+        try:
+            from app.core.institutional_risk_gateway import risk_gateway
+            org_id = user.get("organization_id") or user_id
+            order_limit_px = _float(limit_price) if (str(order_type).upper() == "LIMIT" and limit_price) else ref_price
+            approved, rej_reason, _ = risk_gateway.validate_order(
+                org_id=str(org_id),
+                symbol=sym,
+                side=norm_side,
+                qty=trade_qty,
+                price=order_limit_px,
+                bbo_price=ref_price,
+                order_type=str(order_type),
+            )
+            if not approved:
+                raise HTTPException(
+                    status_code=400,
+                    detail=rej_reason or "Order rejected by Institutional Pre-Trade Risk Gateway",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
         # Generate FIX 4.4 ClOrdID & ExecID
         order_seq = int(time.time() * 1000) % 10000000
         cl_ord_id = f"QE-FIX-{user_id[:8]}-{order_seq}"
