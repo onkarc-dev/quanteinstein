@@ -35,6 +35,7 @@ add_optional_engine_test(matching_engine_tests tests/matching_engine_tests.cpp)
 add_optional_engine_test(paper_broker_tests tests/paper_broker_tests.cpp)
 add_optional_engine_test(exchange_simulator_tests tests/exchange_simulator_tests.cpp)
 add_optional_engine_test(event_store_tests tests/event_store_tests.cpp)
+add_optional_engine_test(fix_engine_tests tests/fix_engine_tests.cpp)
 
 add_executable(benchmark_engine
     cpp_engine/benchmarks/benchmark_engine.cpp

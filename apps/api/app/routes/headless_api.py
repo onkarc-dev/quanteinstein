@@ -426,8 +426,11 @@ class SubmitOrderRequest(BaseModel):
     symbol: str = Field("BTCUSDT", description="Symbol ticker")
     side: str = Field("BUY", pattern="^(BUY|SELL)$", description="'BUY' or 'SELL'")
     qty: Optional[float] = Field(None, gt=0, description="Order quantity")
-    order_type: str = Field("MARKET", pattern="^(MARKET|LIMIT)$", description="'MARKET' or 'LIMIT'")
+    order_type: str = Field("MARKET", description="'MARKET' or 'LIMIT'")
+    type: Optional[str] = Field(None, description="Alias for order_type")
     price: Optional[float] = Field(None, description="Limit price if LIMIT order")
+    limit_price: Optional[float] = Field(None, description="Alias for price")
+    client_order_id: Optional[str] = Field(None, description="Client order ID")
 
 
 @router.post("/orders/session/start", summary="Start algorithmic execution session")
@@ -470,11 +473,18 @@ def submit_order(
         except Exception:
             pass
 
-    res = paper_manager.execute_order(
-        user_id=user_id,
+    from app.core.order_router import order_router
+    ord_type = payload.type or payload.order_type or "MARKET"
+    lim_px = payload.limit_price or payload.price
+    cl_id = payload.client_order_id or "HEADLESS_API_ORDER"
+    res = order_router.route_order(
+        user=user,
         symbol=symbol,
         side=payload.side,
         qty=payload.qty,
+        order_type=ord_type,
+        limit_price=lim_px,
+        reason=cl_id,
     )
 
     if not res.get("ok"):

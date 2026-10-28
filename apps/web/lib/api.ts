@@ -345,3 +345,26 @@ export async function api(path: string, options: RequestInit = {}, retries = 2):
 
   return data;
 }
+
+
+export async function getExecutionStatus() {
+  return api('/api/v1/execution/status');
+}
+
+export async function setExecutionMode(mode: 'SIMULATED' | 'LIVE_FIX') {
+  return api('/api/v1/execution/mode', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export async function selectPrimeBroker(broker_id: string) {
+  return api('/api/v1/execution/prime-broker', {
+    method: 'POST',
+    body: JSON.stringify({ broker_id }),
+  });
+}
+
+export async function getFixAuditTrail(limit = 50) {
+  return api('/api/v1/execution/audit-trail?limit=' + limit);
+}

@@ -86,12 +86,37 @@ def execute_live_order(payload: dict = Body(default={}), user=Depends(current_us
     symbol = str(payload.get('symbol') or 'BTCUSDT').strip().upper()
     side = str(payload.get('side') or 'BUY').strip().upper()
     qty = payload.get('qty')
+    order_type = str(payload.get('type') or payload.get('order_type') or 'MARKET').strip().upper()
+    limit_price = payload.get('limit_price') or payload.get('price')
     _invalidate_status_cache(user_id)
-    result = manager.execute_order(user_id, symbol=symbol, side=side, qty=qty)
+
+    from app.core.order_router import order_router
+    result = order_router.route_order(
+        user=user,
+        symbol=symbol,
+        side=side,
+        qty=qty,
+        order_type=order_type,
+        limit_price=limit_price,
+        reason=str(payload.get('reason') or 'MANUAL_ORDER'),
+    )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Failed to execute paper order."))
+        raise HTTPException(status_code=400, detail=result.get("error", "Failed to execute order."))
     _STATUS_CACHE[user_id] = (time.time(), manager.status(user_id))
     return result
+
+
+@router.get('/execution-status')
+def get_live_execution_status(user=Depends(current_user)):
+    from app.core.order_router import order_router
+    return order_router.get_execution_status(user)
+
+
+@router.post('/execution-mode')
+def set_live_execution_mode(payload: dict = Body(default={}), user=Depends(current_user)):
+    from app.core.order_router import order_router
+    mode = str((payload or {}).get('mode') or 'SIMULATED')
+    return order_router.set_execution_mode(user, mode)
 
 
 @router.post('/close-position')

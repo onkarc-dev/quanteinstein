@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db import init_db
-from app.routes import auth, strategies, jobs, reports, analytics, coach, journal, live_paper, engine, ai, backtests, quant_engine, community, admin, enterprise, headless_api
+from app.routes import auth, strategies, jobs, reports, analytics, coach, journal, live_paper, engine, ai, backtests, quant_engine, community, admin, enterprise, headless_api, fix_execution
 from app.routes.system import router as system_router
 from app.services.job_queue import build_queue
 import app.services.job_queue as jq_module
@@ -222,3 +222,4 @@ app.include_router(community.router, prefix="/community", tags=["community"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(enterprise.router, prefix="/enterprise", tags=["enterprise"])
 app.include_router(headless_api.router, prefix="/api/v1", tags=["headless-api"])
+app.include_router(fix_execution.router)

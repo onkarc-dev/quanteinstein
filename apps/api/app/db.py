@@ -182,6 +182,41 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_org ON api_keys(organization_id);
+CREATE TABLE IF NOT EXISTS enterprise_execution_settings (
+    user_id TEXT PRIMARY KEY,
+    organization_id TEXT,
+    execution_mode TEXT NOT NULL DEFAULT 'SIMULATED',
+    can_trade_live INTEGER NOT NULL DEFAULT 1,
+    prime_broker_id TEXT NOT NULL DEFAULT 'GS_GSET',
+    prime_broker_name TEXT NOT NULL DEFAULT 'Goldman Sachs Electronic Trading (GSET)',
+    sender_comp_id TEXT NOT NULL DEFAULT 'QUANTEINSTEIN_PROD',
+    target_comp_id TEXT NOT NULL DEFAULT 'GS_GSET_FIX',
+    fix_host TEXT NOT NULL DEFAULT 'fix.primebroker.com',
+    fix_port INTEGER NOT NULL DEFAULT 9800,
+    heartbeat_interval INTEGER NOT NULL DEFAULT 30,
+    max_order_notional REAL NOT NULL DEFAULT 1000000.0,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS fix_audit_trail (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    organization_id TEXT,
+    cl_ord_id TEXT NOT NULL,
+    broker_order_id TEXT NOT NULL,
+    exec_id TEXT NOT NULL,
+    msg_type TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    qty REAL NOT NULL,
+    price REAL NOT NULL,
+    raw_fix_in TEXT,
+    raw_fix_out TEXT,
+    latency_us INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fix_audit_user ON fix_audit_trail(user_id);
+CREATE INDEX IF NOT EXISTS idx_fix_audit_clord ON fix_audit_trail(cl_ord_id);
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
