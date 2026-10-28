@@ -21,40 +21,42 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <nav style={{
           background: '#0d0d1a',
           borderBottom: '1px solid #2a2a4a',
-          padding: '0 24px',
+          padding: '6px 16px',
           display: 'flex',
           alignItems: 'center',
-          height: 56,
-          gap: 0,
+          minHeight: 52,
+          height: 'auto',
+          gap: 10,
           position: 'sticky' as const,
           top: 0,
           zIndex: 100,
+          flexWrap: 'wrap',
         }}>
           <Link href="/" style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             textDecoration: 'none',
-            marginRight: 24,
+            marginRight: 10,
             flexShrink: 0,
           }}>
             <img
               src="/logo.png"
               alt="Quanteinstein"
               style={{
-                width: 32,
-                height: 32,
+                width: 28,
+                height: 28,
                 borderRadius: '50%',
                 objectFit: 'cover',
                 aspectRatio: '1 / 1',
                 imageRendering: '-webkit-optimize-contrast',
                 border: '1.5px solid rgba(212, 175, 55, 0.6)',
-                boxShadow: '0 0 12px rgba(212, 175, 55, 0.3)',
+                boxShadow: '0 0 10px rgba(212, 175, 55, 0.3)',
               }}
             />
             <span style={{
               fontWeight: 800,
-              fontSize: 18,
+              fontSize: 16,
               color: '#f8fafc',
               letterSpacing: -0.5,
             }}>
@@ -63,17 +65,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </Link>
           <NavLinks />
           <div style={{
-            fontSize: 11,
-            color: '#555',
-            background: '#1a1a2e',
-            border: '1px solid #2a2a4a',
-            borderRadius: 6,
-            padding: '4px 10px',
-            whiteSpace: 'nowrap' as const,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexShrink: 0,
+            marginLeft: 'auto',
           }}>
-            📄 Paper only · No real money
+            <div style={{
+              fontSize: 10,
+              color: '#64748b',
+              background: '#131826',
+              border: '1px solid #243044',
+              borderRadius: 6,
+              padding: '3px 8px',
+              whiteSpace: 'nowrap' as const,
+            }}>
+              📄 Paper mode
+            </div>
+            <ProfileMenu />
           </div>
-          <ProfileMenu />
         </nav>
         <main><AuthProvider>{children}</AuthProvider></main>
       </body>

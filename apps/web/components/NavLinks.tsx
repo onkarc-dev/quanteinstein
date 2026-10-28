@@ -7,15 +7,16 @@ import { getUser, type AuthUser } from '../lib/api';
 
 export const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: '📊' },
-  { href: '/strategy-builder', label: 'Strategy Builder', icon: '⚙️' },
+  { href: '/strategy-builder', label: 'Strategies', icon: '⚙️' },
   { href: '/backtests', label: 'Backtests', icon: '📈' },
-  { href: '/quant-coach', label: 'Quant Coach', icon: '🧠' },
-  { href: '/paper-trading', label: 'Paper Trading', icon: '⚡' },
+  { href: '/quant-coach', label: 'Coach', icon: '🧠' },
+  { href: '/paper-trading', label: 'Paper Trade', icon: '⚡' },
   { href: '/charting', label: 'Charting', icon: '📉' },
-  { href: '/beta-status', label: 'Alpha Feed', icon: '📡' },
-  { href: '/trade-journal', label: 'Journal & Analytics', icon: '📓' },
-  { href: '/api-management', label: 'API Keys', icon: '🔑', badge: 'INSTITUTIONAL' },
-  { href: '/organization-settings', label: 'Organization', icon: '🏛️', badge: 'INSTITUTIONAL' },
+  { href: '/beta-status', label: 'Feed', icon: '📡' },
+  { href: '/trade-journal', label: 'Journal', icon: '📓' },
+  { href: '/api-management', label: 'API Keys', icon: '🔑', badge: 'INST' },
+  { href: '/organization-settings', label: 'Organization', icon: '🏛️', badge: 'INST' },
+  { href: '/admin', label: 'Admin', icon: '🛡️', badge: 'ADMIN' },
 ];
 
 export default function NavLinks() {
@@ -35,12 +36,12 @@ export default function NavLinks() {
     <div
       style={{
         display: 'flex',
-        gap: 6,
+        gap: 3,
         flex: 1,
-        overflowX: 'auto',
         alignItems: 'center',
+        flexWrap: 'wrap',
         padding: '2px 0',
-        scrollbarWidth: 'none',
+        minWidth: 0,
       }}
     >
       {items.map(({ href, label, icon, badge }) => {
@@ -55,49 +56,51 @@ export default function NavLinks() {
             href={href}
             style={{
               textDecoration: 'none',
-              padding: '6px 14px',
-              borderRadius: 8,
-              fontSize: 13,
+              padding: '4px 8px',
+              borderRadius: 6,
+              fontSize: 12,
               fontWeight: isActive ? 700 : 500,
               whiteSpace: 'nowrap',
-              transition: 'all 0.18s ease-in-out',
+              transition: 'all 0.15s ease-in-out',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 7,
-              color: isActive ? '#ffffff' : (badge ? '#c7d2fe' : '#94a3b8'),
+              gap: 5,
+              color: isActive ? '#ffffff' : (badge === 'ADMIN' ? '#fcd34d' : (badge ? '#c7d2fe' : '#94a3b8')),
               background: isActive
-                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.16) 100%)'
-                : (badge ? 'rgba(99, 102, 241, 0.08)' : 'transparent'),
+                ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.32) 0%, rgba(129, 140, 248, 0.18) 100%)'
+                : (badge === 'ADMIN' ? 'rgba(245, 158, 11, 0.08)' : (badge ? 'rgba(99, 102, 241, 0.08)' : 'transparent')),
               border: isActive
                 ? '1px solid rgba(129, 140, 248, 0.45)'
-                : (badge ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent'),
+                : (badge === 'ADMIN' ? '1px solid rgba(245, 158, 11, 0.25)' : (badge ? '1px solid rgba(99, 102, 241, 0.22)' : '1px solid transparent')),
               boxShadow: isActive
-                ? '0 0 14px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+                ? '0 0 10px rgba(99, 102, 241, 0.22)'
                 : 'none',
             }}
           >
             {isActive && (
               <span
                 style={{
-                  width: 6,
-                  height: 6,
+                  width: 5,
+                  height: 5,
                   borderRadius: '50%',
                   background: '#818cf8',
-                  boxShadow: '0 0 8px #818cf8',
+                  boxShadow: '0 0 6px #818cf8',
                   display: 'inline-block',
                 }}
               />
             )}
-            <span>{icon}</span>
+            <span style={{ fontSize: 13 }}>{icon}</span>
             <span>{label}</span>
             {badge && (
               <span
                 style={{
-                  fontSize: 9,
+                  fontSize: 8,
                   fontWeight: 800,
-                  padding: '1px 5px',
-                  borderRadius: 4,
-                  background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                  padding: '1px 4px',
+                  borderRadius: 3,
+                  background: badge === 'ADMIN'
+                    ? 'linear-gradient(135deg, #f59e0b, #ef4444)'
+                    : 'linear-gradient(135deg, #0ea5e9, #6366f1)',
                   color: '#ffffff',
                   letterSpacing: 0.5,
                   textTransform: 'uppercase',

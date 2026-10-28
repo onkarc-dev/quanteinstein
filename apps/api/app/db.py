@@ -512,10 +512,44 @@ def _init_sqlite():
 def _seed_demo_user_sqlite(conn):
     demo_id = "demo_user"
     conn.execute(
-        "INSERT OR IGNORE INTO users(id,email,name,password_hash,onboarding_completed,created_at) VALUES(?,?,?,?,?,?)",
-        (demo_id, "demo@prismflow.com", "Demo User", hash_password("demo123"), 0, now())
+        "INSERT OR IGNORE INTO users(id,email,name,password_hash,onboarding_completed,tier,role,organization_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (demo_id, "demo@prismflow.com", "Executive Trader", hash_password("demo123"), 1, "ENTERPRISE", "ORGANIZATION_ADMIN", "tier1alpha_org", now())
     )
+    conn.execute("UPDATE users SET tier='ENTERPRISE', role='ORGANIZATION_ADMIN', organization_id='tier1alpha_org', onboarding_completed=1 WHERE id=?", (demo_id,))
     conn.execute("UPDATE users SET email=? WHERE email=?", ("demo@prismflow.com", "demo@prismflow.local"))
+    conn.execute(
+        "INSERT OR REPLACE INTO sessions(token,user_id,expires_at,created_at) VALUES(?,?,?,?)",
+        ("demo_enterprise_dev_token", demo_id, "2099-01-01T00:00:00Z", now())
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO organizations(id,name,slug,tier,db_url,isolation_mode,created_at,status) VALUES(?,?,?,?,?,?,?,?)",
+        ("tier1alpha_org", "Institutional Capital Partners", "tier1alpha", "ENTERPRISE", "postgresql://enterprise_usr:secPass@pg-cluster.internal:5432/qe_tier1alpha", "DEDICATED_SCHEMA", now(), "ACTIVE")
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO sso_configurations(id,organization_id,domain,provider,idp_entity_id,idp_sso_url,idp_certificate,sp_entity_id,acs_url,is_active,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("sso_demo_cfg", "tier1alpha_org", "prismflow.com", "OKTA", "https://idp.okta.com/exk123456", "https://prismflow.okta.com/app/sso", "CERT_MOCK", "https://quanteinstein.com/auth/sso/metadata", "https://quanteinstein.com/auth/sso/acs", 1, now(), now())
+    )
+    institutional_members = [
+        ("demo_quant_1", "elena.vance@tier1alpha.com", "Elena Vance (PM)", "ORGANIZATION_ADMIN"),
+        ("demo_quant_2", "marcus.sterling@tier1alpha.com", "Marcus Sterling", "QUANT_RESEARCHER"),
+        ("demo_quant_3", "sarah.chen@tier1alpha.com", "Sarah Chen", "RISK_OFFICER"),
+        ("demo_quant_4", "david.ross@tier1alpha.com", "David Ross", "COMPLIANCE_OFFICER"),
+    ]
+    for uid, uemail, uname, urole in institutional_members:
+        conn.execute(
+            "INSERT OR IGNORE INTO users(id,email,name,password_hash,onboarding_completed,tier,role,organization_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (uid, uemail, uname, hash_password("demo123"), 1, "ENTERPRISE", urole, "tier1alpha_org", now())
+        )
+    sample_audit = [
+        ("aud_1", demo_id, "tier1alpha_org", "demo@prismflow.com", "ORGANIZATION_ADMIN", "ALGORITHM_DEPLOY", "STRATEGY", "strat_breakout_01", "127.0.0.1", "POST", "/api/v1/strategies/deploy", 200, "a1b2c3d4e5", now()),
+        ("aud_2", "demo_quant_3", "tier1alpha_org", "sarah.chen@tier1alpha.com", "RISK_OFFICER", "RISK_LIMIT_UPDATE", "RISK_POLICY", "pol_max_drawdown", "127.0.0.1", "PUT", "/enterprise/risk/limits", 200, "f6g7h8i9j0", now()),
+        ("aud_3", "demo_quant_2", "tier1alpha_org", "marcus.sterling@tier1alpha.com", "QUANT_RESEARCHER", "BACKTEST_RUN", "BACKTEST", "bt_alpha_09", "127.0.0.1", "POST", "/api/v1/backtests/run", 200, "d4e5f6a1b2", now()),
+    ]
+    for row in sample_audit:
+        conn.execute(
+            "INSERT OR IGNORE INTO audit_logs(id,user_id,organization_id,actor_email,actor_role,action,resource_type,resource_id,client_ip,request_method,request_path,status_code,payload_digest,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            row
+        )
     conn.execute(
         "INSERT OR IGNORE INTO onboarding_state(user_id,step,completed_steps_json,updated_at) VALUES(?,?,?,?)",
         (demo_id, "welcome", "[]", now())

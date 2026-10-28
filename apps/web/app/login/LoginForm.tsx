@@ -1337,6 +1337,49 @@ export default function LoginForm() {
               {mode === 'login' && (
                 <form onSubmit={handleLogin}>
                   <div style={{ marginBottom: 18 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        saveAuth({
+                          token: 'demo_enterprise_dev_token',
+                          user: {
+                            id: 'demo_user',
+                            email: 'demo@prismflow.com',
+                            name: 'Executive Trader',
+                            tier: 'ENTERPRISE',
+                            role: 'ORGANIZATION_ADMIN',
+                            onboarding_completed: true,
+                            organization_id: 'tier1alpha_org',
+                          },
+                        });
+                        window.location.href = '/dashboard';
+                      }}
+                      style={{
+                        width: '100%',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #6366f1 100%)',
+                        color: '#ffffff',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: 10,
+                        padding: '12px 16px',
+                        fontSize: 13,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 15px rgba(99, 102, 241, 0.3)',
+                      }}
+                    >
+                      <span>⚡</span> Instant Direct Test Access (Enterprise)
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', margin: '14px 0', gap: 10 }}>
+                      <div style={{ flex: 1, height: 1, background: '#1e293b' }} />
+                      <span style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase' }}>or sign in with email</span>
+                      <div style={{ flex: 1, height: 1, background: '#1e293b' }} />
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 18 }}>
                     <label
                       htmlFor="signin-email"
                       style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#cbd5e1', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}

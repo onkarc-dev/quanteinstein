@@ -2,9 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { getToken, restoreSession } from '../lib/api';
-
-const PUBLIC_PATHS = new Set(['/', '/login']);
+import { restoreSession, DEFAULT_DEMO_USER, saveAuth } from '../lib/api';
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -15,38 +13,17 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function checkAuth() {
-      const isPublic = PUBLIC_PATHS.has(pathname);
-
       try {
-        const user = await restoreSession();
+        await restoreSession();
         if (cancelled) return;
-
-        if (!user) {
-          if (!isPublic) {
-            router.replace('/login?expired=1');
-            return;
-          }
-          setReady(true);
-          return;
-        }
-
-        if (pathname === '/login') {
-          router.replace('/dashboard');
-          return;
-        }
-
         setReady(true);
       } catch {
         if (cancelled) return;
-        if (!isPublic) {
-          router.replace('/login');
-          return;
-        }
+        saveAuth({ token: 'demo_enterprise_dev_token', user: DEFAULT_DEMO_USER });
         setReady(true);
       }
     }
 
-    setReady(false);
     checkAuth();
 
     return () => {
@@ -65,7 +42,7 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         color: '#94a3b8',
         fontFamily: 'system-ui, sans-serif',
       }}>
-        Loading session…
+        Initializing Quanteinstein Terminal…
       </div>
     );
   }

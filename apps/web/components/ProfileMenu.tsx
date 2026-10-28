@@ -30,8 +30,10 @@ export default function ProfileMenu() {
   const handleToggleTier = () => {
     const nextTier = (user.tier === 'ENTERPRISE' ? 'RETAIL' : 'ENTERPRISE') as 'RETAIL' | 'ENTERPRISE';
     const updatedUser = { ...user, tier: nextTier };
-    localStorage.setItem('quanteinstein_user', JSON.stringify(updatedUser));
-    localStorage.setItem('user', JSON.stringify(updatedUser));
+    const serialized = JSON.stringify(updatedUser);
+    localStorage.setItem('prismflow_user', serialized);
+    localStorage.setItem('quanteinstein_user', serialized);
+    localStorage.setItem('user', serialized);
     setUser(updatedUser);
     window.dispatchEvent(new Event('storage'));
   };
