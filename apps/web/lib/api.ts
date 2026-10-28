@@ -30,6 +30,9 @@ export type AuthUser = {
   email: string;
   name: string;
   onboarding_completed?: boolean;
+  tier?: 'RETAIL' | 'PRO' | 'ENTERPRISE';
+  organization_id?: string | null;
+  role?: string;
 };
 
 export class ApiError extends Error {

@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { getUser, type AuthUser } from '../lib/api';
 
 export const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: '📊' },
@@ -17,6 +18,19 @@ export const NAV_ITEMS = [
 
 export default function NavLinks() {
   const pathname = usePathname();
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    setUser(getUser());
+    const onStorage = () => setUser(getUser());
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const items = [...NAV_ITEMS];
+  if (user?.tier === 'ENTERPRISE' || user?.tier === 'PRO') {
+    items.push({ href: '/api-management', label: 'API Keys', icon: '🔑' });
+  }
 
   return (
     <div
@@ -30,7 +44,7 @@ export default function NavLinks() {
         scrollbarWidth: 'none',
       }}
     >
-      {NAV_ITEMS.map(({ href, label }) => {
+      {items.map(({ href, label }) => {
         const isActive =
           pathname === href ||
           (href !== '/' && pathname.startsWith(href)) ||

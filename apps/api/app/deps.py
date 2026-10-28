@@ -5,17 +5,51 @@ import datetime
 import time
 from fastapi import Header, HTTPException
 import jwt
-from app.db import get_conn, row_to_dict
+from app.db import get_primary_conn, row_to_dict
 from app.core.config import settings
 
 
-def current_user(authorization: str | None = Header(default=None)):
-    """Resolve bearer token → user dict. Supports HS256 JWT access tokens and legacy DB session tokens."""
+def current_user(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+):
+    """Resolve API key or bearer token → user dict. Supports Headless API keys, HS256 JWT, and session tokens."""
+    from app.core.api_key_auth import validate_api_key
+
+    def _bind_tenant(user_data):
+        if not user_data:
+            return None
+        d = row_to_dict(user_data)
+        try:
+            from app.core.tenant_context import set_current_tenant
+            if d.get("tier") == "ENTERPRISE" and d.get("tenant_db_url"):
+                set_current_tenant(d["tenant_db_url"], d)
+            else:
+                set_current_tenant(None, d)
+        except Exception:
+            pass
+        return d
+
+
+    # 0. Check Headless Programmatic API Key Header
+    if x_api_key:
+        api_user = validate_api_key(x_api_key)
+        if not api_user:
+            raise HTTPException(status_code=401, detail="Invalid or expired API Key")
+        return _bind_tenant(api_user)
+
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token. Use Authorization: Bearer <token>")
+        raise HTTPException(status_code=401, detail="Missing authorization. Provide Authorization: Bearer <token> or X-API-Key header")
     token = authorization.split(" ", 1)[1].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Empty bearer token")
+
+    # Check if bearer token is actually an API Key (qe_live_... / qe_test_...)
+    if token.startswith("qe_live_") or token.startswith("qe_test_"):
+        api_user = validate_api_key(token)
+        if not api_user:
+            raise HTTPException(status_code=401, detail="Invalid or expired API Key")
+        return _bind_tenant(api_user)
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     p = "%s" if settings.is_postgres() else "?"
@@ -29,20 +63,29 @@ def current_user(authorization: str | None = Header(default=None)):
     except Exception:
         user_id = ""
 
+
+    _USER_FIELDS = """
+        u.id, u.email, u.name, u.onboarding_completed,
+        COALESCE(u.tier, 'RETAIL') as tier,
+        u.organization_id, u.tenant_db_url,
+        COALESCE(u.role, 'TRADER') as role,
+        COALESCE(u.permissions_json, '[]') as permissions_json
+    """
+
     if user_id:
-        with get_conn() as conn:
+        with get_primary_conn() as conn:
             # Active session check
             row = conn.execute(f"""
-                SELECT u.id, u.email, u.name, u.onboarding_completed
+                SELECT {_USER_FIELDS}
                 FROM sessions s JOIN users u ON u.id = s.user_id
                 WHERE s.token = {p} AND s.user_id = {p} AND s.expires_at > {p}
             """, (token, user_id, now_iso)).fetchone()
             if row:
-                return row_to_dict(row)
+                return _bind_tenant(row)
             # Direct valid JWT user lookup
-            row = conn.execute(f"SELECT id, email, name, onboarding_completed FROM users WHERE id = {p}", (user_id,)).fetchone()
+            row = conn.execute(f"SELECT {_USER_FIELDS.replace('u.', '')} FROM users u WHERE id = {p}", (user_id,)).fetchone()
             if row:
-                return row_to_dict(row)
+                return _bind_tenant(row)
 
     # 2. Supabase Auth JWT
     try:
@@ -81,7 +124,7 @@ def current_user(authorization: str | None = Header(default=None)):
             if not name and email:
                 name = email.split("@")[0]
 
-            with get_conn() as conn:
+            with get_primary_conn() as conn:
                 row = conn.execute(f"SELECT id, email, name, onboarding_completed FROM users WHERE id = {p}", (sub,)).fetchone()
                 if row:
                     return row_to_dict(row)
@@ -113,13 +156,13 @@ def current_user(authorization: str | None = Header(default=None)):
         pass
 
     # 3. Legacy session token in sessions table
-    with get_conn() as conn:
+    with get_primary_conn() as conn:
         row = conn.execute(f"""
-            SELECT u.id, u.email, u.name, u.onboarding_completed
+            SELECT {_USER_FIELDS}
             FROM sessions s JOIN users u ON u.id = s.user_id
             WHERE s.token = {p} AND s.expires_at > {p}
         """, (token, now_iso)).fetchone()
         if row:
-            return row_to_dict(row)
+            return _bind_tenant(row)
 
     raise HTTPException(status_code=401, detail="Invalid or expired token. Please log in again.")

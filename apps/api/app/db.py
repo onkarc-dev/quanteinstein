@@ -94,12 +94,37 @@ def row_to_dict(row) -> Dict[str, Any]:
 
 # ─── Backend selection ────────────────────────────────────────────────────────
 
-def get_conn():
-    """Return an appropriate database connection based on settings."""
+def get_primary_conn():
+    """Always return connection to primary shared catalog database (bypassing tenant context)."""
     if settings.is_postgres():
         return _get_pg_conn()
     _ensure_sqlite_initialized()
     return _get_sqlite_conn()
+
+
+def get_conn():
+    """Return an appropriate database connection based on active tenant routing context or settings."""
+    tenant_url = None
+    try:
+        from app.core.tenant_context import get_current_tenant_url
+        tenant_url = get_current_tenant_url()
+    except Exception:
+        tenant_url = None
+
+    if tenant_url:
+        from app.core.tenant_router import get_tenant_conn
+        return get_tenant_conn(tenant_url)
+
+    return get_primary_conn()
+
+
+def get_conn_for_user(user: Dict[str, Any] | None):
+    """Explicitly retrieve database connection matching user tier and isolated tenant configuration."""
+    if user and user.get("tier") == "ENTERPRISE" and user.get("tenant_db_url"):
+        from app.core.tenant_router import get_tenant_conn
+        return get_tenant_conn(user["tenant_db_url"])
+    return get_conn()
+
 
 
 def _ensure_sqlite_initialized() -> None:
@@ -139,6 +164,24 @@ def _get_pg_conn():
 
 # ─── Schema ───────────────────────────────────────────────────────────────────
 _SQLITE_DDL = """
+CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    organization_id TEXT,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    permissions_json TEXT NOT NULL DEFAULT '["data:read","backtest:run","orders:write"]',
+    rate_limit_per_minute INTEGER NOT NULL DEFAULT 1200,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    expires_at TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_org ON api_keys(organization_id);
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
@@ -149,7 +192,22 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     password_hash TEXT NOT NULL,
     onboarding_completed INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'RETAIL',
+    organization_id TEXT,
+    tenant_db_url TEXT,
+    role TEXT NOT NULL DEFAULT 'TRADER',
+    permissions_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'ENTERPRISE',
+    db_url TEXT NOT NULL,
+    isolation_mode TEXT NOT NULL DEFAULT 'DEDICATED_SCHEMA',
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE'
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
@@ -216,6 +274,10 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at TEXT NOT NULL,
     FOREIGN KEY(job_id) REFERENCES jobs(id)
 );
+CREATE INDEX IF NOT EXISTS idx_jobs_user_status_created ON jobs(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_job_sym_time ON trades(job_id, symbol, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reports_job_created ON reports(job_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS journal_entries (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -311,11 +373,43 @@ def init_db():
         _init_sqlite()
 
 
+
+def _migrate_users_table_sqlite(conn):
+    try:
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+        columns_to_add = [
+            ("tier", "TEXT NOT NULL DEFAULT 'RETAIL'"),
+            ("organization_id", "TEXT"),
+            ("tenant_db_url", "TEXT"),
+            ("role", "TEXT NOT NULL DEFAULT 'TRADER'"),
+            ("permissions_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ]
+        for col_name, col_type in columns_to_add:
+            if col_name not in existing_cols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+    except Exception:
+        pass
+
+
+def _migrate_users_table_postgres(cur):
+    try:
+        for col_name, col_type in [
+            ("tier", "TEXT NOT NULL DEFAULT 'RETAIL'"),
+            ("organization_id", "TEXT"),
+            ("tenant_db_url", "TEXT"),
+            ("role", "TEXT NOT NULL DEFAULT 'TRADER'"),
+            ("permissions_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ]:
+            cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+    except Exception:
+        pass
+
 def _init_sqlite():
     global _LAST_SQLITE_INIT_PATH
     settings.api_root.mkdir(parents=True, exist_ok=True)
     with _get_sqlite_conn() as conn:
         conn.executescript(_SQLITE_DDL)
+        _migrate_users_table_sqlite(conn)
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(?,?)",
             (SCHEMA_VERSION, now()),

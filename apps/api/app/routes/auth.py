@@ -172,18 +172,27 @@ def _clear_failed_logins(email: str, request: Request) -> None:
 
 def _get_user_by_email(conn, email: str):
     p = _p()
-    return conn.execute(f"SELECT id,email,name,password_hash,onboarding_completed FROM users WHERE email={p}", (email,)).fetchone()
+    return conn.execute(f"SELECT id,email,name,password_hash,onboarding_completed,tier,organization_id,tenant_db_url,role FROM users WHERE email={p}", (email,)).fetchone()
 
 
 def _get_user_by_id(conn, user_id: str):
     p = _p()
-    return conn.execute(f"SELECT id,email,name,password_hash,onboarding_completed FROM users WHERE id={p}", (user_id,)).fetchone()
+    return conn.execute(f"SELECT id,email,name,password_hash,onboarding_completed,tier,organization_id,tenant_db_url,role FROM users WHERE id={p}", (user_id,)).fetchone()
 
 
-def _create_access_token(user_id: str) -> str:
+def _create_access_token(user_id: str, tier: str = "RETAIL", organization_id: str | None = None, role: str = "TRADER") -> str:
     exp = _utcnow() + datetime.timedelta(seconds=settings.access_token_ttl_seconds)
+    claims = {
+        "sub": user_id,
+        "typ": "access",
+        "jti": secrets.token_urlsafe(24),
+        "exp": exp,
+        "tier": tier,
+        "org_id": organization_id or "",
+        "role": role,
+    }
     return jwt.encode(
-        {"sub": user_id, "typ": "access", "jti": secrets.token_urlsafe(24), "exp": exp},
+        claims,
         settings.secret_key,
         algorithm="HS256",
     )
@@ -211,7 +220,10 @@ def _create_legacy_session(conn, user_id: str, access_token: str) -> None:
 
 
 def _auth_response(conn, user: Dict[str, Any]) -> Dict[str, Any]:
-    access = _create_access_token(user["id"])
+    tier = user.get("tier") or "RETAIL"
+    org_id = user.get("organization_id")
+    role = user.get("role") or "TRADER"
+    access = _create_access_token(user["id"], tier=tier, organization_id=org_id, role=role)
     refresh = _create_refresh_token(conn, user["id"])
     _create_legacy_session(conn, user["id"], access)
     return {
@@ -219,7 +231,15 @@ def _auth_response(conn, user: Dict[str, Any]) -> Dict[str, Any]:
         "access_token": access,
         "refresh_token": refresh,
         "expires_in": settings.access_token_ttl_seconds,
-        "user": {"id": user["id"], "email": user["email"], "name": user.get("name") or "", "onboarding_completed": bool(user.get("onboarding_completed"))},
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user.get("name") or "",
+            "onboarding_completed": bool(user.get("onboarding_completed")),
+            "tier": tier,
+            "organization_id": org_id,
+            "role": role,
+        },
     }
 
 
@@ -527,4 +547,12 @@ def logout(request: Request, user=Depends(current_user), authorization: str | No
 
 @router.get("/me", summary="Get current user profile")
 def me(user=Depends(current_user)):
-    return {"id": user["id"], "email": user["email"], "name": user["name"], "onboarding_completed": bool(user.get("onboarding_completed", 0))}
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "onboarding_completed": bool(user.get("onboarding_completed", 0)),
+        "tier": user.get("tier") or "RETAIL",
+        "organization_id": user.get("organization_id"),
+        "role": user.get("role") or "TRADER",
+    }

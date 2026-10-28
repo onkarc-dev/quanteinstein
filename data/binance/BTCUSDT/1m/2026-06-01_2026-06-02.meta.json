@@ -1,0 +1,13 @@
+{
+  "symbol": "BTCUSDT",
+  "timeframe": "1m",
+  "binance_interval_used": "1m",
+  "rows": 2880,
+  "start_date": "2026-06-01",
+  "end_date": "2026-06-02",
+  "cached": false,
+  "real_binance_data": true,
+  "synthetic_data_used": false,
+  "streaming_chunk_size": 1000,
+  "note": "OHLCV candles are streamed from Binance REST (/api/v3/klines) in 1,000-bar chunks with O(1) rolling scalar registers and cached locally."
+}

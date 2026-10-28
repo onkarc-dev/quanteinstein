@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db import init_db
-from app.routes import auth, strategies, jobs, reports, analytics, coach, journal, live_paper, engine, ai, backtests, quant_engine, community, admin
+from app.routes import auth, strategies, jobs, reports, analytics, coach, journal, live_paper, engine, ai, backtests, quant_engine, community, admin, enterprise, headless_api
 from app.routes.system import router as system_router
 from app.services.job_queue import build_queue
 import app.services.job_queue as jq_module
@@ -112,6 +112,69 @@ async def add_process_time_header(request: Request, call_next):
     logger.info("%s %s status=%s elapsed_ms=%s", request.method, request.url.path, response.status_code, elapsed_ms)
     return response
 
+# ─── Enterprise Single-Tenant Routing Middleware ──────────────────────────────
+@app.middleware("http")
+async def tenant_routing_middleware(request: Request, call_next):
+    """Dynamically route enterprise requests to isolated single-tenant databases while retail uses shared DB."""
+    tokens = None
+    x_api_key = request.headers.get("x-api-key", "").strip()
+    auth_header = request.headers.get("authorization", "").strip()
+
+    if x_api_key:
+        try:
+            from app.core.api_key_auth import validate_api_key
+            from app.core.tenant_context import set_current_tenant
+            api_user = validate_api_key(x_api_key)
+            if api_user and api_user.get("tier") == "ENTERPRISE" and api_user.get("tenant_db_url"):
+                tokens = set_current_tenant(api_user["tenant_db_url"], api_user)
+        except Exception:
+            pass
+    elif auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token.startswith("qe_live_") or token.startswith("qe_test_"):
+            try:
+                from app.core.api_key_auth import validate_api_key
+                from app.core.tenant_context import set_current_tenant
+                api_user = validate_api_key(token)
+                if api_user and api_user.get("tier") == "ENTERPRISE" and api_user.get("tenant_db_url"):
+                    tokens = set_current_tenant(api_user["tenant_db_url"], api_user)
+            except Exception:
+                pass
+        else:
+            try:
+                import jwt
+                from app.core.tenant_context import set_current_tenant
+                from app.db import get_primary_conn, row_to_dict
+
+                decoded = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+                tier = decoded.get("tier")
+                user_id = decoded.get("sub")
+                if tier == "ENTERPRISE" and user_id:
+                    with get_primary_conn() as conn:
+                        p = "%s" if settings.is_postgres() else "?"
+                        row = conn.execute(
+                            f"SELECT tier, tenant_db_url, organization_id, role FROM users WHERE id = {p}",
+                            (user_id,)
+                        ).fetchone()
+                        if row:
+                            d = row_to_dict(row)
+                            if d.get("tier") == "ENTERPRISE" and d.get("tenant_db_url"):
+                                tokens = set_current_tenant(d["tenant_db_url"], d)
+            except Exception:
+                pass
+
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        if tokens:
+            try:
+                from app.core.tenant_context import reset_current_tenant
+                reset_current_tenant(tokens)
+            except Exception:
+                pass
+
+
 
 # ─── Top-level health (no auth required) ────────────────────────────────────
 @app.get("/metrics", tags=["system"], summary="Prometheus-compatible minimal metrics")
@@ -157,3 +220,5 @@ app.include_router(backtests.router, prefix="/backtests", tags=["backtests"])
 app.include_router(quant_engine.router, prefix="/quant-engine", tags=["quant-engine"])
 app.include_router(community.router, prefix="/community", tags=["community"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(enterprise.router, prefix="/enterprise", tags=["enterprise"])
+app.include_router(headless_api.router, prefix="/api/v1", tags=["headless-api"])

@@ -25,6 +25,7 @@ export default function ProfileMenu() {
     emailLower === 'onkarchouguletrader@gmail.com' ||
     emailLower.includes('admin') ||
     (typeof window !== 'undefined' && Boolean(sessionStorage.getItem('quanteinstein_admin_auth')));
+  const isEnterprise = user.tier === 'ENTERPRISE' || user.tier === 'PRO' || isOwnerAdmin;
 
   return (
     <div style={{ position: 'relative', marginLeft: 10 }}>
@@ -39,16 +40,33 @@ export default function ProfileMenu() {
           cursor: 'pointer',
           fontSize: 12,
           fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}
       >
-        Profile
+        <span>Profile</span>
+        {user.tier === 'ENTERPRISE' && (
+          <span style={{
+            fontSize: 9,
+            fontWeight: 800,
+            padding: '1px 5px',
+            borderRadius: 4,
+            background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+            color: '#fff',
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+          }}>
+            INSTITUTIONAL
+          </span>
+        )}
       </button>
       {open && (
         <div style={{
           position: 'absolute',
           right: 0,
           top: 36,
-          width: 220,
+          width: 230,
           background: '#111827',
           border: '1px solid #374151',
           borderRadius: 10,
@@ -56,8 +74,42 @@ export default function ProfileMenu() {
           boxShadow: '0 12px 30px rgba(0,0,0,0.35)',
           zIndex: 1000,
         }}>
-          <div style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>Name</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>Account</div>
+            <span style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: user.tier === 'ENTERPRISE' ? '#38bdf8' : '#94a3b8',
+              background: user.tier === 'ENTERPRISE' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+              padding: '2px 6px',
+              borderRadius: 4,
+            }}>
+              {user.tier || 'RETAIL'}
+            </span>
+          </div>
           <div style={{ color: '#ffffff', fontWeight: 800, marginTop: 4, marginBottom: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
+          {isEnterprise && (
+            <Link
+              href="/api-management"
+              onClick={() => setOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                textDecoration: 'none',
+                color: '#38bdf8',
+                background: 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                borderRadius: 8,
+                padding: '8px 10px',
+                fontSize: 12,
+                fontWeight: 700,
+                marginBottom: 8,
+              }}
+            >
+              <span>🔑</span> API Management
+            </Link>
+          )}
           {isOwnerAdmin && (
             <Link
               href="/admin"
