@@ -24,6 +24,7 @@ import {
 import { classifyTradeResultFromR } from "../../lib/tradeClassification";
 import TradingChart from "../../components/TradingChart";
 import { DepthOfMarketLadder } from "../../components/DepthOfMarketLadder";
+import { InstitutionalRiskHUD } from "../../components/InstitutionalRiskHUD";
 
 type StrategyRow = {
   id: string;
@@ -2188,6 +2189,28 @@ export default function PaperTradingPage() {
             </div>
           </div>
         )}
+
+        {/* ─── INSTITUTIONAL RISK & MARGIN COCKPIT HUD ─── */}
+        <div style={{ marginTop: 16 }}>
+          <InstitutionalRiskHUD
+            portfolioEquity={25_000_000}
+            grossNotional={42_500_000}
+            initialMarginReq={8_500_000}
+            maintenanceMarginReq={5_950_000}
+            intradayDrawdownPct={1.45}
+            spyBeta={0.42}
+            sizeExposure={-0.15}
+            valueExposure={0.28}
+            momentumExposure={0.64}
+            vegaExposure={-12500}
+            onEmergencyHalt={() => {
+              window.alert("EMERGENCY KILL SWITCH ACTIVATED: Direct Market Access (DMA) execution halted across all Prime Broker gateways.");
+            }}
+            onDeriskQuarter={() => {
+              window.alert("PORTFOLIO DE-RISK INITIATED: 25% pro-rata reduction order generated across active inventory.");
+            }}
+          />
+        </div>
 
         {/* ─── INSTITUTIONAL DEPTH OF MARKET (DOM) & ADVANCED ORDER TICKET ─── */}
         <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(340px, 1fr)', gap: 16 }}>
