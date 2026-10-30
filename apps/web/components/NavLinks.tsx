@@ -31,7 +31,13 @@ export default function NavLinks() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  const items = [...NAV_ITEMS];
+  const isEnterprise = process.env.NEXT_PUBLIC_EDITION === 'enterprise' || user?.tier === 'ENTERPRISE';
+  const items = NAV_ITEMS.filter((item) => {
+    if (isEnterprise && (item.href === '/beta-status' || item.href === '/community')) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div

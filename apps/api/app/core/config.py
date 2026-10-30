@@ -109,6 +109,11 @@ class Settings:
         self.outputs_root = os.getenv("OUTPUTS_ROOT", "outputs")
         self.log_file = os.getenv("LOG_FILE", str(self.outputs_dir / "quantos_api.log"))
 
+        # Product Edition & Air-Gapped Deployment Profile
+        self.edition: str = os.getenv("EDITION", "enterprise").lower()
+        self.is_enterprise: bool = self.edition == "enterprise"
+        self.air_gapped_mode: bool = _as_bool(os.getenv("AIR_GAPPED_MODE", "false"), False)
+
         # Product safety — intentionally immutable at runtime.
         self.safe_mode = True
         self.real_money_enabled = False

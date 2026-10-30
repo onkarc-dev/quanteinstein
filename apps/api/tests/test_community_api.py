@@ -5,6 +5,13 @@ from app.main import app
 
 client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def setup_community_profile():
+    from app.routes import community
+    if not any(getattr(r, "path", "") == "/community/feed" for r in app.routes):
+        app.include_router(community.router, prefix="/community", tags=["community"])
+
+
 
 def test_get_community_feed():
     response = client.get("/community/feed")

@@ -6,8 +6,8 @@ import ProfileMenu from '../components/ProfileMenu';
 import NavLinks from '../components/NavLinks';
 
 export const metadata: Metadata = {
-  title: 'Quanteinstein — Trade Daily, Trade Smartly',
-  description: 'Quanteinstein paper trading platform. Trade Daily, Trade Smartly. Not financial advice.',
+  title: 'Quanteinstein Enterprise OS · Institutional Execution & Risk Management System',
+  description: 'Quanteinstein Enterprise OS — Institutional quantitative research, zero-copy POSIX shared-memory DMA execution, and real-time risk management system.',
   icons: {
     icon: '/logo.png',
     apple: '/logo.png',

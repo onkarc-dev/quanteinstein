@@ -41,13 +41,17 @@ async def lifespan(app: FastAPI):
     # Shutdown hooks (none needed currently)
 
 
+app_title = "Quanteinstein Enterprise OS" if settings.is_enterprise else "QuantOS API"
+app_desc = (
+    "Quanteinstein Enterprise OS · Institutional Execution & Risk Management System"
+    if settings.is_enterprise
+    else "QuantOS — Personal Quant Research Paper Trading Platform. Paper/backtest analytics only. Not financial advice."
+)
+
 app = FastAPI(
-    title="QuantOS API",
+    title=app_title,
     version="3.0.0",
-    description=(
-        "QuantOS — Personal Quant Research Paper Trading Platform. "
-        "Paper/backtest analytics only. Not financial advice. No real-money execution."
-    ),
+    description=app_desc,
     lifespan=lifespan,
 )
 
@@ -197,7 +201,9 @@ def metrics():
 def health():
     return {
         "status": "ok",
-        "product": "QuantOS",
+        "product": "Quanteinstein Enterprise OS" if settings.is_enterprise else "QuantOS",
+        "edition": settings.edition,
+        "air_gapped": settings.air_gapped_mode,
         "version": "3.0.0",
         "safe_mode": True,
         "real_money_enabled": False,
@@ -207,7 +213,13 @@ def health():
 
 @app.get("/version", tags=["system"], summary="API version")
 def version():
-    return {"product": "QuantOS", "version": app.version, "safe_mode": True, "real_money_enabled": False}
+    return {
+        "product": "Quanteinstein Enterprise OS" if settings.is_enterprise else "QuantOS",
+        "edition": settings.edition,
+        "version": app.version,
+        "safe_mode": True,
+        "real_money_enabled": False,
+    }
 
 
 # ─── Routers ──────────────────────────────────────────────────────────────────
@@ -224,7 +236,9 @@ app.include_router(engine.router, prefix="/engine", tags=["local-engine"])
 app.include_router(ai.router, prefix="/ai", tags=["ai"])
 app.include_router(backtests.router, prefix="/backtests", tags=["backtests"])
 app.include_router(quant_engine.router, prefix="/quant-engine", tags=["quant-engine"])
-app.include_router(community.router, prefix="/community", tags=["community"])
+# Conditionally mount community routes only in community profile; zero retail footprint in Enterprise
+if not settings.is_enterprise:
+    app.include_router(community.router, prefix="/community", tags=["community"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(enterprise.router, prefix="/enterprise", tags=["enterprise"])
 app.include_router(headless_api.router, prefix="/api/v1", tags=["headless-api"])
