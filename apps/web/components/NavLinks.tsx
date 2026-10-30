@@ -11,7 +11,7 @@ export const NAV_ITEMS = [
   { href: '/backtests', label: 'Backtests', icon: '📈' },
   { href: '/quant-coach', label: 'Coach', icon: '🧠' },
   { href: '/paper-trading', label: 'Paper Trade', icon: '⚡' },
-  { href: '/broker-integrations', label: 'Brokers', icon: '🔗', badge: 'LIVE' },
+  { href: '/broker-integrations', label: 'Broker Connections', icon: '🔗', badge: 'LIVE' },
   { href: '/charting', label: 'Charting', icon: '📉' },
   { href: '/beta-status', label: 'Feed', icon: '📡' },
   { href: '/trade-journal', label: 'Journal', icon: '📓' },

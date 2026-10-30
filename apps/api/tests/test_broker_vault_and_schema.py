@@ -143,3 +143,19 @@ class TestBrokerVaultAndSchema:
             assert d["target_comp_id"] == "GS_GSET_FIX"
             assert d["port"] == 9800
             assert d["tls_enabled"] == 1
+
+    def test_aws_kms_envelope_encryption_driver(self):
+        os.environ["AWS_KMS_KEY_ID"] = "arn:aws:kms:us-east-1:123456789012:key/test-enterprise-cmk"
+        os.environ["MOCK_AWS_KMS"] = "1"
+        try:
+            secret = "goldman_sachs_institutional_client_cert_passphrase_secret"
+            # Encrypt with enterprise tier (activating KMS envelope driver)
+            encrypted = encrypt_credential(secret, tier="ENTERPRISE")
+            assert encrypted.startswith("awskms:"), "Enterprise payload with KMS configured must use awskms prefix"
+
+            # Decrypt back and verify authenticity
+            decrypted = decrypt_credential(encrypted)
+            assert decrypted == secret, "Decrypted KMS payload must match original plain text"
+        finally:
+            os.environ.pop("AWS_KMS_KEY_ID", None)
+            os.environ.pop("MOCK_AWS_KMS", None)

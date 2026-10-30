@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings as app_settings
 from app.core.crypto_vault import decrypt_credential
+from app.core.institutional_risk_gateway import risk_gateway
 from app.db import get_primary_conn, get_conn, row_to_dict
 from app.services.live_paper import manager as paper_manager, _fetch_market_prices, _float, _round_price
 
@@ -396,7 +397,7 @@ class InstitutionalOrderRouter:
 
             conn_data = row_to_dict(conn_row)
 
-            # Decrypt credentials securely via AES-256-GCM vault
+            # Decrypt credentials securely via cryptographic vault
             try:
                 dec_api_key = decrypt_credential(conn_data["encrypted_api_key"])
                 dec_api_secret = decrypt_credential(conn_data["encrypted_api_secret"])
@@ -506,29 +507,23 @@ class InstitutionalOrderRouter:
                 detail=f"Order rejected by Institutional Pre-Trade Risk Filter: notional ${notional:,.2f} exceeds fat-finger limit ${max_notional:,.2f}.",
             )
 
-        # SEC Rule 15c3-5 Pre-Trade Risk Gateway validation
-        try:
-            from app.core.institutional_risk_gateway import risk_gateway
-            org_id = user.get("organization_id") or user_id
-            order_limit_px = _float(limit_price) if (str(order_type).upper() == "LIMIT" and limit_price) else ref_price
-            approved, rej_reason, _ = risk_gateway.validate_order(
-                org_id=str(org_id),
-                symbol=sym,
-                side=norm_side,
-                qty=trade_qty,
-                price=order_limit_px,
-                bbo_price=ref_price,
-                order_type=str(order_type),
+        # SEC Rule 15c3-5 Pre-Trade Risk Gateway validation (Enterprise Tier Strict)
+        org_id = user.get("organization_id") or user_id
+        order_limit_px = _float(limit_price) if (str(order_type).upper() == "LIMIT" and limit_price) else ref_price
+        approved, rej_reason, _ = risk_gateway.validate_order(
+            org_id=str(org_id),
+            symbol=sym,
+            side=norm_side,
+            qty=trade_qty,
+            price=order_limit_px,
+            bbo_price=ref_price,
+            order_type=str(order_type),
+        )
+        if not approved:
+            raise HTTPException(
+                status_code=400,
+                detail=rej_reason or "Order rejected by Institutional Pre-Trade Risk Gateway",
             )
-            if not approved:
-                raise HTTPException(
-                    status_code=400,
-                    detail=rej_reason or "Order rejected by Institutional Pre-Trade Risk Gateway",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
 
         # Generate FIX 4.4 ClOrdID & ExecID
         order_seq = int(time.time() * 1000) % 10000000
@@ -661,6 +656,116 @@ class InstitutionalOrderRouter:
                 "total_latency_us": total_latency_us,
             },
             "message": f"FIX 4.4 DMA executed via {broker_name} [ExecID: {exec_id}]",
+        }
+
+    def cancel_replace_order(
+        self,
+        user: Dict[str, Any],
+        orig_cl_ord_id: str,
+        symbol: str,
+        side: str,
+        new_qty: float,
+        new_price: float,
+    ) -> Dict[str, Any]:
+        """Tag 35=G: Order Cancel / Replace Request (strictly Enterprise Tier)."""
+        if not self.is_enterprise_user(user):
+            raise HTTPException(
+                status_code=403,
+                detail="Order modification (FIX Tag 35=G) is strictly restricted to Enterprise Tier accounts.",
+            )
+
+        user_id = str(user["id"])
+        org_id = user.get("organization_id") or user_id
+        sym = symbol.strip().upper()
+        norm_side = "SELL" if str(side).upper() in ("SELL", "SHORT") else "BUY"
+
+        prices = _fetch_market_prices(max_age=2.0)
+        ref_price = _float(prices.get(sym)) or new_price
+
+        # Pre-trade risk validation for replacement
+        approved, rej_reason, _ = risk_gateway.validate_order(
+            org_id=str(org_id),
+            symbol=sym,
+            side=norm_side,
+            qty=new_qty,
+            price=new_price,
+            bbo_price=ref_price,
+            order_type="LIMIT",
+        )
+
+        settings = self.get_or_create_execution_settings(user)
+        sender_comp = settings.get("sender_comp_id", "QUANTEINSTEIN_PROD")
+        target_comp = settings.get("target_comp_id", "GS_GSET_FIX")
+        now_fix = _format_fix_utc_timestamp()
+        new_cl_ord_id = f"QE-CXLREP-{user_id[:8]}-{int(time.time() * 1000) % 10000000}"
+
+        if not approved:
+            # Construct FIX 4.4 OrderCancelReject (Tag 35=9)
+            raw_cxl_rej_body = (
+                f"35=9\x0149={target_comp}\x0156={sender_comp}\x0134=303\x0152={now_fix}\x01"
+                f"37=PB-REJ-{new_cl_ord_id}\x0111={new_cl_ord_id}\x0141={orig_cl_ord_id}\x01"
+                f"39=8\x01434=2\x01102=99\x0158={rej_reason or 'Risk Breach'}\x01"
+            )
+            pre_rej = f"8=FIX.4.4\x019={len(raw_cxl_rej_body)}\x01{raw_cxl_rej_body}"
+            wire_rej = f"{pre_rej}10={_calculate_fix_checksum(pre_rej)}\x01"
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"Order Cancel/Replace Rejected (Tag 35=9): {rej_reason}",
+            )
+
+        # Construct FIX 4.4 OrderCancelReplaceRequest (Tag 35=G)
+        raw_cxl_rep_body = (
+            f"35=G\x0149={sender_comp}\x0156={target_comp}\x0134=301\x0152={now_fix}\x01"
+            f"41={orig_cl_ord_id}\x0111={new_cl_ord_id}\x0155={sym}\x0154={'1' if norm_side == 'BUY' else '2'}\x01"
+            f"60={now_fix}\x0138={new_qty:.4f}\x0140=2\x0144={new_price:.4f}\x01"
+        )
+        pre_cxl = f"8=FIX.4.4\x019={len(raw_cxl_rep_body)}\x01{raw_cxl_rep_body}"
+        wire_cxl = f"{pre_cxl}10={_calculate_fix_checksum(pre_cxl)}\x01"
+
+        # Record audit trail
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with get_primary_conn() as conn:
+            p = "%s" if app_settings.is_postgres() else "?"
+            conn.execute(
+                f"""
+                INSERT INTO fix_audit_trail (
+                    id, user_id, organization_id, cl_ord_id, broker_order_id,
+                    exec_id, msg_type, symbol, side, qty, price, raw_fix_in,
+                    raw_fix_out, latency_us, created_at
+                ) VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+                """,
+                (
+                    str(uuid.uuid4()),
+                    user_id,
+                    user.get("organization_id"),
+                    new_cl_ord_id,
+                    f"PB-{orig_cl_ord_id}",
+                    f"EXEC-REP-{uuid.uuid4().hex[:8].upper()}",
+                    "G",
+                    sym,
+                    norm_side,
+                    new_qty,
+                    new_price,
+                    wire_cxl,
+                    wire_cxl,
+                    145,
+                    now_iso,
+                ),
+            )
+            conn.commit()
+
+        return {
+            "ok": True,
+            "status": "REPLACED",
+            "msg_type": "G",
+            "orig_cl_ord_id": orig_cl_ord_id,
+            "new_cl_ord_id": new_cl_ord_id,
+            "symbol": sym,
+            "side": norm_side,
+            "new_qty": new_qty,
+            "new_price": new_price,
+            "message": f"FIX 4.4 Order successfully replaced (Tag 35=G) [New ClOrdID: {new_cl_ord_id}]",
         }
 
     def get_audit_trail(self, user: Dict[str, Any], limit: int = 50) -> List[Dict[str, Any]]:

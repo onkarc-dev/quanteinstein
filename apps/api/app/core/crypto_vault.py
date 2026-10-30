@@ -1,19 +1,23 @@
-"""High-assurance AES-256-GCM Credential Encryption Vault for Quanteinstein.
+"""High-assurance AES-256-GCM & AWS KMS Envelope Credential Vault for Quanteinstein.
 
 Features:
-- NIST SP 800-38D compliant AES-256-GCM authenticated encryption.
-- HKDF / PBKDF2 SHA-256 key derivation from server secret or master vault key.
-- Unique cryptographically secure 96-bit initialization vectors (nonces) per encryption.
-- Tamper-evident message authentication code (128-bit authentication tag).
+- Dual-tier cryptographic security:
+  * Default / Retail Tier: NIST SP 800-38D compliant AES-256-GCM authenticated encryption
+    with PBKDF2-HMAC-SHA256 (100,000 iterations) key strengthening.
+  * Enterprise / Institutional Tier: Optional AWS KMS Envelope Encryption Driver
+    using Customer Master Keys (CMKs) to generate unique 256-bit Data Encryption Keys (DEKs).
+- Unique 96-bit cryptographically secure initialization vectors (nonces) per encryption.
+- Tamper-evident 128-bit authentication tags (GHASH).
 - Zero plain-text persistence on disk or database.
-- Safe API key prefix extraction and masking for retail and institutional displays.
+- Safe API key masking and prefix extraction for UI rendering.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import os
-from typing import Optional
+import struct
+from typing import Optional, Tuple
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -21,10 +25,17 @@ try:
 except ImportError:
     HAS_CRYPTOGRAPHY = False
 
+try:
+    import boto3
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
+
 from app.core.config import settings
 
-# Prefix to identify encryption scheme and allow future key rotation
-VAULT_PREFIX = "aes256gcm:"
+VAULT_PREFIX_AES = "aes256gcm:"
+VAULT_PREFIX_KMS = "awskms:"
+VAULT_PREFIX = VAULT_PREFIX_AES
 SALT = b"quanteinstein_broker_vault_salt_v1"
 
 
@@ -40,11 +51,64 @@ def _derive_vault_key() -> bytes:
     return hashlib.pbkdf2_hmac("sha256", master_secret, SALT, 100_000, 32)
 
 
-def encrypt_credential(plaintext: Optional[str]) -> str:
-    """Encrypts a plain-text credential (API key, secret, passphrase) using AES-256-GCM.
+class AwsKmsEnvelopeDriver:
+    """Enterprise envelope encryption driver backed by AWS KMS."""
+
+    def __init__(self, key_id: Optional[str] = None):
+        self._key_id = key_id
+        self._client = None
+
+    @property
+    def key_id(self) -> Optional[str]:
+        return self._key_id or os.getenv("AWS_KMS_KEY_ID") or os.getenv("AWS_KMS_KEY_ARN")
+
+    @property
+    def is_available(self) -> bool:
+        return bool(self.key_id and (HAS_BOTO3 or os.getenv("MOCK_AWS_KMS") == "1"))
+
+    def _get_client(self):
+        if not self._client and HAS_BOTO3 and self.key_id:
+            region = os.getenv("AWS_REGION", "us-east-1")
+            self._client = boto3.client("kms", region_name=region)
+        return self._client
+
+    def generate_data_key(self) -> Tuple[bytes, bytes]:
+        """Generates a 256-bit plaintext data key and its encrypted counterpart."""
+        if os.getenv("MOCK_AWS_KMS") == "1" or not HAS_BOTO3:
+            # Deterministic envelope simulation for testing/CI without active AWS credentials
+            plaintext_dek = os.urandom(32)
+            mock_enc_dek = b"mock_kms_encrypted_dek:" + base64.b64encode(plaintext_dek)
+            return plaintext_dek, mock_enc_dek
+
+        client = self._get_client()
+        resp = client.generate_data_key(KeyId=self.key_id, KeySpec="AES_256")
+        return resp["Plaintext"], resp["CiphertextBlob"]
+
+    def decrypt_data_key(self, encrypted_dek: bytes) -> bytes:
+        """Decrypts the encrypted DEK using the AWS KMS CMK."""
+        if os.getenv("MOCK_AWS_KMS") == "1" or encrypted_dek.startswith(b"mock_kms_encrypted_dek:"):
+            # Mock decryption in development
+            raw_b64 = encrypted_dek[len(b"mock_kms_encrypted_dek:"):]
+            return base64.b64decode(raw_b64)
+
+        client = self._get_client()
+        resp = client.decrypt(CiphertextBlob=encrypted_dek)
+        return resp["Plaintext"]
+
+
+_kms_driver = AwsKmsEnvelopeDriver()
+
+
+def is_kms_enabled() -> bool:
+    """Returns True if AWS KMS enterprise driver is configured and operational."""
+    return _kms_driver.is_available
+
+
+def encrypt_credential(plaintext: Optional[str], tier: str = "RETAIL") -> str:
+    """Encrypts a plain-text credential (API key, secret, passphrase).
     
-    Returns a prefixed Base64 string containing:
-    VAULT_PREFIX + base64(nonce [12 bytes] + ciphertext + auth_tag [16 bytes])
+    If tier is 'ENTERPRISE' and AWS KMS is configured, uses AWS KMS envelope encryption.
+    Otherwise, uses NIST SP 800-38D compliant local AES-256-GCM encryption.
     """
     if plaintext is None:
         return ""
@@ -52,46 +116,99 @@ def encrypt_credential(plaintext: Optional[str]) -> str:
     if not plaintext_str:
         return ""
 
+    if not HAS_CRYPTOGRAPHY:
+        raise RuntimeError("cryptography library required for AES-256-GCM credential vault")
+
+    is_enterprise = str(tier).upper() in ("ENTERPRISE", "PRO", "INSTITUTIONAL")
+
+    # Mode A: Enterprise AWS KMS Envelope Encryption
+    if is_enterprise and _kms_driver.is_available:
+        try:
+            plaintext_dek, encrypted_dek = _kms_driver.generate_data_key()
+            nonce = os.urandom(12)
+            aesgcm = AESGCM(plaintext_dek)
+            ciphertext = aesgcm.encrypt(nonce, plaintext_str.encode("utf-8"), None)
+
+            # Wire packet: [2-byte dek_len] + [encrypted_dek] + [12-byte nonce] + [ciphertext + tag]
+            dek_len = len(encrypted_dek)
+            header = struct.pack(">H", dek_len)
+            payload = header + encrypted_dek + nonce + ciphertext
+            return VAULT_PREFIX_KMS + base64.b64encode(payload).decode("ascii")
+        except Exception:
+            # Fallback to local AES-256-GCM if KMS call fails
+            pass
+
+    # Mode B: Standard AES-256-GCM with PBKDF2 derived key
     key = _derive_vault_key()
+    nonce = os.urandom(12)
+    aesgcm = AESGCM(key)
+    ciphertext = aesgcm.encrypt(nonce, plaintext_str.encode("utf-8"), None)
+    payload = nonce + ciphertext
+    return VAULT_PREFIX_AES + base64.b64encode(payload).decode("ascii")
 
-    if HAS_CRYPTOGRAPHY:
-        nonce = os.urandom(12)  # 96-bit nonce recommended for AES-GCM
-        aesgcm = AESGCM(key)
-        ciphertext = aesgcm.encrypt(nonce, plaintext_str.encode("utf-8"), None)
-        payload = nonce + ciphertext
-        return VAULT_PREFIX + base64.b64encode(payload).decode("ascii")
 
-    # Fallback to pure-Python AES or standard HMAC-augmented scheme if cryptography wheel absent
-    raise RuntimeError("cryptography library required for AES-256-GCM credential vault")
+def encrypt_enterprise_credential(plaintext: Optional[str]) -> str:
+    """Convenience helper to encrypt with enterprise security tier."""
+    return encrypt_credential(plaintext, tier="ENTERPRISE")
 
 
 def decrypt_credential(ciphertext_blob: Optional[str]) -> str:
-    """Decrypts an AES-256-GCM encrypted credential back to plain-text string.
+    """Decrypts an AES-256-GCM or AWS KMS encrypted credential back to plain-text string.
     
-    Raises ValueError if ciphertext is tampered with, corrupted, or has an invalid tag.
+    Auto-detects the encryption prefix ('awskms:' or 'aes256gcm:').
+    Raises ValueError if ciphertext is corrupted, tampered with, or tag verification fails.
     """
     if not ciphertext_blob:
         return ""
 
     blob = str(ciphertext_blob).strip()
-    if not blob.startswith(VAULT_PREFIX):
-        # Return as-is if unencrypted or legacy
-        return blob
 
-    encoded = blob[len(VAULT_PREFIX):]
-    try:
-        raw_payload = base64.b64decode(encoded.encode("ascii"))
-    except Exception as exc:
-        raise ValueError("Invalid base64 payload in encrypted credential") from exc
+    # Case 1: AWS KMS Envelope Payload
+    if blob.startswith(VAULT_PREFIX_KMS):
+        if not HAS_CRYPTOGRAPHY:
+            raise RuntimeError("cryptography library required for AES-256-GCM credential vault")
 
-    if len(raw_payload) < 28:  # 12 bytes nonce + at least 16 bytes auth tag
-        raise ValueError("Encrypted credential payload is truncated or corrupted")
+        encoded = blob[len(VAULT_PREFIX_KMS):]
+        try:
+            raw_payload = base64.b64decode(encoded.encode("ascii"))
+        except Exception as exc:
+            raise ValueError("Invalid base64 payload in KMS encrypted credential") from exc
 
-    nonce = raw_payload[:12]
-    ciphertext_with_tag = raw_payload[12:]
-    key = _derive_vault_key()
+        if len(raw_payload) < 2 + 1 + 12 + 16:
+            raise ValueError("KMS credential payload is truncated or corrupted")
 
-    if HAS_CRYPTOGRAPHY:
+        dek_len = struct.unpack(">H", raw_payload[:2])[0]
+        encrypted_dek = raw_payload[2 : 2 + dek_len]
+        nonce_and_ct = raw_payload[2 + dek_len :]
+        nonce = nonce_and_ct[:12]
+        ciphertext = nonce_and_ct[12:]
+
+        try:
+            plaintext_dek = _kms_driver.decrypt_data_key(encrypted_dek)
+            aesgcm = AESGCM(plaintext_dek)
+            decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+            return decrypted_bytes.decode("utf-8")
+        except Exception as exc:
+            raise ValueError(f"AWS KMS envelope decryption failed: {exc}") from exc
+
+    # Case 2: Standard AES-256-GCM Payload
+    if blob.startswith(VAULT_PREFIX_AES):
+        if not HAS_CRYPTOGRAPHY:
+            raise RuntimeError("cryptography library required for AES-256-GCM credential vault")
+
+        encoded = blob[len(VAULT_PREFIX_AES):]
+        try:
+            raw_payload = base64.b64decode(encoded.encode("ascii"))
+        except Exception as exc:
+            raise ValueError("Invalid base64 payload in encrypted credential") from exc
+
+        if len(raw_payload) < 28:
+            raise ValueError("Encrypted credential payload is truncated or corrupted")
+
+        nonce = raw_payload[:12]
+        ciphertext_with_tag = raw_payload[12:]
+        key = _derive_vault_key()
+
         aesgcm = AESGCM(key)
         try:
             decrypted_bytes = aesgcm.decrypt(nonce, ciphertext_with_tag, None)
@@ -99,7 +216,8 @@ def decrypt_credential(ciphertext_blob: Optional[str]) -> str:
         except Exception as exc:
             raise ValueError("Authentication tag verification failed; credential was tampered with or key is invalid") from exc
 
-    raise RuntimeError("cryptography library required for AES-256-GCM credential vault")
+    # Return as-is if unencrypted or legacy
+    return blob
 
 
 def extract_key_prefix(api_key: Optional[str], length: int = 6) -> str:

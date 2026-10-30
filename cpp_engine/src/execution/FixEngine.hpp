@@ -11,43 +11,48 @@
 #include <iomanip>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace quantos::fix {
 
 // Standard FIX Tags
 namespace tags {
-    constexpr int BeginString     = 8;
-    constexpr int BodyLength      = 9;
-    constexpr int CheckSum        = 10;
-    constexpr int ClOrdID         = 11;
-    constexpr int CumQty          = 14;
-    constexpr int ExecID          = 17;
-    constexpr int MsgSeqNum       = 34;
-    constexpr int MsgType         = 35;
-    constexpr int OrderID         = 37;
-    constexpr int OrderQty        = 38;
-    constexpr int OrdStatus       = 39;
-    constexpr int OrdType         = 40;
-    constexpr int OrigClOrdID     = 41;
-    constexpr int Price           = 44;
-    constexpr int SenderCompID    = 49;
-    constexpr int SendingTime     = 52;
-    constexpr int Side            = 54;
-    constexpr int Symbol          = 55;
-    constexpr int TargetCompID    = 56;
-    constexpr int Text            = 58;
-    constexpr int TimeInForce     = 59;
-    constexpr int TransactTime    = 60;
-    constexpr int LastPx          = 31;
-    constexpr int LastQty         = 32;
-    constexpr int AvgPx           = 6;
-    constexpr int ExecType        = 150;
-    constexpr int LeavesQty       = 151;
-    constexpr int HeartBtInt      = 108;
-    constexpr int EncryptMethod   = 98;
+    constexpr int BeginString        = 8;
+    constexpr int BodyLength         = 9;
+    constexpr int CheckSum           = 10;
+    constexpr int ClOrdID            = 11;
+    constexpr int CumQty             = 14;
+    constexpr int ExecID             = 17;
+    constexpr int MsgSeqNum          = 34;
+    constexpr int MsgType            = 35;
+    constexpr int OrderID            = 37;
+    constexpr int OrderQty           = 38;
+    constexpr int OrdStatus          = 39;
+    constexpr int OrdType            = 40;
+    constexpr int OrigClOrdID        = 41;
+    constexpr int Price              = 44;
+    constexpr int SenderCompID       = 49;
+    constexpr int SendingTime        = 52;
+    constexpr int Side               = 54;
+    constexpr int Symbol             = 55;
+    constexpr int TargetCompID       = 56;
+    constexpr int Text               = 58;
+    constexpr int TimeInForce        = 59;
+    constexpr int TransactTime       = 60;
+    constexpr int LastPx             = 31;
+    constexpr int LastQty            = 32;
+    constexpr int AvgPx              = 6;
+    constexpr int ExecType           = 150;
+    constexpr int LeavesQty          = 151;
+    constexpr int HeartBtInt         = 108;
+    constexpr int EncryptMethod      = 98;
+    constexpr int CxlRejResponseTo   = 434;
+    constexpr int CxlRejReason       = 102;
+    constexpr int OrdRejReason       = 103;
 }
 
 // Standard FIX MsgTypes
@@ -63,6 +68,7 @@ namespace msg_type {
     inline const std::string Logon              = "A";
     inline const std::string NewOrderSingle     = "D";
     inline const std::string OrderCancelRequest = "F";
+    inline const std::string OrderCancelReplace = "G";
 }
 
 // Standard FIX OrdStatus
@@ -80,6 +86,31 @@ namespace ord_status {
     constexpr char PendingNew      = 'A';
     constexpr char Calculated      = 'B';
     constexpr char Expired         = 'C';
+}
+
+// Standard FIX Tag 102 CxlRejReason Codes
+namespace cxl_rej_reason {
+    constexpr int TooLateToCancel               = 0;
+    constexpr int UnknownOrder                  = 1;
+    constexpr int BrokerCredit                  = 2;
+    constexpr int OrderAlreadyInPendingStatus   = 3;
+    constexpr int UnableToProcessOrderMassCancel = 4;
+    constexpr int OrigOrdModTimeDidNotMatch     = 5;
+    constexpr int DuplicateClOrdID              = 6;
+    constexpr int Other                         = 99;
+}
+
+// Standard FIX Tag 103 OrdRejReason Codes
+namespace ord_rej_reason {
+    constexpr int BrokerCreditCheckFailed       = 0;
+    constexpr int UnknownSymbol                 = 1;
+    constexpr int ExchangeClosed                = 2;
+    constexpr int OrderExceedsLimit             = 3;
+    constexpr int TooLateToEnter                = 4;
+    constexpr int UnknownOrder                  = 5;
+    constexpr int DuplicateOrder                = 6;
+    constexpr int UnsupportedOrderType          = 11;
+    constexpr int Other                         = 99;
 }
 
 // SOH delimiter
@@ -229,6 +260,21 @@ private:
     std::vector<int> ordered_tags_;
 };
 
+struct ManagedOrderState {
+    std::string cl_ord_id;
+    std::string orig_cl_ord_id;
+    std::string broker_order_id;
+    std::string symbol;
+    Side side;
+    double original_qty = 0.0;
+    double current_qty = 0.0;
+    double filled_qty = 0.0;
+    double price = 0.0;
+    char ord_status = ord_status::New;
+    uint64_t created_at_ns = 0;
+    uint64_t updated_at_ns = 0;
+};
+
 struct FixSessionConfig {
     std::string sender_comp_id = "QUANTEINSTEIN_PRIME";
     std::string target_comp_id = "GS_GSET_FIX";
@@ -320,6 +366,48 @@ public:
         return msg;
     }
 
+    // Tag 35=G: Order Cancel / Replace Request (Order Modification)
+    FixMessage create_cancel_replace_request(
+        const std::string& orig_cl_ord_id,
+        const std::string& new_cl_ord_id,
+        const std::string& symbol,
+        Side side,
+        double new_qty,
+        double new_price)
+    {
+        FixMessage msg(msg_type::OrderCancelReplace);
+        populate_header(msg);
+        msg.set_field(tags::OrigClOrdID, orig_cl_ord_id);
+        msg.set_field(tags::ClOrdID, new_cl_ord_id);
+        msg.set_field(tags::Symbol, symbol);
+        msg.set_field(tags::Side, side == Side::BUY ? "1" : "2");
+        msg.set_field(tags::OrderQty, new_qty, 4);
+        msg.set_field(tags::OrdType, "2"); // Limit
+        msg.set_field(tags::Price, new_price, 4);
+        msg.set_field(tags::TransactTime, current_fix_utc_timestamp());
+        return msg;
+    }
+
+    // Tag 35=9: Order Cancel Reject Message
+    FixMessage create_cancel_reject(
+        const std::string& orig_cl_ord_id,
+        const std::string& cl_ord_id,
+        char cxl_rej_response_to,
+        int rej_reason,
+        const std::string& reason_text)
+    {
+        FixMessage msg(msg_type::OrderCancelReject);
+        populate_header(msg);
+        msg.set_field(tags::OrigClOrdID, orig_cl_ord_id);
+        msg.set_field(tags::ClOrdID, cl_ord_id);
+        msg.set_field(tags::OrderID, "PB-ORD-REJ");
+        msg.set_field(tags::OrdStatus, "8");
+        msg.set_field(tags::CxlRejResponseTo, std::string(1, cxl_rej_response_to));
+        msg.set_field(tags::CxlRejReason, rej_reason);
+        msg.set_field(tags::Text, reason_text);
+        return msg;
+    }
+
     void handle_inbound_message(const FixMessage& msg) {
         std::string mtype = msg.msg_type();
         in_seq_num_++;
@@ -345,10 +433,10 @@ private:
     FixSessionState state_;
 };
 
-// Institutional Live Execution Broker Adapter over FIX Protocol
+// Institutional Live Execution Broker Adapter over FIX Protocol with Stateful Lifecycle Tracking
 class FixBroker final : public IBroker {
 public:
-    explicit FixBroker(FixSessionConfig cfg = {}, double institutional_commission_bps = 0.25)
+    explicit FixBroker(FixSessionConfig cfg = {}, double institutional_commission_bps = 0.20)
         : session_(std::move(cfg)),
           commission_bps_(institutional_commission_bps),
           order_counter_(1000) {
@@ -410,6 +498,24 @@ public:
 
         session_.handle_inbound_message(report);
 
+        // Track in managed state map
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            ManagedOrderState st;
+            st.cl_ord_id = cl_ord_id;
+            st.broker_order_id = "PB-" + cl_ord_id;
+            st.symbol = request.symbol;
+            st.side = request.side;
+            st.original_qty = request.quantity;
+            st.current_qty = request.quantity;
+            st.filled_qty = request.quantity;
+            st.price = exec_price;
+            st.ord_status = ord_status::Filled;
+            st.created_at_ns = start_ns;
+            st.updated_at_ns = start_ns;
+            orders_[cl_ord_id] = st;
+        }
+
         OrderExecution e;
         e.client_order_id = request.client_order_id;
         e.broker_order_id = "PB-" + cl_ord_id;
@@ -451,6 +557,52 @@ public:
         return e;
     }
 
+    // Tag 35=G: Replace / Modify existing live order
+    OrderExecution replace_order(const std::string& orig_cl_ord_id, double new_qty, double new_price,
+                                 const std::string& symbol, Side side, uint64_t ts_ns = 0) {
+        uint64_t start_ns = ts_ns > 0 ? ts_ns : current_time_ns();
+        std::string new_cl_id = "QE-FIX-REP-" + std::to_string(order_counter_++);
+
+        if (new_qty <= 0.0 || new_price <= 0.0) {
+            FixMessage rej = session_.create_cancel_reject(
+                orig_cl_ord_id, new_cl_id, '2', cxl_rej_reason::Other, "Invalid replacement price or quantity");
+            OrderExecution e;
+            e.status = OrderStatus::REJECTED;
+            e.broker_order_id = orig_cl_ord_id;
+            e.message = "FIX_35=9_CANCEL_REJECT: " + rej.get_field(tags::Text);
+            return e;
+        }
+
+        FixMessage rep_req = session_.create_cancel_replace_request(
+            orig_cl_ord_id, new_cl_id, symbol, side, new_qty, new_price);
+        session_.handle_inbound_message(rep_req);
+
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            ManagedOrderState st;
+            st.cl_ord_id = new_cl_id;
+            st.orig_cl_ord_id = orig_cl_ord_id;
+            st.broker_order_id = "PB-" + new_cl_id;
+            st.symbol = symbol;
+            st.side = side;
+            st.current_qty = new_qty;
+            st.price = new_price;
+            st.ord_status = ord_status::Replaced;
+            st.updated_at_ns = start_ns;
+            orders_[new_cl_id] = st;
+        }
+
+        OrderExecution e;
+        e.status = OrderStatus::NEW;
+        e.broker_order_id = "PB-" + new_cl_id;
+        e.symbol = symbol;
+        e.side = side;
+        e.requested_quantity = new_qty;
+        e.fill_price = new_price;
+        e.message = "FIX_35=G_ORDER_REPLACED via " + session_.config().prime_broker_name + " [ClOrdID=" + new_cl_id + "]";
+        return e;
+    }
+
     const char* name() const override { return "FixBroker"; }
 
 private:
@@ -463,6 +615,8 @@ private:
     FixSession session_;
     double commission_bps_;
     std::atomic<uint64_t> order_counter_;
+    std::mutex state_mutex_;
+    std::unordered_map<std::string, ManagedOrderState> orders_;
 };
 
 enum class UserTier {
@@ -485,7 +639,7 @@ struct RouterDecision {
 class InstitutionalOrderRouter {
 public:
     explicit InstitutionalOrderRouter(std::shared_ptr<PaperBroker> paper_broker,
-                                     std::shared_ptr<FixBroker> fix_broker)
+                                      std::shared_ptr<FixBroker> fix_broker)
         : paper_broker_(std::move(paper_broker)),
           fix_broker_(std::move(fix_broker)) {}
 

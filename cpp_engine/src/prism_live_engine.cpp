@@ -1,10 +1,34 @@
 #include "prism_live_engine.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <sstream>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+using socket_t = SOCKET;
+static const socket_t INVALID_SOCK = INVALID_SOCKET;
+static void close_socket(socket_t s) { closesocket(s); }
+#else
+#include <pthread.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+using socket_t = int;
+static const socket_t INVALID_SOCK = -1;
+static void close_socket(socket_t s) { close(s); }
+#endif
 
 namespace {
 
@@ -13,10 +37,8 @@ static constexpr bool ENABLE_SIGNAL_LOGS = true;
 
 std::string ns_to_simple_time(uint64_t ns) {
     const uint64_t sec = ns / 1000000000ULL;
-
     std::ostringstream oss;
     oss << sec;
-
     return oss.str();
 }
 
@@ -37,21 +59,17 @@ uint64_t normalize_timestamp_ns(uint64_t ts) {
 
 Bar to_strategy_bar(const PrismBar& b) {
     Bar out{};
-
     out.ts = static_cast<uint64_t>(
         std::strtoull(b.timestamp.c_str(), nullptr, 10)
     );
-
     out.open = b.open;
     out.high = b.high;
     out.low = b.low;
     out.close = b.close;
     out.volume = b.volume;
     out.atr_14 = b.atr_14;
-
     return out;
 }
-
 
 } // namespace
 
@@ -273,7 +291,7 @@ double PrismLiveEngine::compute_setup_score(const PrismBar& bar) const {
 }
 
 void PrismLiveEngine::evaluate_prism() {
-    // Disabled. Signal generation is handled by PrismStrategy.
+    // Signal generation is handled by PrismStrategy.
 }
 
 bool PrismLiveEngine::has_signal() const {
@@ -298,4 +316,187 @@ double PrismLiveEngine::last_close() const {
     }
 
     return 0.0;
+}
+
+// -----------------------------------------------------------------------------
+// Standalone Headless TCP Daemon Implementation (Co-Located Sub-Millisecond DMA)
+// -----------------------------------------------------------------------------
+
+HeadlessTcpDaemon::HeadlessTcpDaemon(PrismLiveEngine& engine, HeadlessTcpDaemonConfig cfg)
+    : engine_(engine), cfg_(cfg)
+{
+}
+
+HeadlessTcpDaemon::~HeadlessTcpDaemon() {
+    stop();
+}
+
+void HeadlessTcpDaemon::thread_entry(void* param) {
+    auto* self = static_cast<HeadlessTcpDaemon*>(param);
+    if (self) {
+        self->run_event_loop();
+    }
+}
+
+bool HeadlessTcpDaemon::start() {
+    if (running_.load()) {
+        return true;
+    }
+    running_.store(true);
+
+#if defined(_WIN32) || defined(_WIN64)
+    thread_handle_ = reinterpret_cast<void*>(
+        CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(&HeadlessTcpDaemon::thread_entry), this, 0, nullptr)
+    );
+    return thread_handle_ != nullptr;
+#else
+    pthread_t pt;
+    if (pthread_create(&pt, nullptr, reinterpret_cast<void*(*)(void*)>(&HeadlessTcpDaemon::thread_entry), this) == 0) {
+        thread_handle_ = reinterpret_cast<void*>(pt);
+        return true;
+    }
+    running_.store(false);
+    return false;
+#endif
+}
+
+void HeadlessTcpDaemon::stop() {
+    if (!running_.load()) {
+        return;
+    }
+    running_.store(false);
+
+    // Trigger local connection to unblock accept() if needed
+#if defined(_WIN32) || defined(_WIN64)
+    socket_t wakeup = socket(AF_INET, SOCK_STREAM, 0);
+    if (wakeup != INVALID_SOCK) {
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<u_short>(cfg_.port));
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        ::connect(wakeup, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+        close_socket(wakeup);
+    }
+    if (thread_handle_) {
+        WaitForSingleObject(reinterpret_cast<HANDLE>(thread_handle_), 3000);
+        CloseHandle(reinterpret_cast<HANDLE>(thread_handle_));
+        thread_handle_ = nullptr;
+    }
+#else
+    if (thread_handle_) {
+        pthread_join(reinterpret_cast<pthread_t>(thread_handle_), nullptr);
+        thread_handle_ = nullptr;
+    }
+#endif
+}
+
+bool HeadlessTcpDaemon::is_running() const {
+    return running_.load();
+}
+
+void HeadlessTcpDaemon::run_event_loop() {
+#if defined(_WIN32) || defined(_WIN64)
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        running_.store(false);
+        return;
+    }
+#endif
+
+    socket_t listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd == INVALID_SOCK) {
+        running_.store(false);
+#if defined(_WIN32) || defined(_WIN64)
+        WSACleanup();
+#endif
+        return;
+    }
+
+    int opt = 1;
+#if defined(_WIN32) || defined(_WIN64)
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+#else
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+
+    sockaddr_in saddr{};
+    saddr.sin_family = AF_INET;
+    saddr.sin_addr.s_addr = INADDR_ANY;
+    saddr.sin_port = htons(static_cast<uint16_t>(cfg_.port));
+
+    if (bind(listen_fd, reinterpret_cast<sockaddr*>(&saddr), sizeof(saddr)) != 0) {
+        close_socket(listen_fd);
+        running_.store(false);
+#if defined(_WIN32) || defined(_WIN64)
+        WSACleanup();
+#endif
+        return;
+    }
+
+    if (listen(listen_fd, SOMAXCONN) != 0) {
+        close_socket(listen_fd);
+        running_.store(false);
+#if defined(_WIN32) || defined(_WIN64)
+        WSACleanup();
+#endif
+        return;
+    }
+
+    if (cfg_.verbose) {
+        std::cout << "[HEADLESS_TCP_DAEMON] Sub-millisecond direct socket server listening on port " << cfg_.port << "\n";
+    }
+
+    while (running_.load()) {
+        sockaddr_in caddr{};
+#if defined(_WIN32) || defined(_WIN64)
+        int clen = sizeof(caddr);
+#else
+        socklen_t clen = sizeof(caddr);
+#endif
+        socket_t client_fd = accept(listen_fd, reinterpret_cast<sockaddr*>(&caddr), &clen);
+        if (client_fd == INVALID_SOCK) {
+            break;
+        }
+
+        if (!running_.load()) {
+            close_socket(client_fd);
+            break;
+        }
+
+        // Sub-millisecond direct packet handling loop
+        char buffer[1024];
+        int bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+        if (bytes > 0) {
+            buffer[bytes] = '\0';
+            // Parse fast TradePacket: "PRICE,VOLUME,TS_NS"
+            double px = 0.0, vol = 0.0;
+            uint64_t ts = 0;
+            if (std::sscanf(buffer, "%lf,%lf,%llu", &px, &vol, &ts) >= 2) {
+                TradePacket tp{};
+                tp.price = px;
+                tp.volume = vol;
+                tp.exchange_ts_ns = ts > 0 ? ts : std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+                engine_.on_trade(tp);
+
+                if (engine_.has_signal()) {
+                    auto sig = engine_.last_signal();
+                    std::ostringstream resp;
+                    resp << "SIGNAL:" << sig.reason << "," << sig.entry_price << ","
+                         << sig.stop_loss << "," << sig.target1 << "\n";
+                    std::string s = resp.str();
+                    send(client_fd, s.c_str(), static_cast<int>(s.size()), 0);
+                } else {
+                    const char* ack = "ACK\n";
+                    send(client_fd, ack, 4, 0);
+                }
+            }
+        }
+        close_socket(client_fd);
+    }
+
+    close_socket(listen_fd);
+#if defined(_WIN32) || defined(_WIN64)
+    WSACleanup();
+#endif
 }

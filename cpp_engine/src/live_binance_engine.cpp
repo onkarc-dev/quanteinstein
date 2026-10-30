@@ -14,6 +14,15 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#if defined(_WIN32) || defined(_WIN64)
+#include <pthread.h>
+inline bool operator==(const __ptw32_handle_t& a, const __ptw32_handle_t& b) {
+    return a.p == b.p && a.x == b.x;
+}
+inline bool operator<(const __ptw32_handle_t& a, const __ptw32_handle_t& b) {
+    return a.p < b.p || (a.p == b.p && a.x < b.x);
+}
+#endif
 #include <thread>
 #include <vector>
 

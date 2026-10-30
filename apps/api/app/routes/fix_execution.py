@@ -26,6 +26,14 @@ class FixOrderRequest(BaseModel):
     mode: Optional[str] = Field(None, description="Optional override: 'SIMULATED', 'PAPER', or 'LIVE'")
 
 
+class FixCancelReplaceRequest(BaseModel):
+    orig_cl_ord_id: str = Field(..., description="Original Client Order ID to replace")
+    symbol: str = Field("BTCUSDT", description="Trading asset symbol")
+    side: str = Field("BUY", description="'BUY' or 'SELL'")
+    new_qty: float = Field(..., description="New order quantity")
+    new_price: float = Field(..., description="New limit price")
+
+
 @router.get("/status")
 def get_execution_status(user=Depends(current_user)):
     """
@@ -67,6 +75,22 @@ def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
         limit_price=payload.limit_price,
         reason=payload.reason,
         mode=payload.mode,
+    )
+
+
+@router.post("/cancel-replace")
+def cancel_replace_order(payload: FixCancelReplaceRequest, user=Depends(current_user)):
+    """
+    Tag 35=G: Order Cancel / Replace Request.
+    Restricted strictly to Enterprise Tier users.
+    """
+    return order_router.cancel_replace_order(
+        user=user,
+        orig_cl_ord_id=payload.orig_cl_ord_id,
+        symbol=payload.symbol,
+        side=payload.side,
+        new_qty=payload.new_qty,
+        new_price=payload.new_price,
     )
 
 

@@ -4,6 +4,7 @@
 #include "PrismConfig.hpp"
 #include "prism_strategy.hpp"
 
+#include <atomic>
 #include <deque>
 #include <string>
 #include <vector>
@@ -66,4 +67,30 @@ private:
 
     double previous_20_bar_high() const;
     double compute_setup_score(const PrismBar& bar) const;
+};
+
+// Headless TCP Engine Daemon for sub-millisecond co-located institutional tick-to-trade
+struct HeadlessTcpDaemonConfig {
+    int port = 9876;
+    int max_clients = 64;
+    bool verbose = false;
+};
+
+class HeadlessTcpDaemon {
+public:
+    explicit HeadlessTcpDaemon(PrismLiveEngine& engine, HeadlessTcpDaemonConfig cfg = {});
+    ~HeadlessTcpDaemon();
+
+    bool start();
+    void stop();
+    bool is_running() const;
+
+private:
+    PrismLiveEngine& engine_;
+    HeadlessTcpDaemonConfig cfg_;
+    std::atomic<bool> running_{false};
+    void* thread_handle_{nullptr};
+
+    void run_event_loop();
+    static void thread_entry(void* param);
 };

@@ -111,6 +111,27 @@ void test_fix_broker_order_execution() {
     assert(cxl.message.find("FIX_4.4_ORDER_CANCELLED") != std::string::npos);
 }
 
+void test_fix_cancel_replace_and_reject() {
+    FixSessionConfig cfg;
+    cfg.sender_comp_id = "QE_INSTITUTIONAL";
+    cfg.target_comp_id = "GS_GSET_FIX";
+    cfg.prime_broker_name = "Goldman Sachs Electronic Trading (GSET)";
+    FixBroker broker(cfg, 0.20);
+
+    // 1. Test Order Cancel / Replace (Tag 35=G)
+    OrderExecution rep = broker.replace_order("QE-FIX-7771-1000", 2.50, 64800.0, "BTCUSDT", Side::BUY, 3'000'000);
+    assert(rep.status == OrderStatus::NEW);
+    assert(rep.requested_quantity == 2.50);
+    assert(rep.fill_price == 64800.0);
+    assert(rep.message.find("FIX_35=G_ORDER_REPLACED") != std::string::npos);
+
+    // 2. Test Order Cancel Reject (Tag 35=9) on invalid quantity
+    OrderExecution rej = broker.replace_order("QE-FIX-7771-1000", -1.0, 64800.0, "BTCUSDT", Side::BUY, 4'000'000);
+    assert(rej.status == OrderStatus::REJECTED);
+    assert(rej.message.find("FIX_35=9_CANCEL_REJECT") != std::string::npos);
+    assert(rej.message.find("Invalid replacement price or quantity") != std::string::npos);
+}
+
 void test_dual_tier_order_router_isolation() {
     auto paper = std::make_shared<PaperBroker>();
     FixSessionConfig cfg;
@@ -175,8 +196,10 @@ int main() {
     std::cout << "  ✓ FixSession logon & heartbeat verified" << std::endl;
     test_fix_broker_order_execution();
     std::cout << "  ✓ FixBroker DMA order execution verified" << std::endl;
+    test_fix_cancel_replace_and_reject();
+    std::cout << "  ✓ FIX 35=G Cancel/Replace & 35=9 Reject verified" << std::endl;
     test_dual_tier_order_router_isolation();
     std::cout << "  ✓ Dual-tier institutional router isolation verified" << std::endl;
-    std::cout << "[FIX Engine Tests] ALL 5 TESTS PASSED SUCCESSFULLY!" << std::endl;
+    std::cout << "[FIX Engine Tests] ALL 6 TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }
