@@ -28,6 +28,10 @@ class IntraBarExecutionResult:
     slippage_incurred: float
     effective_spread: float
     realized_r: float
+    adverse_selection_drag: float = 0.0
+    borrow_fee_drag: float = 0.0
+    is_htb: bool = False
+    annualized_borrow_rate: float = 0.0
 
     @property
     def triggered(self) -> bool:
@@ -304,3 +308,75 @@ class MicrostructureExecutionEngine:
         fee = position_value * funding_rate
         return abs(fee)
 
+
+    @classmethod
+    def simulate_passive_limit_order(
+        cls,
+        limit_price: float,
+        side: Literal["BUY", "LONG", "SELL", "SHORT"],
+        bar: BarData,
+        kappa: float = 0.20,
+        historical_l2_depth: float = 1000.0,
+        queue_ratio_ahead: float = 0.35,
+    ) -> Tuple[bool, float, float]:
+        """
+        Passive Limit Order Adverse Selection & Queue Position Model:
+        - Orders do not fill automatically on price touch.
+        - Requires traded bar volume to exceed queue position ahead.
+        - Applies adverse selection toxic flow penalty: -kappa * sigma * sqrt(dt).
+        Returns (is_filled, effective_fill_price, adverse_selection_penalty).
+        """
+        is_long = str(side).upper() in ("BUY", "LONG")
+        # Check price boundary condition
+        price_touched = (bar.low <= limit_price) if is_long else (bar.high >= limit_price)
+        if not price_touched:
+            return False, 0.0, 0.0
+
+        # Queue position check: order is queued behind existing depth
+        simulated_queue_ahead = max(50.0, historical_l2_depth * queue_ratio_ahead)
+        if bar.volume > 0 and bar.volume < simulated_queue_ahead:
+            # Price touched boundary, but insufficient volume traded through the level
+            return False, 0.0, 0.0
+
+        # Adverse selection penalty: toxic order flow sweeps the book
+        atr_est = max(0.001 * limit_price, bar.high - bar.low)
+        sigma = (atr_est / limit_price) if limit_price > 0 else 0.015
+        dt = 1.0 / 390.0  # Normalized intraday bar duration
+        adverse_penalty = kappa * sigma * (dt ** 0.5) * limit_price
+
+        # Adverse selection pushes buy fills higher, sell fills lower
+        effective_fill = (limit_price + adverse_penalty) if is_long else (limit_price - adverse_penalty)
+        return True, round(effective_fill, 6), round(adverse_penalty, 6)
+
+    @classmethod
+    def calculate_short_borrow_fee(
+        cls,
+        notional_value: float,
+        days_held: float,
+        borrow_tier: Literal["GC", "MODERATE_HTB", "SEVERE_HTB"] = "GC",
+        custom_annual_rate: Optional[float] = None,
+    ) -> Dict[str, float]:
+        """
+        Dynamic Hard-To-Borrow (HTB) Negative Carry Simulation for Equity Shorts:
+        - GC (General Collateral): 0.35% (35 bps) annualized
+        - MODERATE_HTB: 8.5% annualized
+        - SEVERE_HTB: 28.5% - 85.0% annualized
+        Accrues negative carry daily: notional * (annual_rate / 360) * days_held.
+        """
+        if custom_annual_rate is not None:
+            annual_rate = max(0.0, custom_annual_rate)
+        elif borrow_tier == "SEVERE_HTB":
+            annual_rate = 0.350  # 35.0% annualized
+        elif borrow_tier == "MODERATE_HTB":
+            annual_rate = 0.085  # 8.5% annualized
+        else:
+            annual_rate = 0.0035  # 35 bps GC
+
+        daily_rate = annual_rate / 360.0
+        borrow_carry_cost = abs(notional_value) * daily_rate * max(1.0, days_held)
+        return {
+            "borrow_cost": round(borrow_carry_cost, 4),
+            "annualized_rate_pct": round(annual_rate * 100.0, 2),
+            "is_htb": annual_rate > 0.05,
+            "days_accrued": days_held,
+        }

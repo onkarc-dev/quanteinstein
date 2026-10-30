@@ -41,6 +41,9 @@ struct TradeLog {
     double entry_price = 0, stop_loss = 0, target1 = 0, target2 = 0, exit_price = 0;
     double gross_r = 0, friction_r = 0, net_r = 0, r_multiple = 0, setup_score = 0;
     double market_impact_bps = 0.0; // Almgren-Chriss dynamic market impact in basis points
+    double adverse_selection_penalty = 0.0; // Passive limit adverse selection drag (%)
+    double borrow_fee_drag_r = 0.0; // HTB short borrow negative carry drag in R
+    double annualized_borrow_rate_pct = 0.0; // Annualized borrow rate (%)
     int holding_bars = 0;
 };
 
@@ -577,7 +580,8 @@ int main(int argc, char** argv) {
     auto make_trade_log = [&](int tid, const std::string& e_time, double e_price, double s_loss, double tp1, double tp2,
                               const std::string& x_time, double x_price, const std::string& x_reason,
                               double risk_dist, double s_score, const std::string& reg, int h_bars,
-                              double current_atr = 0.0, double current_vol = 0.0) -> TradeLog {
+                              double current_atr = 0.0, double current_vol = 0.0,
+                              bool is_short = false, double custom_borrow_rate = 0.0) -> TradeLog {
         TradeLog tr;
         tr.trade_id = tid;
         tr.entry_time = e_time;
@@ -593,14 +597,31 @@ int main(int argc, char** argv) {
         // Dynamic Almgren-Chriss impact calculation
         double dynamic_impact_bps = compute_almgren_chriss_impact_bps(e_price, current_atr, current_vol);
         tr.market_impact_bps = dynamic_impact_bps;
+
+        // Microstructure Adverse Selection for passive limit / retest fills:
+        // Penalty = kappa * sigma * sqrt(dt)
+        double sigma = (e_price > 0.0 && current_atr > 0.0) ? (current_atr / e_price) : 0.015;
+        double kappa = 0.20;
+        double dt = 1.0 / 390.0; // Normalized intraday bar period
+        double adverse_sel_pct = kappa * sigma * std::sqrt(dt) * 100.0; // adverse selection drag in %
+        tr.adverse_selection_penalty = adverse_sel_pct;
+
+        // Dynamic Hard-To-Borrow (HTB) Negative Carry Simulation for short positions:
+        // Daily borrow drag: notional * (annual_borrow_rate / 360) * days_held
+        double annual_borrow_rate = is_short ? ((custom_borrow_rate > 0.0) ? custom_borrow_rate : 0.085) : 0.0035;
+        tr.annualized_borrow_rate_pct = annual_borrow_rate * 100.0;
+        double days_held = std::max(1.0, (static_cast<double>(h_bars) * run_config.bar_seconds) / 86400.0);
+        double borrow_drag_pct = is_short ? (annual_borrow_rate * (days_held / 360.0) * 100.0) : 0.0;
+
         double dynamic_slip_pct = dynamic_impact_bps / 100.0;
-        double dynamic_total_friction_pct = round_trip_fee_pct + dynamic_slip_pct;
+        double dynamic_total_friction_pct = round_trip_fee_pct + dynamic_slip_pct + (adverse_sel_pct / 100.0);
 
         double sl_dist_pct = (e_price > 0.0 && risk_dist > 0.0)
             ? ((risk_dist / e_price) * 100.0)
             : std::max(0.01, run_config.strategy.risk.risk_per_trade_pct);
         tr.friction_r = dynamic_total_friction_pct / std::max(1e-6, sl_dist_pct);
-        tr.net_r = tr.gross_r - tr.friction_r;
+        tr.borrow_fee_drag_r = borrow_drag_pct / std::max(1e-6, sl_dist_pct);
+        tr.net_r = tr.gross_r - tr.friction_r - tr.borrow_fee_drag_r;
         tr.r_multiple = tr.net_r;
         tr.setup_score = s_score;
         tr.regime_at_entry = reg;
@@ -643,7 +664,10 @@ int main(int argc, char** argv) {
             }
 
             // Task 3: Execute pending order generated on candle (t) at the opening tick of candle (t + 1)
+            // with passive limit order queue position check: order fills only if bar volume clears queue ahead
             if (pending_order.active && !trade_open && i == pending_order.signal_bar_idx + 1) {
+                double simulated_queue_ahead = std::max(50.0, b.volume * 0.35);
+                bool queue_cleared = (b.volume <= 0.0 || b.volume >= simulated_queue_ahead);
                 double fill_price = b.open > 0.0 ? b.open : b.close;
                 double atr_stop = fill_price - pending_order.planned_atr * atr_mult;
                 double fill_stop = std::min(atr_stop, pending_order.zone_low);
@@ -652,7 +676,7 @@ int main(int argc, char** argv) {
                 double fill_t2 = fill_price + run_config.strategy.targets.target2_R * fill_R;
                 double tp1_dist_pct = (fill_price > 0.0) ? (std::abs(fill_t1 - fill_price) / fill_price * 100.0) : 0.0;
 
-                if (fill_R > 0.0 && tp1_dist_pct >= min_tp1_move_pct && b.mps_state != "BLOCK" && b.regime != "SHOCK") {
+                if (queue_cleared && fill_R > 0.0 && tp1_dist_pct >= min_tp1_move_pct && b.mps_state != "BLOCK" && b.regime != "SHOCK") {
                     trade_open = true;
                     entry = fill_price;
                     stop = fill_stop;
@@ -741,7 +765,8 @@ int main(int argc, char** argv) {
                     TradeLog tr = make_trade_log(
                         trade_id, entry_timestamp, entry, stop, t1, t2,
                         b.timestamp, exit_price, exit_reason, R,
-                        entry_score.setup_score, entry_regime, held_bars
+                        entry_score.setup_score, entry_regime, held_bars,
+                        b.atr14, b.volume
                     );
                     trades.push_back(tr);
                     equity += tr.net_r;
@@ -936,7 +961,8 @@ int main(int argc, char** argv) {
         TradeLog tr = make_trade_log(
             trade_id, entry_timestamp, entry, stop, t1, t2,
             last_bar.timestamp, last_bar.close, "DATA_END_EXIT", R,
-            entry_score.setup_score, entry_regime, held_bars
+            entry_score.setup_score, entry_regime, held_bars,
+            last_bar.atr14, last_bar.volume
         );
         trades.push_back(tr);
         equity += tr.net_r;
@@ -952,12 +978,13 @@ int main(int argc, char** argv) {
 
     {
         std::ofstream o(outdir + "/trade_log.csv");
-        o << "trade_id,entry_time,entry_price,stop_loss,target1,target2,exit_time,exit_price,exit_reason,r_multiple,gross_r,net_r,friction_r,setup_score_at_entry,regime_at_entry,holding_bars\n";
+        o << "trade_id,entry_time,entry_price,stop_loss,target1,target2,exit_time,exit_price,exit_reason,r_multiple,gross_r,net_r,friction_r,borrow_fee_drag_r,adverse_selection_pct,annual_borrow_rate_pct,setup_score_at_entry,regime_at_entry,holding_bars\n";
         for (const auto& t : trades) {
             o << t.trade_id << "," << t.entry_time << "," << t.entry_price << "," << t.stop_loss << ","
               << t.target1 << "," << t.target2 << "," << t.exit_time << "," << t.exit_price << ","
               << t.exit_reason << "," << t.r_multiple << "," << t.gross_r << "," << t.net_r << ","
-              << t.friction_r << "," << t.setup_score << "," << t.regime_at_entry << "," << t.holding_bars << "\n";
+              << t.friction_r << "," << t.borrow_fee_drag_r << "," << t.adverse_selection_penalty << ","
+              << t.annualized_borrow_rate_pct << "," << t.setup_score << "," << t.regime_at_entry << "," << t.holding_bars << "\n";
         }
     }
 
