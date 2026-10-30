@@ -29,8 +29,13 @@ public:
     ~ShmChannel() { close_channel(); }
 
     bool init_as_server() {
+#if defined(_WIN32) || defined(_WIN64)
         bool ok1 = create_or_open_ring(ORDER_RING_NAME, sizeof(ShmOrderRingBuffer), true, order_handle_, reinterpret_cast<void*&>(order_ring_));
         bool ok2 = create_or_open_ring(EXEC_RING_NAME, sizeof(ShmExecRingBuffer), true, exec_handle_, reinterpret_cast<void*&>(exec_ring_));
+#else
+        bool ok1 = create_or_open_ring(ORDER_RING_NAME, sizeof(ShmOrderRingBuffer), true, order_fd_, reinterpret_cast<void*&>(order_ring_));
+        bool ok2 = create_or_open_ring(EXEC_RING_NAME, sizeof(ShmExecRingBuffer), true, exec_fd_, reinterpret_cast<void*&>(exec_ring_));
+#endif
 
         if (ok1 && order_ring_) {
             if (order_ring_->magic != SHM_MAGIC_RING_BUF) {
@@ -53,8 +58,13 @@ public:
     }
 
     bool init_as_client() {
+#if defined(_WIN32) || defined(_WIN64)
         bool ok1 = create_or_open_ring(ORDER_RING_NAME, sizeof(ShmOrderRingBuffer), false, order_handle_, reinterpret_cast<void*&>(order_ring_));
         bool ok2 = create_or_open_ring(EXEC_RING_NAME, sizeof(ShmExecRingBuffer), false, exec_handle_, reinterpret_cast<void*&>(exec_ring_));
+#else
+        bool ok1 = create_or_open_ring(ORDER_RING_NAME, sizeof(ShmOrderRingBuffer), false, order_fd_, reinterpret_cast<void*&>(order_ring_));
+        bool ok2 = create_or_open_ring(EXEC_RING_NAME, sizeof(ShmExecRingBuffer), false, exec_fd_, reinterpret_cast<void*&>(exec_ring_));
+#endif
         is_initialized_ = (ok1 && ok2);
         return is_initialized_;
     }

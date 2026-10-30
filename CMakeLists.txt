@@ -23,6 +23,14 @@ function(add_optional_engine_test target source)
             cpp_engine/src
         )
 
+        if(UNIX AND NOT APPLE)
+            find_package(Threads QUIET)
+            if(TARGET Threads::Threads)
+                target_link_libraries(${target} PRIVATE Threads::Threads)
+            endif()
+            target_link_libraries(${target} PRIVATE rt)
+        endif()
+
         add_test(NAME ${target} COMMAND ${target})
     else()
         message(STATUS "Skipping optional test target ${target}: missing ${source}")
