@@ -475,6 +475,25 @@ export interface OrgDetails {
     sec_rule_15c3_5: string;
     finra_4511_audit: string;
   };
+  provisioning_progress_pct?: number;
+  provisioning_message?: string;
+  est_seconds_remaining?: number;
+}
+
+export interface ProvisioningStatusResponse {
+  status: string;
+  provisioning?: {
+    task_id: string;
+    org_id: string;
+    org_slug: string;
+    status: string;
+    progress_pct: number;
+    stage_message: string;
+    est_seconds_remaining: number;
+    retry_count: number;
+    created_at: string;
+    updated_at: string;
+  };
 }
 
 export interface AuditLogEntry {
@@ -497,6 +516,10 @@ export interface AuditLogEntry {
 
 export async function getOrganizationDetails(): Promise<{ status: string; organization: OrgDetails }> {
   return api('/enterprise/organization/details') as any;
+}
+
+export async function getProvisioningStatus(orgIdOrSlug: string): Promise<ProvisioningStatusResponse> {
+  return api('/enterprise/provision/status/' + encodeURIComponent(orgIdOrSlug)) as any;
 }
 
 export async function getOrganizationMembers(): Promise<{ status: string; count: number; members: OrgMember[] }> {

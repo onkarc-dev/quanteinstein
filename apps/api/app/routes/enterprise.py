@@ -7,7 +7,11 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, EmailStr
 
 from app.core.config import settings
-from app.core.tenant_provisioner import provision_enterprise_tenant, verify_tenant_health
+from app.core.tenant_provisioner import (
+    provision_enterprise_tenant,
+    verify_tenant_health,
+    tenant_provisioning_queue,
+)
 from app.core.tenant_context import get_current_tenant_url
 from app.db import get_conn, row_to_dict, now
 from app.deps import current_user
@@ -59,6 +63,7 @@ class ProvisionTenantRequest(BaseModel):
     isolation_mode: str = "DEDICATED_SCHEMA"  # "DEDICATED_SCHEMA", "DEDICATED_DATABASE", or "ISOLATED_SQLITE"
     custom_db_url: Optional[str] = None
     admin_password: Optional[str] = None
+    async_provision: Optional[bool] = None
 
 
 @router.post("/provision", summary="Automated provisioning of isolated enterprise tenant database")
@@ -75,10 +80,20 @@ def provision_tenant(
             isolation_mode=payload.isolation_mode,
             custom_db_url=payload.custom_db_url,
             admin_password=payload.admin_password,
+            async_provision=payload.async_provision,
         )
         return {"status": "ok", "tenant": result}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Provisioning failed: {str(e)}")
+
+
+@router.get("/provision/status/{org_id_or_slug}", summary="Get background provisioning status and progress")
+def get_provision_status(org_id_or_slug: str):
+    """Real-time progress tracker for single-tenant database provisioning."""
+    status_info = tenant_provisioning_queue.get_status(org_id_or_slug)
+    if not status_info:
+        raise HTTPException(status_code=404, detail="Provisioning task not found")
+    return {"status": "ok", "provisioning": status_info}
 
 
 @router.get("/organizations", summary="List enterprise tenant organizations")

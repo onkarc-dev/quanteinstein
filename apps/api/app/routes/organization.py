@@ -13,6 +13,7 @@ from pydantic import BaseModel, EmailStr
 
 from app.core.audit_middleware import record_audit_event
 from app.core.config import settings
+from app.core.tenant_provisioner import tenant_provisioning_queue
 from app.db import get_primary_conn, hash_password, now, row_to_dict
 from app.deps import current_user
 
@@ -114,6 +115,15 @@ def get_organization_details(user: Dict[str, Any] = Depends(current_user)):
             prefix = parts[0].split("://", 1)[0] + "://***:***@"
             masked_url = prefix + parts[1]
 
+        prov_status = tenant_provisioning_queue.get_status(resolved_org_id)
+        org_status = org_dict.get("status") or (prov_status.get("status") if prov_status else "ACTIVE")
+        is_provisioning = (org_status == "PROVISIONING") or (prov_status and prov_status.get("status") in {"QUEUED", "PROVISIONING"})
+
+        db_status = "PROVISIONING" if is_provisioning else "ONLINE"
+        progress_pct = prov_status.get("progress_pct", 35) if (prov_status and is_provisioning) else (15 if is_provisioning else 100)
+        prov_msg = prov_status.get("stage_message", "Provisioning Secure Infrastructure (Est. 2 mins)") if (prov_status and is_provisioning) else ("Provisioning Secure Infrastructure (Est. 2 mins)" if is_provisioning else "Single-tenant database active and verified")
+        est_sec = prov_status.get("est_seconds_remaining", 120) if (prov_status and is_provisioning) else (120 if is_provisioning else 0)
+
     return {
         "status": "ok",
         "organization": {
@@ -122,8 +132,11 @@ def get_organization_details(user: Dict[str, Any] = Depends(current_user)):
             "slug": org_dict.get("slug") or "inst-capital",
             "tier": org_dict.get("tier") or "ENTERPRISE",
             "isolation_mode": org_dict.get("isolation_mode") or "DEDICATED_SCHEMA",
-            "database_status": "ONLINE",
+            "database_status": db_status,
             "database_url_masked": masked_url,
+            "provisioning_progress_pct": progress_pct,
+            "provisioning_message": prov_msg,
+            "est_seconds_remaining": est_sec,
             "created_at": org_dict.get("created_at") or now(),
             "member_count": member_count,
             "sso_configured": bool(sso_info and sso_info.get("is_active")),

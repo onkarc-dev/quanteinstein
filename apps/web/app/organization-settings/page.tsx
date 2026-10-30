@@ -160,6 +160,27 @@ export default function OrganizationSettingsPage() {
     loadAll();
   }, []);
 
+  // Live polling while single-tenant infrastructure is provisioning
+  useEffect(() => {
+    if (org?.database_status !== 'PROVISIONING') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const orgRes = await getOrganizationDetails();
+        if (orgRes && orgRes.organization) {
+          setOrg(orgRes.organization);
+          if (orgRes.organization.database_status === 'ONLINE') {
+            setSuccessMsg('Dedicated single-tenant infrastructure successfully provisioned and verified!');
+          }
+        }
+      } catch (err) {
+        // Silent retry
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [org?.database_status]);
+
   async function loadAll() {
     try {
       setLoading(true);
@@ -403,6 +424,86 @@ export default function OrganizationSettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* ─── PROVISIONING PROGRESS BANNER (SECURE QUEUE RATE-LIMITED) ─────── */}
+        {org?.database_status === 'PROVISIONING' && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.12) 0%, rgba(99, 102, 241, 0.12) 100%)',
+            border: '1px solid rgba(56, 189, 248, 0.4)',
+            borderRadius: 14,
+            padding: '20px 24px',
+            marginBottom: 24,
+            boxShadow: '0 4px 20px rgba(56, 189, 248, 0.15)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  background: 'rgba(56, 189, 248, 0.2)',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 20,
+                }}>
+                  ⚙️
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
+                    Provisioning Secure Infrastructure (Est. 2 mins)
+                  </h4>
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                    {org.provisioning_message || 'Initializing single-tenant Postgres schema, generating KMS crypto keys, and mounting SEC Rule 15c3-5 pre-trade gateway...'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{
+                  fontSize: 13,
+                  fontWeight: 800,
+                  fontFamily: 'monospace',
+                  color: '#38bdf8',
+                  background: 'rgba(14, 165, 233, 0.2)',
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                }}>
+                  {org.provisioning_progress_pct || 35}% COMPLETE
+                </span>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                  {org.est_seconds_remaining ? `~${org.est_seconds_remaining}s remaining` : 'Finalizing deployment...'}
+                </div>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div style={{
+              width: '100%',
+              height: 8,
+              background: '#0a0e1a',
+              borderRadius: 4,
+              overflow: 'hidden',
+              border: '1px solid #1e293b',
+              marginTop: 10,
+            }}>
+              <div style={{
+                width: `${Math.min(100, Math.max(5, org.provisioning_progress_pct || 35))}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #0284c7 0%, #38bdf8 50%, #6366f1 100%)',
+                borderRadius: 4,
+                transition: 'width 0.6s ease-in-out',
+                boxShadow: '0 0 10px rgba(56, 189, 248, 0.5)',
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, fontSize: 11, color: '#64748b' }}>
+              <span>🛡️ Protected by async rate-limiting queue (max 5 provisions/sec) &amp; exponential backoff</span>
+              <span style={{ color: '#38bdf8', fontWeight: 600 }}>Auto-refreshing status...</span>
+            </div>
+          </div>
+        )}
 
         {/* ─── Feedback Messages ────────────────────────────────────────────── */}
         {error && (
@@ -887,7 +988,13 @@ export default function OrganizationSettingsPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 12 }}>
                 <div style={{ background: '#0a0e1a', padding: 10, borderRadius: 8, border: '1px solid #1e293b' }}>
                   <div style={{ color: '#64748b', fontSize: 10 }}>HEALTH STATUS</div>
-                  <div style={{ color: '#10b981', fontWeight: 800, marginTop: 2 }}>● HEALTHY (ONLINE)</div>
+                  <div style={{
+                    color: org?.database_status === 'PROVISIONING' ? '#f59e0b' : '#10b981',
+                    fontWeight: 800,
+                    marginTop: 2
+                  }}>
+                    {org?.database_status === 'PROVISIONING' ? `⏳ PROVISIONING (${org?.provisioning_progress_pct || 35}%)` : '● HEALTHY (ONLINE)'}
+                  </div>
                 </div>
                 <div style={{ background: '#0a0e1a', padding: 10, borderRadius: 8, border: '1px solid #1e293b' }}>
                   <div style={{ color: '#64748b', fontSize: 10 }}>ISOLATION MODE</div>

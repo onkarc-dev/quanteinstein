@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -60,15 +61,19 @@ public:
           state_(FixSessionState::DISCONNECTED) {}
 
     const FixSessionConfig& config() const noexcept { return cfg_; }
-    FixSessionState state() const noexcept { return state_; }
-    bool is_active() const noexcept { return state_ == FixSessionState::ACTIVE; }
+    FixSessionState state() const noexcept { return state_.load(std::memory_order_relaxed); }
+    bool is_active() const noexcept { return state_.load(std::memory_order_relaxed) == FixSessionState::ACTIVE; }
+
+    std::string session_id() const {
+        return cfg_.sender_comp_id + "->" + cfg_.target_comp_id;
+    }
 
     FixMessage create_logon() {
         FixMessage msg(msg_type::Logon);
         populate_header(msg);
         msg.set_field(tags::EncryptMethod, "0");
         msg.set_field(tags::HeartBtInt, cfg_.heartbeat_interval_sec);
-        state_ = FixSessionState::LOGON_SENT;
+        state_.store(FixSessionState::LOGON_SENT, std::memory_order_release);
         return msg;
     }
 
@@ -185,9 +190,9 @@ public:
         if (HFT_LIKELY_COND(mtype == msg_type::ExecutionReport || mtype == msg_type::OrderCancelReplace)) {
             // Hot fast path inbound execution
         } else if (mtype == msg_type::Logon) {
-            state_ = FixSessionState::ACTIVE;
+            state_.store(FixSessionState::ACTIVE, std::memory_order_release);
         } else if (mtype == msg_type::Logout) {
-            state_ = FixSessionState::DISCONNECTED;
+            state_.store(FixSessionState::DISCONNECTED, std::memory_order_release);
         }
     }
 
@@ -207,18 +212,165 @@ private:
     FixSessionConfig cfg_;
     std::atomic<uint64_t> out_seq_num_;
     std::atomic<uint64_t> in_seq_num_;
-    FixSessionState state_;
+    std::atomic<FixSessionState> state_;
 };
+
+// ============================================================================
+// Core-Sharded Scalable FIX Session Pool & Manager (5,000+ Concurrent Sessions)
+// ============================================================================
+class FixSessionManager {
+public:
+    static constexpr size_t NUM_SHARDS = 64; // Power of 2 striped sharding across CPU cores
+    static constexpr size_t MAX_SESSIONS = 8192; // High-water capacity (exceeds 5,000 safe requirement)
+
+    struct alignas(64) SessionShard {
+        mutable std::shared_mutex mutex;
+        std::unordered_map<std::string, std::shared_ptr<FixSession>> sessions;
+    };
+
+    static FixSessionManager& instance() noexcept {
+        static FixSessionManager mgr;
+        return mgr;
+    }
+
+    FixSessionManager() {
+        total_sessions_.store(0, std::memory_order_relaxed);
+    }
+
+    // Fast FNV-1a 64-bit string_view hash for O(1) lock-free shard distribution
+    static inline size_t hash_key(std::string_view key) noexcept {
+        uint64_t hash = 14695981039346656037ULL;
+        for (char c : key) {
+            hash ^= static_cast<uint64_t>(c);
+            hash *= 1099511628211ULL;
+        }
+        return static_cast<size_t>(hash & (NUM_SHARDS - 1));
+    }
+
+    // Allocate or retrieve a dynamic FIX session
+    std::shared_ptr<FixSession> get_or_create_session(const FixSessionConfig& cfg) {
+        std::string key = cfg.sender_comp_id + "->" + cfg.target_comp_id;
+        size_t shard_idx = hash_key(key);
+        auto& shard = shards_[shard_idx];
+
+        // Optimistic fast path: shared read lock
+        {
+            std::shared_lock<std::shared_mutex> rlock(shard.mutex);
+            auto it = shard.sessions.find(key);
+            if (HFT_LIKELY_COND(it != shard.sessions.end())) {
+                return it->second;
+            }
+        }
+
+        // Exclusive write path only when creating new session on this shard
+        std::unique_lock<std::shared_mutex> wlock(shard.mutex);
+        auto it = shard.sessions.find(key);
+        if (it != shard.sessions.end()) {
+            return it->second;
+        }
+
+        if (HFT_UNLIKELY_COND(total_sessions_.load(std::memory_order_relaxed) >= MAX_SESSIONS)) {
+            return nullptr;
+        }
+
+        auto session = std::make_shared<FixSession>(cfg);
+        shard.sessions.emplace(std::move(key), session);
+        total_sessions_.fetch_add(1, std::memory_order_relaxed);
+        return session;
+    }
+
+    std::shared_ptr<FixSession> get_session(std::string_view session_key) const {
+        size_t shard_idx = hash_key(session_key);
+        const auto& shard = shards_[shard_idx];
+
+        std::shared_lock<std::shared_mutex> rlock(shard.mutex);
+        auto it = shard.sessions.find(std::string(session_key));
+        if (it != shard.sessions.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
+    std::shared_ptr<FixSession> get_session_by_comps(std::string_view sender, std::string_view target) const {
+        std::string key = std::string(sender) + "->" + std::string(target);
+        return get_session(key);
+    }
+
+    bool remove_session(std::string_view session_key) {
+        size_t shard_idx = hash_key(session_key);
+        auto& shard = shards_[shard_idx];
+
+        std::unique_lock<std::shared_mutex> wlock(shard.mutex);
+        auto it = shard.sessions.find(std::string(session_key));
+        if (it != shard.sessions.end()) {
+            shard.sessions.erase(it);
+            total_sessions_.fetch_sub(1, std::memory_order_relaxed);
+            return true;
+        }
+        return false;
+    }
+
+    size_t size() const noexcept {
+        return total_sessions_.load(std::memory_order_relaxed);
+    }
+
+    size_t capacity() const noexcept {
+        return MAX_SESSIONS;
+    }
+
+    size_t active_count() const {
+        size_t count = 0;
+        for (size_t i = 0; i < NUM_SHARDS; ++i) {
+            std::shared_lock<std::shared_mutex> rlock(shards_[i].mutex);
+            for (const auto& [_, s] : shards_[i].sessions) {
+                if (s && s->is_active()) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    void broadcast_heartbeats(std::string_view test_req_id = "") {
+        for (size_t i = 0; i < NUM_SHARDS; ++i) {
+            std::shared_lock<std::shared_mutex> rlock(shards_[i].mutex);
+            for (auto& [_, s] : shards_[i].sessions) {
+                if (s && s->is_active()) {
+                    s->create_heartbeat(test_req_id);
+                }
+            }
+        }
+    }
+
+    void clear() {
+        for (size_t i = 0; i < NUM_SHARDS; ++i) {
+            std::unique_lock<std::shared_mutex> wlock(shards_[i].mutex);
+            shards_[i].sessions.clear();
+        }
+        total_sessions_.store(0, std::memory_order_relaxed);
+    }
+
+private:
+    SessionShard shards_[NUM_SHARDS];
+    std::atomic<size_t> total_sessions_{0};
+};
+
+using ShardedFixSessionManager = FixSessionManager;
 
 // Institutional Live Execution Broker Adapter over FIX Protocol with Stateful Lifecycle Tracking
 class FixBroker final : public IBroker {
 public:
     explicit FixBroker(FixSessionConfig cfg = {}, double institutional_commission_bps = 0.20)
-        : session_(std::move(cfg)),
+        : session_(cfg),
           commission_bps_(institutional_commission_bps),
           order_counter_(1000) {
         auto logon_msg = session_.create_logon();
         session_.handle_inbound_message(FixMessage(msg_type::Logon));
+        FixSessionManager::instance().get_or_create_session(cfg);
+    }
+
+    static FixSessionManager& session_manager() noexcept {
+        return FixSessionManager::instance();
     }
 
     const FixSession& session() const noexcept { return session_; }
@@ -330,9 +482,10 @@ public:
 
         session_.handle_inbound_message(*report);
 
-        // Track in managed state map
+        // Track in sharded managed state map (zero false-sharing across CPU cores)
         {
-            std::lock_guard<std::mutex> lock(state_mutex_);
+            size_t oshard = hash_order_id(cl_ord_id);
+            std::unique_lock<std::shared_mutex> lock(order_shards_[oshard].mutex);
             ManagedOrderState st;
             st.cl_ord_id = cl_ord_id;
             st.broker_order_id = std::string(pb_order_id_sv);
@@ -345,7 +498,7 @@ public:
             st.ord_status = ord_status::Filled;
             st.created_at_ns = start_ns;
             st.updated_at_ns = start_ns;
-            orders_[cl_ord_id] = std::move(st);
+            order_shards_[oshard].orders[cl_ord_id] = std::move(st);
         }
 
         OrderExecution e;
@@ -419,7 +572,8 @@ public:
         std::string new_cl_id_str(new_cl_id);
         std::string pb_order_id = "PB-" + new_cl_id_str;
         {
-            std::lock_guard<std::mutex> lock(state_mutex_);
+            size_t oshard = hash_order_id(new_cl_id_str);
+            std::unique_lock<std::shared_mutex> lock(order_shards_[oshard].mutex);
             ManagedOrderState st;
             st.cl_ord_id = new_cl_id_str;
             st.orig_cl_ord_id = std::string(orig_cl_ord_id);
@@ -430,7 +584,7 @@ public:
             st.price = new_price;
             st.ord_status = ord_status::Replaced;
             st.updated_at_ns = start_ns;
-            orders_[new_cl_id_str] = std::move(st);
+            order_shards_[oshard].orders[new_cl_id_str] = std::move(st);
         }
 
         OrderExecution e;
@@ -444,6 +598,17 @@ public:
         return e;
     }
 
+    bool get_order_state(std::string_view cl_ord_id, ManagedOrderState& out_state) const {
+        size_t oshard = hash_order_id(cl_ord_id);
+        std::shared_lock<std::shared_mutex> lock(order_shards_[oshard].mutex);
+        auto it = order_shards_[oshard].orders.find(std::string(cl_ord_id));
+        if (it != order_shards_[oshard].orders.end()) {
+            out_state = it->second;
+            return true;
+        }
+        return false;
+    }
+
     const char* name() const override { return "FixBroker"; }
 
 private:
@@ -453,11 +618,25 @@ private:
                 std::chrono::high_resolution_clock::now().time_since_epoch()).count());
     }
 
+    struct alignas(64) OrderShard {
+        mutable std::shared_mutex mutex;
+        std::unordered_map<std::string, ManagedOrderState> orders;
+    };
+    static constexpr size_t NUM_ORDER_SHARDS = 32;
+
+    static inline size_t hash_order_id(std::string_view id) noexcept {
+        uint64_t hash = 14695981039346656037ULL;
+        for (char c : id) {
+            hash ^= static_cast<uint64_t>(c);
+            hash *= 1099511628211ULL;
+        }
+        return static_cast<size_t>(hash & (NUM_ORDER_SHARDS - 1));
+    }
+
     FixSession session_;
     double commission_bps_;
     std::atomic<uint64_t> order_counter_;
-    std::mutex state_mutex_;
-    std::unordered_map<std::string, ManagedOrderState> orders_;
+    OrderShard order_shards_[NUM_ORDER_SHARDS];
 };
 
 enum class UserTier {

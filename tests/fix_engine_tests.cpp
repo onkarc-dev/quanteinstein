@@ -6,6 +6,8 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 using namespace quantos::fix;
 
@@ -218,6 +220,72 @@ void test_zero_alloc_fix_pool_and_direct_wire_encode() {
     }
 }
 
+void test_sharded_fix_session_manager_5000_scaling() {
+    auto& mgr = FixSessionManager::instance();
+    mgr.clear();
+    assert(mgr.size() == 0);
+
+    constexpr size_t TARGET_SESSIONS = 5000;
+    constexpr size_t NUM_THREADS = 8;
+    std::vector<std::thread> workers;
+    workers.reserve(NUM_THREADS);
+
+    // Concurrently register 5,000 unique institutional fund FIX sessions
+    size_t chunk_size = TARGET_SESSIONS / NUM_THREADS;
+    for (size_t t = 0; t < NUM_THREADS; ++t) {
+        workers.emplace_back([t, chunk_size, &mgr]() {
+            size_t start = t * chunk_size;
+            size_t end = (t == NUM_THREADS - 1) ? TARGET_SESSIONS : start + chunk_size;
+            for (size_t i = start; i < end; ++i) {
+                FixSessionConfig cfg;
+                cfg.sender_comp_id = "QE_FUND_" + std::to_string(i);
+                cfg.target_comp_id = "GS_GSET_FIX";
+                cfg.prime_broker_name = "Goldman Sachs GSET";
+                auto session = mgr.get_or_create_session(cfg);
+                assert(session != nullptr);
+                assert(session->config().sender_comp_id == cfg.sender_comp_id);
+            }
+        });
+    }
+
+    for (auto& w : workers) {
+        w.join();
+    }
+    workers.clear();
+
+    assert(mgr.size() == TARGET_SESSIONS);
+
+    // Concurrently verify 5,000 lookups across 8 threads
+    std::atomic<size_t> successful_lookups{0};
+    for (size_t t = 0; t < NUM_THREADS; ++t) {
+        workers.emplace_back([t, chunk_size, &mgr, &successful_lookups]() {
+            size_t start = t * chunk_size;
+            size_t end = (t == NUM_THREADS - 1) ? TARGET_SESSIONS : start + chunk_size;
+            for (size_t i = start; i < end; ++i) {
+                std::string sender = "QE_FUND_" + std::to_string(i);
+                auto session = mgr.get_session_by_comps(sender, "GS_GSET_FIX");
+                if (session && session->config().sender_comp_id == sender) {
+                    successful_lookups.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    for (auto& w : workers) {
+        w.join();
+    }
+
+    assert(successful_lookups.load() == TARGET_SESSIONS);
+
+    // Verify broadcast heartbeats across 5,000 sessions
+    mgr.broadcast_heartbeats("PULSE-5000");
+
+    // Verify removing a session
+    assert(mgr.remove_session("QE_FUND_100->GS_GSET_FIX"));
+    assert(mgr.size() == TARGET_SESSIONS - 1);
+    assert(mgr.get_session("QE_FUND_100->GS_GSET_FIX") == nullptr);
+}
+
 } // namespace
 
 int main() {
@@ -228,6 +296,8 @@ int main() {
     std::cout << "  ✓ FixMessage parse verified" << std::endl;
     test_zero_alloc_fix_pool_and_direct_wire_encode();
     std::cout << "  ✓ Zero-alloc FixMessagePool & direct wire encoder verified" << std::endl;
+    test_sharded_fix_session_manager_5000_scaling();
+    std::cout << "  ✓ Sharded FixSessionManager (5,000 concurrent sessions, 8 threads) verified" << std::endl;
     test_fix_session_lifecycle();
     std::cout << "  ✓ FixSession logon & heartbeat verified" << std::endl;
     test_fix_broker_order_execution();
@@ -236,6 +306,6 @@ int main() {
     std::cout << "  ✓ FIX 35=G Cancel/Replace & 35=9 Reject verified" << std::endl;
     test_dual_tier_order_router_isolation();
     std::cout << "  ✓ Dual-tier institutional router isolation verified" << std::endl;
-    std::cout << "[FIX Engine Tests] ALL 7 TESTS PASSED SUCCESSFULLY!" << std::endl;
+    std::cout << "[FIX Engine Tests] ALL 8 TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

@@ -164,7 +164,24 @@ class RQJobQueue:
         self._RQJob = _RQJob
 
     def enqueue(self, kind: str, payload: Dict[str, Any]) -> QueueJob:
-        if kind != "backtest":
+        if kind == "enterprise_db_provisioning":
+            rq_job = self._rq.enqueue(
+                "app.core.tenant_provisioner.provision_tenant_worker_sync",
+                dict(payload),
+                job_timeout=300,
+                result_ttl=86400,
+                failure_ttl=86400,
+                retry=self._Retry(max=3, interval=[10, 30, 60]),
+            )
+            return QueueJob(
+                id=rq_job.id,
+                kind=kind,
+                payload=dict(payload),
+                status=JobStatus.queued,
+                created_at=_now(),
+                meta={"rq_job_id": rq_job.id},
+            )
+        elif kind != "backtest":
             raise ValueError(f"Unsupported RQ job kind: {kind}")
 
         rq_job = self._rq.enqueue(
