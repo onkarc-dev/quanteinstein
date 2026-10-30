@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Body, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.deps import current_user
@@ -35,7 +35,7 @@ class FixCancelReplaceRequest(BaseModel):
 
 
 @router.get("/status")
-def get_execution_status(user=Depends(current_user)):
+async def get_execution_status(user=Depends(current_user)):
     """
     Returns the current execution routing state, active Prime Broker, and live trading permissions.
     """
@@ -43,7 +43,7 @@ def get_execution_status(user=Depends(current_user)):
 
 
 @router.post("/mode")
-def set_execution_mode(payload: ExecutionModeRequest, user=Depends(current_user)):
+async def set_execution_mode(payload: ExecutionModeRequest, user=Depends(current_user)):
     """
     Toggles execution mode between 'SIMULATED' (Paper Simulator) and 'LIVE_FIX' (Prime Broker DMA).
     Restricted to Enterprise Tier users.
@@ -52,7 +52,7 @@ def set_execution_mode(payload: ExecutionModeRequest, user=Depends(current_user)
 
 
 @router.post("/prime-broker")
-def select_prime_broker(payload: PrimeBrokerSelectRequest, user=Depends(current_user)):
+async def select_prime_broker(payload: PrimeBrokerSelectRequest, user=Depends(current_user)):
     """
     Selects active Institutional Prime Broker for FIX 4.4 order routing.
     Restricted to Enterprise Tier users.
@@ -61,12 +61,12 @@ def select_prime_broker(payload: PrimeBrokerSelectRequest, user=Depends(current_
 
 
 @router.post("/order")
-def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
+async def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
     """
-    Unified high-concurrency order submission endpoint.
-    Routes to simulator for retail accounts, or directly to prime broker FIX for authorized enterprise accounts.
+    Unified high-concurrency asynchronous order submission endpoint.
+    Protected by token-bucket rate limiting and async timeouts.
     """
-    return order_router.route_order(
+    return await order_router.route_order_async(
         user=user,
         symbol=payload.symbol,
         side=payload.side,
@@ -79,7 +79,7 @@ def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
 
 
 @router.post("/cancel-replace")
-def cancel_replace_order(payload: FixCancelReplaceRequest, user=Depends(current_user)):
+async def cancel_replace_order(payload: FixCancelReplaceRequest, user=Depends(current_user)):
     """
     Tag 35=G: Order Cancel / Replace Request.
     Restricted strictly to Enterprise Tier users.
@@ -95,7 +95,7 @@ def cancel_replace_order(payload: FixCancelReplaceRequest, user=Depends(current_
 
 
 @router.get("/audit-trail")
-def get_fix_audit_trail(limit: int = 50, user=Depends(current_user)):
+async def get_fix_audit_trail(limit: int = 50, user=Depends(current_user)):
     """
     Retrieves immutable FIX protocol audit trail logs for regulatory and SOC 2 compliance.
     """

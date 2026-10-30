@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { api, formatApiError, getUser, type AuthUser, getExecutionStatus, setExecutionMode, selectPrimeBroker, getFixAuditTrail } from "../../lib/api";
@@ -521,6 +521,21 @@ function Countdown({ until }: { until?: string }) {
 }
 
 export default function PaperTradingPage() {
+  const isMountedRef = useRef(true);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const activeAbortRef = useRef<AbortController | null>(null);
+  const pollLoopRef = useRef<() => void>(() => {});
+
+  const scheduleNextPoll = (delayMs = 1500) => {
+    if (!isMountedRef.current) return;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+    }
+    pollTimerRef.current = setTimeout(() => {
+      pollLoopRef.current();
+    }, delayMs);
+  };
+
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [execStatus, setExecStatus] = useState<any>(null);
   const [switchingMode, setSwitchingMode] = useState(false);
@@ -683,9 +698,17 @@ export default function PaperTradingPage() {
   }, []);
 
   async function refresh(isInitial = false) {
+    if (!isMountedRef.current) return;
+    if (activeAbortRef.current) {
+      activeAbortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    activeAbortRef.current = abortCtrl;
+
     try {
       const url = isInitial ? "/live-paper/status?fresh=1" : "/live-paper/status";
-      const s = (await api(url)) as LiveStatus;
+      const s = (await api(url, { signal: abortCtrl.signal }, isInitial ? 1 : 0)) as LiveStatus;
+      if (!isMountedRef.current) return;
       const wasActive = typeof window !== "undefined" && localStorage.getItem("quantos_paper_active") === "1";
 
       if (s.status === "running") {
@@ -707,17 +730,24 @@ export default function PaperTradingPage() {
         setStatus(s);
       } else if (wasActive && (s.status === "idle" || s.status === "stopped")) {
         try {
-          const recovered = (await api("/live-paper/start", {
-            method: "POST",
-            body: JSON.stringify({
-              strategy_id: selectedStrategyId || undefined,
-              symbols: selectedSymbols,
-              starting_balance: customBalance,
-            }),
-          })) as LiveStatus;
+          const recovered = (await api(
+            "/live-paper/start",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                strategy_id: selectedStrategyId || undefined,
+                symbols: selectedSymbols,
+                starting_balance: customBalance,
+              }),
+              signal: abortCtrl.signal,
+            },
+            0
+          )) as LiveStatus;
+          if (!isMountedRef.current) return;
           setStatus(recovered);
           return;
         } catch {
+          if (!isMountedRef.current) return;
           setStatus(s);
         }
       } else {
@@ -727,11 +757,35 @@ export default function PaperTradingPage() {
       if (s.wallet?.starting_balance && s.wallet.starting_balance > 0) {
         setCustomBalance((prev) => (prev === 100000 ? s.wallet!.starting_balance : prev));
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === "AbortError" || !isMountedRef.current) {
+        return;
+      }
       setMessage(formatApiError(err));
       setStatus({ status: "error", error: formatApiError(err) });
+    } finally {
+      if (activeAbortRef.current === abortCtrl) {
+        activeAbortRef.current = null;
+      }
     }
   }
+
+  pollLoopRef.current = async () => {
+    if (!isMountedRef.current) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      scheduleNextPoll(3000);
+      return;
+    }
+    try {
+      await refresh(false);
+    } catch {
+      // Handled inside refresh
+    } finally {
+      if (isMountedRef.current) {
+        scheduleNextPoll(1500);
+      }
+    }
+  };
 
   async function handleUpdateBalance(amount: number) {
     const target = Math.max(100, Math.round(amount));
@@ -1053,9 +1107,10 @@ export default function PaperTradingPage() {
   }
 
   useEffect(() => {
+    isMountedRef.current = true;
     loadStrategies();
     refresh(true);
-    const id = setInterval(() => refresh(false), 1500);
+    scheduleNextPoll(1500);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -1065,7 +1120,13 @@ export default function PaperTradingPage() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      clearInterval(id);
+      isMountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+      }
+      if (activeAbortRef.current) {
+        activeAbortRef.current.abort();
+      }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

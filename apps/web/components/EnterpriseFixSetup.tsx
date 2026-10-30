@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   getUser,
   setTierOverride,
@@ -114,19 +114,28 @@ export default function EnterpriseFixSetup() {
   const [testResult, setTestResult] = useState<FixSessionTestResult | null>(null);
   const [savingConnection, setSavingConnection] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    const update = () => {
-      const u = getUser();
-      setUser(u);
-    };
-    update();
-    fetchFixConnections();
-    window.addEventListener('storage', update);
-    return () => window.removeEventListener('storage', update);
+  const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    setToastMessage({ text, type });
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 4500);
   }, []);
 
-  const fetchFixConnections = async () => {
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const fetchFixConnections = useCallback(async () => {
     try {
       const res = await getFixConnections();
       if (res && res.ok) {
@@ -137,21 +146,32 @@ export default function EnterpriseFixSetup() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleSelectBrokerTemplate = (broker: PrimeBrokerTemplate) => {
+  useEffect(() => {
+    const update = () => {
+      const u = getUser();
+      setUser(u);
+    };
+    update();
+    fetchFixConnections();
+    window.addEventListener('storage', update);
+    return () => window.removeEventListener('storage', update);
+  }, [fetchFixConnections]);
+
+  const handleSelectBrokerTemplate = useCallback((broker: PrimeBrokerTemplate) => {
     setSelectedBroker(broker);
     setTargetCompId(broker.defaultTargetCompId);
     setHostIp(broker.defaultHost);
     setPort(broker.defaultPort);
     setFixVersion(broker.defaultVersion);
     setTestResult(null);
-  };
+  }, []);
 
-  const handleFileUpload = async (file: File) => {
+  const handleFileUpload = useCallback(async (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!['pem', 'crt', 'cer', 'key'].includes(ext || '')) {
-      setToastMessage({ text: 'Invalid certificate. Only .pem or .crt files allowed.', type: 'error' });
+      showToast('Invalid certificate. Only .pem or .crt files allowed.', 'error');
       return;
     }
 
@@ -162,33 +182,33 @@ export default function EnterpriseFixSetup() {
         setUploadedCertPath(res.stored_path);
         setUploadedCertName(res.filename);
         setCertFingerprint(res.sha256_fingerprint);
-        setToastMessage({ text: `Certificate '${res.filename}' verified and vaulted successfully.`, type: 'success' });
+        showToast(`Certificate '${res.filename}' verified and vaulted successfully.`, 'success');
       }
     } catch (err: any) {
-      setToastMessage({ text: err.message || 'Failed to upload certificate.', type: 'error' });
+      showToast(err.message || 'Failed to upload certificate.', 'error');
     } finally {
       setUploadingCert(false);
     }
-  };
+  }, [showToast]);
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
-  };
+  }, []);
 
-  const handleDragLeave = () => {
+  const handleDragLeave = useCallback(() => {
     setIsDragging(false);
-  };
+  }, []);
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFileUpload(e.dataTransfer.files[0]);
     }
-  };
+  }, [handleFileUpload]);
 
-  const handleTestFixSession = async () => {
+  const handleTestFixSession = useCallback(async () => {
     setTestingSession(true);
     setTestResult(null);
     try {
@@ -201,18 +221,18 @@ export default function EnterpriseFixSetup() {
       });
       if (res && res.ok) {
         setTestResult(res);
-        setToastMessage({ text: 'FIX 4.4 Session Handshake Verified (< 200µs).', type: 'success' });
+        showToast('FIX 4.4 Session Handshake Verified (< 200µs).', 'success');
       }
     } catch (err: any) {
-      setToastMessage({ text: err.message || 'FIX Handshake test failed.', type: 'error' });
+      showToast(err.message || 'FIX Handshake test failed.', 'error');
     } finally {
       setTestingSession(false);
     }
-  };
+  }, [selectedBroker.name, targetCompId, hostIp, port, fixVersion, showToast]);
 
-  const handleSaveFixConnection = async () => {
+  const handleSaveFixConnection = useCallback(async () => {
     if (!senderCompId.trim() || !targetCompId.trim() || !hostIp.trim()) {
-      setToastMessage({ text: 'SenderCompID, TargetCompID, and Host IP are required.', type: 'error' });
+      showToast('SenderCompID, TargetCompID, and Host IP are required.', 'error');
       return;
     }
 
@@ -233,26 +253,40 @@ export default function EnterpriseFixSetup() {
       });
 
       if (res && res.ok) {
-        setToastMessage({ text: `Prime Broker ${selectedBroker.name} deployed successfully!`, type: 'success' });
+        showToast(`Prime Broker ${selectedBroker.name} deployed successfully!`, 'success');
         await fetchFixConnections();
       }
     } catch (err: any) {
-      setToastMessage({ text: err.message || 'Failed to save FIX connection.', type: 'error' });
+      showToast(err.message || 'Failed to save FIX connection.', 'error');
     } finally {
       setSavingConnection(false);
     }
-  };
+  }, [
+    senderCompId,
+    targetCompId,
+    hostIp,
+    selectedBroker.name,
+    port,
+    fixVersion,
+    tlsEnabled,
+    uploadedCertPath,
+    fixPassword,
+    heartbeatInterval,
+    accountIdentifier,
+    showToast,
+    fetchFixConnections,
+  ]);
 
-  const handleDeleteFix = async (connId: string, name: string) => {
+  const handleDeleteFix = useCallback(async (connId: string, name: string) => {
     if (!confirm(`Are you sure you want to remove the FIX gateway connection for ${name}?`)) return;
     try {
       await deleteFixConnection(connId);
-      setToastMessage({ text: `Removed FIX connection for ${name}.`, type: 'success' });
+      showToast(`Removed FIX connection for ${name}.`, 'success');
       await fetchFixConnections();
     } catch (err: any) {
-      setToastMessage({ text: err.message || 'Failed to delete connection.', type: 'error' });
+      showToast(err.message || 'Failed to delete connection.', 'error');
     }
-  };
+  }, [showToast, fetchFixConnections]);
 
   // ─── STRICT TIER GATE: MUST BE ENTERPRISE ──────────────────────────────────
   const isEnterprise = user?.tier === 'ENTERPRISE' || user?.role === 'ORGANIZATION_ADMIN';
@@ -336,10 +370,7 @@ export default function EnterpriseFixSetup() {
             onClick={() => {
               const updated = setTierOverride('ENTERPRISE');
               setUser(updated);
-              setToastMessage({
-                text: 'Switched to Institutional Enterprise Mode! Prime Brokerage FIX access unlocked.',
-                type: 'success',
-              });
+              showToast('Switched to Institutional Enterprise Mode! Prime Brokerage FIX access unlocked.', 'success');
               fetchFixConnections();
             }}
             style={{

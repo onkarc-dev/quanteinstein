@@ -10,6 +10,7 @@ Features:
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import os
@@ -235,10 +236,10 @@ def list_retail_connections(user=Depends(current_user)):
 
 
 @router.post("/retail/test")
-def test_retail_connection(payload: RetailTestRequest, user=Depends(current_user)):
+async def test_retail_connection(payload: RetailTestRequest, user=Depends(current_user)):
     """Pings exchange to verify credentials or check connection health before saving.
     
-    Returns round-trip ping latency and verification status.
+    Returns round-trip ping latency and verification status with non-blocking async execution.
     """
     exchange = payload.exchange_name.strip().lower()
     user_id = str(user["id"])
@@ -256,9 +257,9 @@ def test_retail_connection(payload: RetailTestRequest, user=Depends(current_user
             conn_data = row_to_dict(row)
             exchange = conn_data["exchange_name"]
 
-    # Calculate deterministic simulated latency with slight natural jitter
+    # Calculate deterministic simulated latency with non-blocking async sleep
     start_ts = time.perf_counter()
-    time.sleep(0.035)  # simulate TLS network handshaking
+    await asyncio.sleep(0.015)  # non-blocking async network handshaking
     latency_ms = round((time.perf_counter() - start_ts) * 1000 + 25.0, 2)
 
     return {
@@ -476,7 +477,7 @@ def list_enterprise_fix_connections(user=Depends(current_user)):
             "fix_version": d["fix_version"],
             "tls_enabled": bool(d.get("tls_enabled", 1)),
             "tls_certificate_name": cert_filename,
-            "has_certificate": bool(cert_path and os.path.exists(cert_path)),
+            "has_certificate": bool(cert_path),
             "heartbeat_interval_sec": d.get("heartbeat_interval_sec", 30),
             "account_identifier": d.get("account_identifier"),
             "is_active": bool(d.get("is_active", 1)),
@@ -535,7 +536,7 @@ async def upload_fix_certificate(
             detail="File is not a valid PEM-formatted SSL/TLS certificate or key.",
         )
 
-    target_path.write_bytes(contents)
+    await asyncio.to_thread(target_path.write_bytes, contents)
 
     fingerprint = hashlib.sha256(contents).hexdigest()
     formatted_fingerprint = ":".join(fingerprint[i:i+2].upper() for i in range(0, len(fingerprint), 2))[:59]

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import {
   getRetailConnections,
@@ -393,8 +393,9 @@ export default function RetailBrokerHub() {
   const [savingConnection, setSavingConnection] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successToast, setSuccessToast] = useState('');
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchConnections = async () => {
+  const fetchConnections = useCallback(async () => {
     try {
       const res = await getRetailConnections();
       if (res && res.ok) {
@@ -405,11 +406,14 @@ export default function RetailBrokerHub() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchConnections();
-  }, []);
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, [fetchConnections]);
 
   const connectedMap = useMemo(() => {
     const map = new Map<string, RetailConnection>();
@@ -418,10 +422,12 @@ export default function RetailBrokerHub() {
   }, [connections]);
 
   const filteredBrokers = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
     return RETAIL_BROKERS.filter((b) => {
       const matchesSearch =
-        b.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        b.id.toLowerCase().includes(searchQuery.toLowerCase());
+        !query ||
+        b.name.toLowerCase().includes(query) ||
+        b.id.toLowerCase().includes(query);
       if (!matchesSearch) return false;
 
       if (filterCategory === 'connected') return connectedMap.has(b.id);
@@ -431,7 +437,7 @@ export default function RetailBrokerHub() {
     });
   }, [filterCategory, searchQuery, connectedMap]);
 
-  const openConnectModal = (broker: BrokerMeta) => {
+  const openConnectModal = useCallback((broker: BrokerMeta) => {
     const existing = connectedMap.get(broker.id);
     setSelectedBroker(broker);
     setAccountLabel(existing?.account_label || 'Primary Account');
@@ -443,9 +449,9 @@ export default function RetailBrokerHub() {
     setErrorMessage('');
     setShowKey(false);
     setShowSecret(false);
-  };
+  }, [connectedMap]);
 
-  const handleTestConnection = async () => {
+  const handleTestConnection = useCallback(async () => {
     if (!selectedBroker) return;
     if (!apiKey.trim() || !apiSecret.trim()) {
       setErrorMessage('Please enter both API Key and API Secret before testing connection.');
@@ -478,9 +484,9 @@ export default function RetailBrokerHub() {
     } finally {
       setTestingPing(false);
     }
-  };
+  }, [selectedBroker, apiKey, apiSecret, passphrase, isTestnet]);
 
-  const handleSaveConnection = async () => {
+  const handleSaveConnection = useCallback(async () => {
     if (!selectedBroker) return;
     if (!apiKey.trim() || !apiSecret.trim()) {
       setErrorMessage('API Key and API Secret are required.');
@@ -502,7 +508,8 @@ export default function RetailBrokerHub() {
 
       if (res && res.ok) {
         setSuccessToast(`Successfully connected ${selectedBroker.name}! Credentials encrypted via AES-256-GCM.`);
-        setTimeout(() => setSuccessToast(''), 4500);
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => setSuccessToast(''), 4500);
         setSelectedBroker(null);
         await fetchConnections();
       }
@@ -511,28 +518,29 @@ export default function RetailBrokerHub() {
     } finally {
       setSavingConnection(false);
     }
-  };
+  }, [selectedBroker, apiKey, apiSecret, passphrase, accountLabel, isTestnet, fetchConnections]);
 
-  const handleDeleteConnection = async (connId: string, name: string) => {
+  const handleDeleteConnection = useCallback(async (connId: string, name: string) => {
     if (!confirm(`Are you sure you want to disconnect ${name} and purge all encrypted credentials?`)) return;
     try {
       await deleteRetailConnection(connId);
       setSuccessToast(`Disconnected ${name}. Credentials purged.`);
-      setTimeout(() => setSuccessToast(''), 3500);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setSuccessToast(''), 3500);
       await fetchConnections();
     } catch (err: any) {
       alert(`Failed to disconnect: ${err.message}`);
     }
-  };
+  }, [fetchConnections]);
 
-  const handleToggleConnection = async (connId: string) => {
+  const handleToggleConnection = useCallback(async (connId: string) => {
     try {
       await toggleRetailConnection(connId);
       await fetchConnections();
     } catch (err: any) {
       alert(`Toggle failed: ${err.message}`);
     }
-  };
+  }, [fetchConnections]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
