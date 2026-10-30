@@ -1,0 +1,78 @@
+# ==============================================================================
+# Quanteinstein Enterprise OS · Helm Chart Values
+# Single-Tenant Air-Gapped VPC Architecture
+# ==============================================================================
+
+global:
+  edition: enterprise
+  airGappedMode: true
+  organizationId: "INSTITUTIONAL_FUND_CORE"
+
+engine:
+  replicaCount: 1 # Strictly 1 instance per dedicated NUMA node / shm domain
+  image:
+    repository: quanteinstein/enterprise-engine
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: "4000m"
+      memory: "16Gi"
+    requests:
+      cpu: "2000m"
+      memory: "8Gi"
+  securityContext:
+    privileged: false
+    capabilities:
+      add:
+        - SYS_NICE
+        - IPC_LOCK
+        - SYS_RESOURCE
+  shmSize: "4Gi"
+  env:
+    RT_SCHEDULER: "SCHED_FIFO"
+    RT_PRIORITY: "80"
+    PRIMARY_PB: "GS_GSET_FIX"
+    DROPCOPY_ADMIN: "CITCO_NAV_DROPCOPY"
+
+api:
+  replicaCount: 2
+  image:
+    repository: quanteinstein/enterprise-api
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+  env:
+    EDITION: "enterprise"
+    AIR_GAPPED_MODE: "true"
+    REQUIRE_REG_SHO_LOCATES: "true"
+
+workstation:
+  replicaCount: 2
+  image:
+    repository: quanteinstein/enterprise-workstation
+    tag: "2.0.0"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+
+networkPolicy:
+  enabled: true
+  denyAllEgress: true # Enforce absolute air-gap boundary at k8s network layer

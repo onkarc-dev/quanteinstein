@@ -1,0 +1,16 @@
+apiVersion: v2
+name: quanteinstein-enterprise
+description: Quanteinstein Enterprise OS · Institutional Execution & Risk Management System
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - quantitative-trading
+  - low-latency
+  - institutional
+  - fix-engine
+  - air-gapped
+home: https://quanteinstein.io
+maintainers:
+  - name: Quanteinstein Systems Engineering
+    email: systems@quanteinstein.io

@@ -1,0 +1,29 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-airgap-isolation
+  labels:
+    app.kubernetes.io/name: qe-enterprise-airgap
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: quanteinstein-enterprise
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow intra-namespace traffic between enterprise services
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: quanteinstein-enterprise
+  egress:
+    # STRICT AIRGAP: Egress permitted ONLY to intra-namespace pods (engine, api, db)
+    # Zero external internet traffic allowed
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: quanteinstein-enterprise
+{{- end }}

@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-engine
+  labels:
+    app.kubernetes.io/name: qe-enterprise-engine
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: quanteinstein-enterprise
+spec:
+  replicas: {{ .Values.engine.replicaCount }}
+  selector:
+    matchLabels:
+      app: qe-enterprise-engine
+  template:
+    metadata:
+      labels:
+        app: qe-enterprise-engine
+    spec:
+      containers:
+        - name: engine
+          image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag }}"
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          securityContext:
+            capabilities:
+              add:
+                - SYS_NICE
+                - IPC_LOCK
+                - SYS_RESOURCE
+          resources:
+            {{- toYaml .Values.engine.resources | nindent 12 }}
+          env:
+            - name: EDITION
+              value: {{ .Values.global.edition | quote }}
+            - name: AIR_GAPPED_MODE
+              value: {{ .Values.global.airGappedMode | quote }}
+            - name: RT_SCHEDULER
+              value: {{ .Values.engine.env.RT_SCHEDULER | quote }}
+            - name: RT_PRIORITY
+              value: {{ .Values.engine.env.RT_PRIORITY | quote }}
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: dshm
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.engine.shmSize }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    app.kubernetes.io/name: qe-enterprise-api
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: quanteinstein-enterprise
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app: qe-enterprise-api
+  template:
+    metadata:
+      labels:
+        app: qe-enterprise-api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.api.service.port }}
+              name: http
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          env:
+            - name: EDITION
+              value: {{ .Values.global.edition | quote }}
+            - name: AIR_GAPPED_MODE
+              value: {{ .Values.global.airGappedMode | quote }}
+            - name: REQUIRE_REG_SHO_LOCATES
+              value: {{ .Values.api.env.REQUIRE_REG_SHO_LOCATES | quote }}
+          volumeMounts:
+            - mountPath: /dev/shm
+              name: dshm
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.engine.shmSize }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-workstation
+  labels:
+    app.kubernetes.io/name: qe-enterprise-workstation
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: quanteinstein-enterprise
+spec:
+  replicas: {{ .Values.workstation.replicaCount }}
+  selector:
+    matchLabels:
+      app: qe-enterprise-workstation
+  template:
+    metadata:
+      labels:
+        app: qe-enterprise-workstation
+    spec:
+      containers:
+        - name: workstation
+          image: "{{ .Values.workstation.image.repository }}:{{ .Values.workstation.image.tag }}"
+          imagePullPolicy: {{ .Values.workstation.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.workstation.service.port }}
+              name: http
+          resources:
+            {{- toYaml .Values.workstation.resources | nindent 12 }}
+          env:
+            - name: NEXT_PUBLIC_EDITION
+              value: {{ .Values.global.edition | quote }}
+            - name: NEXT_PUBLIC_AIR_GAPPED
+              value: {{ .Values.global.airGappedMode | quote }}
