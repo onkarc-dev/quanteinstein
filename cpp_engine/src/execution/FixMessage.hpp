@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <chrono>
@@ -65,6 +66,12 @@ namespace tags {
     constexpr int CxlRejResponseTo   = 434;
     constexpr int CxlRejReason       = 102;
     constexpr int OrdRejReason       = 103;
+    constexpr int Account            = 1;
+    constexpr int BeginSeqNo         = 7;
+    constexpr int EndSeqNo           = 16;
+    constexpr int NewSeqNo           = 36;
+    constexpr int GapFillFlag        = 123;
+    constexpr int ResetSeqNumFlag    = 141;
 }
 
 // Standard FIX MsgTypes
@@ -268,6 +275,11 @@ public:
         set_field(tags::MsgType, msg_type);
     }
 
+    explicit FixMessage(const char* msg_type) noexcept {
+        reset();
+        set_field(tags::MsgType, std::string_view(msg_type ? msg_type : ""));
+    }
+
     explicit FixMessage(const std::string& msg_type) noexcept {
         reset();
         set_field(tags::MsgType, std::string_view(msg_type));
@@ -338,6 +350,50 @@ public:
     std::string get_field(int tag, const std::string& fallback = "") const {
         std::string_view sv = get_field_sv(tag, std::string_view(fallback));
         return std::string(sv);
+    }
+
+    void set_string(int tag, std::string_view val) noexcept {
+        set_field(tag, val);
+    }
+
+    void set_int(int tag, int64_t val) noexcept {
+        set_field(tag, val);
+    }
+
+    void set_double(int tag, double val, int precision = 4) noexcept {
+        set_field(tag, val, precision);
+    }
+
+    std::optional<std::string> get_string(int tag) const {
+        int idx = get_tag_index(tag);
+        if (HFT_LIKELY_COND(idx >= 0)) {
+            return std::string(entries_[idx].val, entries_[idx].len);
+        }
+        return std::nullopt;
+    }
+
+    std::optional<int> get_int(int tag) const noexcept {
+        int idx = get_tag_index(tag);
+        if (HFT_LIKELY_COND(idx >= 0)) {
+            char* end = nullptr;
+            long v = std::strtol(entries_[idx].val, &end, 10);
+            if (end != entries_[idx].val) {
+                return static_cast<int>(v);
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<double> get_double(int tag) const noexcept {
+        int idx = get_tag_index(tag);
+        if (HFT_LIKELY_COND(idx >= 0)) {
+            char* end = nullptr;
+            double v = std::strtod(entries_[idx].val, &end);
+            if (end != entries_[idx].val) {
+                return v;
+            }
+        }
+        return std::nullopt;
     }
 
     bool has_field(int tag) const noexcept {

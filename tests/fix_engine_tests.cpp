@@ -1,4 +1,6 @@
 #include "execution/FixEngine.hpp"
+#include "execution/FixDropCopySession.hpp"
+#include "execution/ShmChannel.hpp"
 #include "trading/PaperBroker.hpp"
 
 #include <cassert>
@@ -286,6 +288,108 @@ void test_sharded_fix_session_manager_5000_scaling() {
     assert(mgr.get_session("QE_FUND_100->GS_GSET_FIX") == nullptr);
 }
 
+void test_shm_channel_order_ipc() {
+    quantos::ShmChannel channel;
+    assert(channel.init_as_server());
+
+    ShmOrderSubmission sub{};
+    sub.magic = SHM_MAGIC_ORDER_SUB;
+    sub.seq_num = 42;
+    sub.client_order_id = 998877;
+    std::strcpy(sub.client_order_id_str, "QE-IPC-TEST-001");
+    std::strcpy(sub.symbol, "NVDA");
+    sub.asset_class = 0; // EQUITY
+    sub.side = 5; // SHORT_SELL
+    sub.order_type = 2; // LIMIT
+    sub.quantity = 500.0;
+    sub.limit_price = 142.50;
+    std::strcpy(sub.borrow_locate_id, "LOC-PB-NVDA");
+    std::strcpy(sub.cusip, "67066G104");
+    std::strcpy(sub.sedol, "2379504");
+    std::strcpy(sub.isin, "US67066G1046");
+    sub.timestamp_ns = 1730000000000ULL;
+
+    assert(channel.push_order(sub));
+
+    ShmOrderSubmission out_sub{};
+    assert(channel.pop_order(out_sub));
+    assert(out_sub.seq_num == 42);
+    assert(out_sub.client_order_id == 998877);
+    assert(std::string(out_sub.client_order_id_str) == "QE-IPC-TEST-001");
+    assert(std::string(out_sub.symbol) == "NVDA");
+    assert(out_sub.side == 5);
+    assert(out_sub.quantity == 500.0);
+    assert(std::string(out_sub.borrow_locate_id) == "LOC-PB-NVDA");
+    assert(std::string(out_sub.cusip) == "67066G104");
+
+    // Execution report roundtrip
+    ShmExecutionReport rep{};
+    rep.magic = SHM_MAGIC_EXEC_REP;
+    rep.seq_num = 42;
+    rep.client_order_id = 998877;
+    std::strcpy(rep.client_order_id_str, "QE-IPC-TEST-001");
+    std::strcpy(rep.broker_order_id, "PB-GS-001");
+    std::strcpy(rep.exec_id, "EXEC-GS-999");
+    std::strcpy(rep.symbol, "NVDA");
+    rep.side = 5;
+    rep.exec_type = 2; // Fill
+    rep.ord_status = 3; // Filled
+    rep.order_qty = 500.0;
+    rep.cum_qty = 500.0;
+    rep.last_px = 142.50;
+    rep.total_latency_ns = 1450;
+
+    assert(channel.push_execution_report(rep));
+
+    ShmExecutionReport out_rep{};
+    assert(channel.pop_execution_report(out_rep));
+    assert(out_rep.seq_num == 42);
+    assert(std::string(out_rep.broker_order_id) == "PB-GS-001");
+    assert(out_rep.last_px == 142.50);
+}
+
+void test_fix_drop_copy_session_and_clearing() {
+    FixDropCopySession drop_copy;
+    drop_copy.set_connected(true);
+    assert(drop_copy.is_connected());
+
+    FixMessage exec_rep;
+    exec_rep.set_string(tags::BeginString, "FIX.4.4");
+    exec_rep.set_string(tags::MsgType, "8");
+    exec_rep.set_string(tags::SenderCompID, "GS_GSET_DROPCOPY");
+    exec_rep.set_string(tags::TargetCompID, "QE_DROPMONITOR_PROD");
+    exec_rep.set_int(tags::MsgSeqNum, 1);
+    exec_rep.set_string(tags::ClOrdID, "QE-INST-001");
+    exec_rep.set_string(tags::OrderID, "PB-GS-9988");
+    exec_rep.set_string(tags::ExecID, "EXEC-101");
+    exec_rep.set_string(tags::ExecType, "2"); // Fill
+    exec_rep.set_string(tags::OrdStatus, "2"); // Filled
+    exec_rep.set_string(tags::Symbol, "AAPL");
+    exec_rep.set_string(tags::Side, "1"); // Buy
+    exec_rep.set_double(tags::LastQty, 1000.0);
+    exec_rep.set_double(tags::LastPx, 225.00);
+    exec_rep.set_double(tags::CumQty, 1000.0);
+    exec_rep.set_double(tags::AvgPx, 225.00);
+    exec_rep.set_string(tags::TransactTime, "20261030-14:30:00.000");
+
+    assert(drop_copy.ingest_execution_report(exec_rep));
+    assert(drop_copy.total_reports() == 1);
+    assert(drop_copy.total_notional_cleared() == 225000.0);
+
+    std::string csv = drop_copy.export_fund_admin_csv();
+    assert(csv.find("CITCO_FUND_SERVICES") != std::string::npos);
+    assert(csv.find("AAPL") != std::string::npos);
+    assert(csv.find("225000.00") != std::string::npos);
+}
+
+void test_fix_conformance_harness() {
+    auto result = FixConformanceHarness::run_all_conformance_tests();
+    for (const auto& pass : result.passed_tests) {
+        std::cout << "    [Conformance] ✓ " << pass << std::endl;
+    }
+    assert(result.all_passed);
+}
+
 } // namespace
 
 int main() {
@@ -306,6 +410,12 @@ int main() {
     std::cout << "  ✓ FIX 35=G Cancel/Replace & 35=9 Reject verified" << std::endl;
     test_dual_tier_order_router_isolation();
     std::cout << "  ✓ Dual-tier institutional router isolation verified" << std::endl;
-    std::cout << "[FIX Engine Tests] ALL 8 TESTS PASSED SUCCESSFULLY!" << std::endl;
+    test_shm_channel_order_ipc();
+    std::cout << "  ✓ Zero-copy shared-memory IPC SPSC ring buffer verified" << std::endl;
+    test_fix_drop_copy_session_and_clearing();
+    std::cout << "  ✓ FixDropCopySession (Tag 35=8) & Citco/SS&C clearing verified" << std::endl;
+    test_fix_conformance_harness();
+    std::cout << "  ✓ Automated FIX Conformance Suite (Tags 141, 34, 35=2, 35=4) verified" << std::endl;
+    std::cout << "[FIX Engine Tests] ALL 11 TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

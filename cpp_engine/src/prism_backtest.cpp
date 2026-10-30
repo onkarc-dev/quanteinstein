@@ -40,6 +40,7 @@ struct TradeLog {
     std::string entry_time, exit_time, exit_reason, regime_at_entry;
     double entry_price = 0, stop_loss = 0, target1 = 0, target2 = 0, exit_price = 0;
     double gross_r = 0, friction_r = 0, net_r = 0, r_multiple = 0, setup_score = 0;
+    double market_impact_bps = 0.0; // Almgren-Chriss dynamic market impact in basis points
     int holding_bars = 0;
 };
 
@@ -559,9 +560,24 @@ int main(int argc, char** argv) {
     const double total_friction_pct = round_trip_fee_pct + round_trip_slip_pct;
     const double min_tp1_move_pct = 2.5 * total_friction_pct;
 
+    // Institutional Almgren-Chriss Dynamic Market Impact Model:
+    // Total Impact = gamma * sigma * (Q / ADV) + eta * sigma * sqrt(q / V_bar)
+    auto compute_almgren_chriss_impact_bps = [&](double price, double atr, double bar_vol) -> double {
+        if (price <= 0.0) return round_trip_slip_pct * 100.0;
+        double sigma = (atr > 0.0) ? (atr / price) : 0.015; // Normalized asset volatility
+        double est_adv = std::max(50000.0, bar_vol * 390.0);
+        double institutional_order_qty = std::max(10.0, est_adv * 0.01); // 1% participation of ADV
+        double perm_impact = 0.314 * sigma * (institutional_order_qty / est_adv);
+        double part_rate = (bar_vol > 0.0) ? std::min(0.20, (institutional_order_qty / 20.0) / bar_vol) : 0.02;
+        double temp_impact = 0.142 * sigma * std::sqrt(std::max(0.0001, part_rate));
+        double dynamic_impact_pct = (perm_impact + temp_impact) * 100.0;
+        return std::max(round_trip_slip_pct * 100.0, dynamic_impact_pct * 100.0);
+    };
+
     auto make_trade_log = [&](int tid, const std::string& e_time, double e_price, double s_loss, double tp1, double tp2,
                               const std::string& x_time, double x_price, const std::string& x_reason,
-                              double risk_dist, double s_score, const std::string& reg, int h_bars) -> TradeLog {
+                              double risk_dist, double s_score, const std::string& reg, int h_bars,
+                              double current_atr = 0.0, double current_vol = 0.0) -> TradeLog {
         TradeLog tr;
         tr.trade_id = tid;
         tr.entry_time = e_time;
@@ -573,10 +589,17 @@ int main(int argc, char** argv) {
         tr.exit_price = x_price;
         tr.exit_reason = x_reason;
         tr.gross_r = (risk_dist > 0.0) ? ((x_price - e_price) / risk_dist) : 0.0;
+
+        // Dynamic Almgren-Chriss impact calculation
+        double dynamic_impact_bps = compute_almgren_chriss_impact_bps(e_price, current_atr, current_vol);
+        tr.market_impact_bps = dynamic_impact_bps;
+        double dynamic_slip_pct = dynamic_impact_bps / 100.0;
+        double dynamic_total_friction_pct = round_trip_fee_pct + dynamic_slip_pct;
+
         double sl_dist_pct = (e_price > 0.0 && risk_dist > 0.0)
             ? ((risk_dist / e_price) * 100.0)
             : std::max(0.01, run_config.strategy.risk.risk_per_trade_pct);
-        tr.friction_r = total_friction_pct / std::max(1e-6, sl_dist_pct);
+        tr.friction_r = dynamic_total_friction_pct / std::max(1e-6, sl_dist_pct);
         tr.net_r = tr.gross_r - tr.friction_r;
         tr.r_multiple = tr.net_r;
         tr.setup_score = s_score;

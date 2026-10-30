@@ -39,10 +39,34 @@ VAULT_PREFIX = VAULT_PREFIX_AES
 SALT = b"quanteinstein_broker_vault_salt_v1"
 
 
+def is_production() -> bool:
+    """Returns True if the system is operating in institutional production mode."""
+    env = (os.getenv("ENVIRONMENT") or os.getenv("QUANTEINSTEIN_ENV") or os.getenv("APP_ENV") or "").lower()
+    return env in ("production", "prod")
+
+
+def check_production_security():
+    """Fail-closed assertion: rejects running with local fallback keys when ENVIRONMENT=production."""
+    if is_production():
+        if not _kms_driver.is_available:
+            raise RuntimeError(
+                "CRITICAL SECURITY VIOLATION: Production mode (ENVIRONMENT=production) requires active AWS KMS "
+                "envelope encryption with a verified Customer Master Key (CMK). "
+                "Booting with local fallback keys in production is strictly prohibited by SOC 2 Type II / SEC controls."
+            )
+
+
 def _derive_vault_key() -> bytes:
     """Derives a fixed 256-bit (32 bytes) symmetric key from server secret."""
+    explicit_key = os.getenv("CREDENTIALS_ENCRYPTION_KEY")
+    if is_production() and not explicit_key:
+        raise RuntimeError(
+            "CRITICAL SECURITY VIOLATION: Production environment requires an explicitly defined "
+            "CREDENTIALS_ENCRYPTION_KEY. Hardcoded fallback secrets are forbidden."
+        )
+
     master_secret = (
-        os.getenv("CREDENTIALS_ENCRYPTION_KEY")
+        explicit_key
         or getattr(settings, "secret_key", "")
         or "quanteinstein-master-vault-encryption-secret-default-key-32b"
     ).encode("utf-8")
@@ -122,21 +146,29 @@ def encrypt_credential(plaintext: Optional[str], tier: str = "RETAIL") -> str:
     is_enterprise = str(tier).upper() in ("ENTERPRISE", "PRO", "INSTITUTIONAL")
 
     # Mode A: Enterprise AWS KMS Envelope Encryption
-    if is_enterprise and _kms_driver.is_available:
-        try:
-            plaintext_dek, encrypted_dek = _kms_driver.generate_data_key()
-            nonce = os.urandom(12)
-            aesgcm = AESGCM(plaintext_dek)
-            ciphertext = aesgcm.encrypt(nonce, plaintext_str.encode("utf-8"), None)
+    if is_enterprise:
+        if _kms_driver.is_available:
+            try:
+                plaintext_dek, encrypted_dek = _kms_driver.generate_data_key()
+                nonce = os.urandom(12)
+                aesgcm = AESGCM(plaintext_dek)
+                ciphertext = aesgcm.encrypt(nonce, plaintext_str.encode("utf-8"), None)
 
-            # Wire packet: [2-byte dek_len] + [encrypted_dek] + [12-byte nonce] + [ciphertext + tag]
-            dek_len = len(encrypted_dek)
-            header = struct.pack(">H", dek_len)
-            payload = header + encrypted_dek + nonce + ciphertext
-            return VAULT_PREFIX_KMS + base64.b64encode(payload).decode("ascii")
-        except Exception:
-            # Fallback to local AES-256-GCM if KMS call fails
-            pass
+                # Wire packet: [2-byte dek_len] + [encrypted_dek] + [12-byte nonce] + [ciphertext + tag]
+                dek_len = len(encrypted_dek)
+                header = struct.pack(">H", dek_len)
+                payload = header + encrypted_dek + nonce + ciphertext
+                return VAULT_PREFIX_KMS + base64.b64encode(payload).decode("ascii")
+            except Exception as exc:
+                if is_production():
+                    raise RuntimeError(f"CRITICAL: AWS KMS envelope encryption failed in production: {exc}") from exc
+                # Fallback to local AES-256-GCM in dev/test only
+                pass
+        elif is_production():
+            raise RuntimeError(
+                "CRITICAL: Enterprise tier credential encryption requires active AWS KMS in production mode. "
+                "Local encryption fallback is strictly rejected."
+            )
 
     # Mode B: Standard AES-256-GCM with PBKDF2 derived key
     key = _derive_vault_key()

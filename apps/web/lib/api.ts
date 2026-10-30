@@ -758,3 +758,59 @@ export async function deleteFixConnection(connectionId: string): Promise<{ ok: b
     method: 'DELETE',
   }) as any;
 }
+
+export interface BorrowLocate {
+  locate_id: string;
+  symbol: string;
+  available_qty: number;
+  allocated_qty: number;
+  borrow_rate_bps: number;
+  prime_broker: string;
+  is_hard_to_borrow: boolean;
+  expires_in_sec: number;
+}
+
+export interface MerkleVerificationResult {
+  chain_status: 'SECURE_VERIFIED' | 'TAMPER_DETECTED' | 'UNINITIALIZED';
+  total_blocks_verified: number;
+  root_merkle_hash: string;
+  genesis_block_hash: string;
+  verification_latency_us: number;
+  invalid_block_id?: string | null;
+  timestamp: string;
+  soc2_attestation: string;
+}
+
+export async function getBorrowLocates(symbol?: string): Promise<{ ok: boolean; count: number; symbol_filter?: string | null; locates: BorrowLocate[] }> {
+  const query = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+  return api(`/api/v1/risk/borrow-locates${query}`) as any;
+}
+
+export async function verifyMerkleAuditChain(): Promise<MerkleVerificationResult> {
+  return api('/api/v1/audit/verify-chain') as any;
+}
+
+export async function submitInstitutionalOrder(payload: {
+  symbol: string;
+  side: 'BUY' | 'SELL' | 'SHORT_SELL';
+  qty?: number;
+  order_type?: 'MARKET' | 'LIMIT' | 'ICEBERG' | 'TWAP' | 'VWAP';
+  limit_price?: number;
+  reason?: string;
+  mode?: string;
+  borrow_locate_id?: string;
+  asset_class?: 'EQUITY' | 'FUTURES' | 'OPTIONS' | 'FX' | 'CRYPTO';
+  display_qty?: number;
+  algo_duration_sec?: number;
+  algo_participation_rate?: number;
+  futures_roll_code?: string;
+  strike_price?: number;
+  put_or_call?: number;
+  option_expiry_date?: number;
+}): Promise<any> {
+  return api('/api/v1/execution/order', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as any;
+}
+

@@ -100,6 +100,15 @@ def execute_live_order(payload: dict = Body(default={}), user=Depends(current_us
         limit_price=limit_price,
         reason=str(payload.get('reason') or 'MANUAL_ORDER'),
         mode=payload.get('mode') or payload.get('account_mode'),
+        borrow_locate_id=payload.get('borrow_locate_id'),
+        asset_class=str(payload.get('asset_class') or 'EQUITY'),
+        display_qty=payload.get('display_qty'),
+        algo_duration_sec=payload.get('algo_duration_sec'),
+        algo_participation_rate=payload.get('algo_participation_rate'),
+        futures_roll_code=payload.get('futures_roll_code'),
+        strike_price=payload.get('strike_price'),
+        put_or_call=payload.get('put_or_call'),
+        option_expiry_date=payload.get('option_expiry_date'),
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to execute order."))

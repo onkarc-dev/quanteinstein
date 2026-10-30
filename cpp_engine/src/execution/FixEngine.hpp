@@ -64,17 +64,77 @@ public:
     FixSessionState state() const noexcept { return state_.load(std::memory_order_relaxed); }
     bool is_active() const noexcept { return state_.load(std::memory_order_relaxed) == FixSessionState::ACTIVE; }
 
+    uint64_t next_in_seq_num() const noexcept { return in_seq_num_.load(std::memory_order_relaxed); }
+    uint64_t next_out_seq_num() const noexcept { return out_seq_num_.load(std::memory_order_relaxed); }
+    void set_next_in_seq_num(uint64_t n) noexcept { in_seq_num_.store(n, std::memory_order_relaxed); }
+
     std::string session_id() const {
         return cfg_.sender_comp_id + "->" + cfg_.target_comp_id;
     }
 
-    FixMessage create_logon() {
+    FixMessage build_logon(bool reset_seq_num = false) {
+        if (reset_seq_num) {
+            out_seq_num_.store(1, std::memory_order_relaxed);
+            in_seq_num_.store(1, std::memory_order_relaxed);
+        }
         FixMessage msg(msg_type::Logon);
         populate_header(msg);
         msg.set_field(tags::EncryptMethod, "0");
         msg.set_field(tags::HeartBtInt, cfg_.heartbeat_interval_sec);
+        if (reset_seq_num) {
+            msg.set_field(tags::ResetSeqNumFlag, "Y");
+        }
         state_.store(FixSessionState::LOGON_SENT, std::memory_order_release);
         return msg;
+    }
+
+    FixMessage handle_incoming(const FixMessage& msg) {
+        uint64_t seq = static_cast<uint64_t>(msg.get_int(tags::MsgSeqNum).value_or(0));
+        uint64_t expected = in_seq_num_.load(std::memory_order_relaxed);
+
+        std::string_view type = msg.msg_type();
+
+        // Sequence Reset / Gap Fill (Tag 35=4)
+        if (type == "4") {
+            int new_seq = msg.get_int(tags::NewSeqNo).value_or(static_cast<int>(expected));
+            if (new_seq > 0) {
+                in_seq_num_.store(static_cast<uint64_t>(new_seq), std::memory_order_relaxed);
+            }
+            FixMessage ack(std::string_view("0"));
+            populate_header(ack);
+            return ack;
+        }
+
+        // Sequence Gap Detection: received seq > expected -> issue ResendRequest (Tag 35=2)
+        if (seq > expected) {
+            FixMessage resend(std::string_view("2"));
+            populate_header(resend);
+            resend.set_field(tags::BeginSeqNo, expected);
+            resend.set_field(tags::EndSeqNo, 0);
+            return resend;
+        }
+
+        // In-sequence message
+        in_seq_num_.store(expected + 1, std::memory_order_relaxed);
+
+        if (type == "A") { // Logon
+            state_.store(FixSessionState::ACTIVE, std::memory_order_release);
+            return create_heartbeat();
+        } else if (type == "1") { // Test Request
+            auto test_req_id = msg.get_string(112).value_or("");
+            return create_heartbeat(test_req_id);
+        } else if (type == "5") { // Logout
+            state_.store(FixSessionState::LOGOUT_SENT, std::memory_order_release);
+            FixMessage logout(std::string_view("5"));
+            populate_header(logout);
+            return logout;
+        }
+
+        return create_heartbeat();
+    }
+
+    FixMessage create_logon() {
+        return build_logon(false);
     }
 
     FixMessage create_heartbeat(std::string_view test_req_id = "") {
@@ -369,12 +429,28 @@ public:
         FixSessionManager::instance().get_or_create_session(cfg);
     }
 
+    FixBroker(std::string_view broker_id, std::string_view broker_name, double institutional_commission_bps = 0.20)
+        : FixBroker(FixSessionConfig{
+            "QUANTEINSTEIN_PRIME",
+            std::string(broker_id),
+            "FIX.4.4",
+            30,
+            1,
+            1,
+            std::string(broker_name)
+          }, institutional_commission_bps) {}
+
     static FixSessionManager& session_manager() noexcept {
         return FixSessionManager::instance();
     }
 
     const FixSession& session() const noexcept { return session_; }
     FixSession& session() noexcept { return session_; }
+
+    OrderExecution execute(const OrderRequest& request, double market_price = 0.0, uint64_t ts_ns = 0) {
+        double px = market_price > 0.0 ? market_price : (request.limit_price > 0.0 ? request.limit_price : 100.0);
+        return submit_order(request, px, ts_ns);
+    }
 
     OrderExecution submit_order(const OrderRequest& request, double market_price, uint64_t ts_ns) override {
         uint64_t start_ns = ts_ns > 0 ? ts_ns : current_time_ns();
@@ -546,6 +622,12 @@ public:
     }
 
     // Tag 35=G: Replace / Modify existing live order
+    OrderExecution cancel_replace_order(std::string_view orig_cl_ord_id, std::string_view new_cl_ord_id,
+                                        std::string_view symbol, Side side, double new_qty, double new_price,
+                                        uint64_t ts_ns = 0) {
+        return replace_order(orig_cl_ord_id, new_qty, new_price, symbol, side, ts_ns);
+    }
+
     OrderExecution replace_order(std::string_view orig_cl_ord_id, double new_qty, double new_price,
                                  std::string_view symbol, Side side, uint64_t ts_ns = 0) {
         uint64_t start_ns = ts_ns > 0 ? ts_ns : current_time_ns();

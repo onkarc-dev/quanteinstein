@@ -18,12 +18,21 @@ class PrimeBrokerSelectRequest(BaseModel):
 
 class FixOrderRequest(BaseModel):
     symbol: str = Field("BTCUSDT", description="Trading asset symbol")
-    side: str = Field("BUY", description="'BUY' or 'SELL'")
+    side: str = Field("BUY", description="'BUY', 'SELL', or 'SHORT_SELL'")
     qty: Optional[float] = Field(None, description="Order quantity")
-    order_type: str = Field("MARKET", description="'MARKET' or 'LIMIT'")
+    order_type: str = Field("MARKET", description="'MARKET', 'LIMIT', 'ICEBERG', 'TWAP', or 'VWAP'")
     limit_price: Optional[float] = Field(None, description="Limit price if LIMIT order")
     reason: str = Field("MANUAL_ORDER", description="Execution rationale or strategy tag")
     mode: Optional[str] = Field(None, description="Optional override: 'SIMULATED', 'PAPER', or 'LIVE'")
+    borrow_locate_id: Optional[str] = Field(None, description="SEC Reg SHO Rule 203(b)(1) Borrow Locate ID for short sales")
+    asset_class: str = Field("EQUITY", description="'EQUITY', 'FUTURES', 'OPTIONS', 'FX', or 'CRYPTO'")
+    display_qty: Optional[float] = Field(None, description="Iceberg visible peak quantity")
+    algo_duration_sec: Optional[int] = Field(None, description="TWAP algorithm duration in seconds")
+    algo_participation_rate: Optional[float] = Field(None, description="VWAP target participation rate (e.g. 0.15 for 15% ADV)")
+    futures_roll_code: Optional[str] = Field(None, description="Futures roll contract schedule (e.g. 'ESZ26')")
+    strike_price: Optional[float] = Field(None, description="Options strike price")
+    put_or_call: Optional[int] = Field(None, description="0=None, 1=Call, 2=Put")
+    option_expiry_date: Optional[int] = Field(None, description="Options expiration YYYYMMDD")
 
 
 class FixCancelReplaceRequest(BaseModel):
@@ -64,7 +73,7 @@ async def select_prime_broker(payload: PrimeBrokerSelectRequest, user=Depends(cu
 async def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
     """
     Unified high-concurrency asynchronous order submission endpoint.
-    Protected by token-bucket rate limiting and async timeouts.
+    Protected by token-bucket rate limiting, SEC Reg SHO locate verification, and zero-copy C++ IPC.
     """
     return await order_router.route_order_async(
         user=user,
@@ -75,6 +84,15 @@ async def execute_order(payload: FixOrderRequest, user=Depends(current_user)):
         limit_price=payload.limit_price,
         reason=payload.reason,
         mode=payload.mode,
+        borrow_locate_id=payload.borrow_locate_id,
+        asset_class=payload.asset_class,
+        display_qty=payload.display_qty,
+        algo_duration_sec=payload.algo_duration_sec,
+        algo_participation_rate=payload.algo_participation_rate,
+        futures_roll_code=payload.futures_roll_code,
+        strike_price=payload.strike_price,
+        put_or_call=payload.put_or_call,
+        option_expiry_date=payload.option_expiry_date,
     )
 
 

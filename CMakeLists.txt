@@ -232,6 +232,10 @@ target_include_directories(prism_cpp_heavy_paper PRIVATE
     cpp_engine/src/dashboard
 )
 
+if(WIN32)
+    target_link_libraries(prism_cpp_heavy_paper PRIVATE ws2_32)
+endif()
+
 
 add_executable(quantos-engine
     cpp_engine/src/apps/quantos_engine.cpp

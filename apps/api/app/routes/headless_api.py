@@ -48,10 +48,30 @@ from app.services.market_data_service import (
     fetch_historical_market_csv,
     get_market_symbols_catalog,
 )
+from app.core.audit_middleware import verify_merkle_audit_chain
 
 logger = logging.getLogger("quantos.headless_api")
 
 router = APIRouter()
+
+
+@router.get("/audit/verify-chain", summary="Cryptographically verify Merkle-tree hash chaining of audit trail")
+def verify_audit_chain_endpoint(limit: int = Query(500, ge=1, le=10000)):
+    """Verifies that no records in the immutable audit trail were modified, inserted, or deleted.
+    SEC Rule 17a-4 / FINRA 4511 Merkle tree cryptographic proof.
+    """
+    return verify_merkle_audit_chain(limit=limit)
+
+
+@router.get("/risk/borrow-locates", summary="List available SEC Reg SHO borrow locates")
+def get_borrow_locates(user=Depends(current_user)):
+    """Returns real-time borrow inventory pool for short sale execution (SEC Reg SHO Rule 203(b)(1))."""
+    from app.core.institutional_risk_gateway import risk_gateway
+    org_id = user.get("organization_id") or "default_org"
+    return {
+        "status": "ok",
+        "locates": risk_gateway.borrow_locates.list_locates(str(org_id)),
+    }
 
 
 def _p() -> str:

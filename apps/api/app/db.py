@@ -251,6 +251,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     status_code INTEGER NOT NULL,
     payload_digest TEXT,
     details_json TEXT,
+    previous_hash TEXT,
+    block_hash TEXT,
     is_immutable INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -535,6 +537,11 @@ def _init_sqlite():
     with _get_sqlite_conn() as conn:
         conn.executescript(_SQLITE_DDL)
         _migrate_users_table_sqlite(conn)
+        for col_name, col_type in [("previous_hash", "TEXT"), ("block_hash", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE audit_logs ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_audit_logs_no_update
             BEFORE UPDATE ON audit_logs
