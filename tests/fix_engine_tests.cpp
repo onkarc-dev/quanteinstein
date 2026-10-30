@@ -390,7 +390,33 @@ void test_fix_conformance_harness() {
     assert(result.all_passed);
 }
 
+void test_linux_realtime_and_prime_broker_prioritization() {
+    // 1. Linux real-time isolation configuration check
+    bool rt_ok = quantos::ShmChannel::configure_linux_realtime_isolation(0, 80);
+    assert(rt_ok);
+
+    // 2. Prime broker prioritized destinations check
+    auto routes = InstitutionalPBRouter::get_priority_pb_destinations();
+    assert(routes.size() >= 5);
+    assert(routes[0].dest == PrimeBrokerDestination::GOLDMAN_SACHS);
+    assert(routes[0].target_comp_id == "GS_GSET_FIX");
+    assert(routes[0].priority == 1);
+
+    assert(routes[1].dest == PrimeBrokerDestination::MORGAN_STANLEY);
+    assert(routes[1].target_comp_id == "MS_MSET_FIX");
+    assert(routes[1].priority == 2);
+
+    assert(routes[2].dest == PrimeBrokerDestination::JP_MORGAN);
+    assert(routes[2].target_comp_id == "JPM_EXEC_FIX");
+    assert(routes[2].priority == 3);
+
+    auto optimal = InstitutionalPBRouter::select_optimal_destination("EQUITY");
+    assert(optimal.dest == PrimeBrokerDestination::GOLDMAN_SACHS);
+    assert(optimal.target_comp_id == "GS_GSET_FIX");
+}
+
 } // namespace
+
 
 int main() {
     std::cout << "[FIX Engine Tests] Starting C++ institutional tests..." << std::endl;
@@ -416,6 +442,8 @@ int main() {
     std::cout << "  ✓ FixDropCopySession (Tag 35=8) & Citco/SS&C clearing verified" << std::endl;
     test_fix_conformance_harness();
     std::cout << "  ✓ Automated FIX Conformance Suite (Tags 141, 34, 35=2, 35=4) verified" << std::endl;
-    std::cout << "[FIX Engine Tests] ALL 11 TESTS PASSED SUCCESSFULLY!" << std::endl;
+    test_linux_realtime_and_prime_broker_prioritization();
+    std::cout << "  ✓ Linux real-time isolation & Prime Broker priority routing verified" << std::endl;
+    std::cout << "[FIX Engine Tests] ALL 12 TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

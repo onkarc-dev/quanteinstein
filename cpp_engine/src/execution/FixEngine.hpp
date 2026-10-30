@@ -35,6 +35,43 @@ struct ManagedOrderState {
     uint64_t updated_at_ns = 0;
 };
 
+
+enum class PrimeBrokerDestination {
+    GOLDMAN_SACHS,      // GS_GSET_FIX
+    MORGAN_STANLEY,     // MS_MSET_FIX
+    JP_MORGAN,          // JPM_EXEC_FIX
+    UBS,                // UBS_PINC_FIX
+    INSTINET            // INSTINET_FIX
+};
+
+struct PrimeBrokerRoute {
+    PrimeBrokerDestination dest;
+    std::string sender_comp_id;
+    std::string target_comp_id;
+    std::string broker_name;
+    int priority; // 1 = highest priority primary
+    double latency_budget_us;
+};
+
+class InstitutionalPBRouter {
+public:
+    static std::vector<PrimeBrokerRoute> get_priority_pb_destinations() {
+        return {
+            {PrimeBrokerDestination::GOLDMAN_SACHS, "QUANTEINSTEIN_PRIME", "GS_GSET_FIX", "Goldman Sachs Electronic Trading (GSET)", 1, 15.0},
+            {PrimeBrokerDestination::MORGAN_STANLEY, "QUANTEINSTEIN_PRIME", "MS_MSET_FIX", "Morgan Stanley Electronic Trading (MSET)", 2, 18.0},
+            {PrimeBrokerDestination::JP_MORGAN, "QUANTEINSTEIN_PRIME", "JPM_EXEC_FIX", "J.P. Morgan Execution Services", 3, 20.0},
+            {PrimeBrokerDestination::UBS, "QUANTEINSTEIN_PRIME", "UBS_PINC_FIX", "UBS Price Improvement Network", 4, 22.0},
+            {PrimeBrokerDestination::INSTINET, "QUANTEINSTEIN_PRIME", "INSTINET_FIX", "Instinet Newport DMA", 5, 25.0}
+        };
+    }
+
+    static PrimeBrokerRoute select_optimal_destination(const std::string& asset_class = "EQUITY") {
+        (void)asset_class;
+        auto routes = get_priority_pb_destinations();
+        return routes[0]; // Tier 1 primary route
+    }
+};
+
 struct FixSessionConfig {
     std::string sender_comp_id = "QUANTEINSTEIN_PRIME";
     std::string target_comp_id = "GS_GSET_FIX";

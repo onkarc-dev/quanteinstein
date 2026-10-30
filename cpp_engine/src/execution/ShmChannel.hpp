@@ -6,13 +6,15 @@
 #include <iostream>
 #include <string>
 
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <pthread.h>
+#include <sched.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -29,7 +31,7 @@ public:
     ~ShmChannel() { close_channel(); }
 
     bool init_as_server() {
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         bool ok1 = create_or_open_ring(ORDER_RING_NAME, sizeof(ShmOrderRingBuffer), true, order_handle_, reinterpret_cast<void*&>(order_ring_));
         bool ok2 = create_or_open_ring(EXEC_RING_NAME, sizeof(ShmExecRingBuffer), true, exec_handle_, reinterpret_cast<void*&>(exec_ring_));
 #else
@@ -58,7 +60,7 @@ public:
     }
 
     bool init_as_client() {
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         bool ok1 = create_or_open_ring(ORDER_RING_NAME, sizeof(ShmOrderRingBuffer), false, order_handle_, reinterpret_cast<void*&>(order_ring_));
         bool ok2 = create_or_open_ring(EXEC_RING_NAME, sizeof(ShmExecRingBuffer), false, exec_handle_, reinterpret_cast<void*&>(exec_ring_));
 #else
@@ -85,7 +87,7 @@ public:
         std::memcpy(&order_ring_->submissions[idx], &order, sizeof(ShmOrderSubmission));
         order_ring_->submissions[idx].is_ready = 1;
 
-        #if defined(_WIN32) || defined(_WIN64)
+        #if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         MemoryBarrier();
         #else
         __sync_synchronize();
@@ -114,7 +116,7 @@ public:
         std::memcpy(&out_order, &order_ring_->submissions[idx], sizeof(ShmOrderSubmission));
         order_ring_->submissions[idx].is_ready = 0;
 
-        #if defined(_WIN32) || defined(_WIN64)
+        #if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         MemoryBarrier();
         #else
         __sync_synchronize();
@@ -139,7 +141,7 @@ public:
         std::memcpy(&exec_ring_->reports[idx], &report, sizeof(ShmExecutionReport));
         exec_ring_->reports[idx].is_ready = 1;
 
-        #if defined(_WIN32) || defined(_WIN64)
+        #if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         MemoryBarrier();
         #else
         __sync_synchronize();
@@ -167,7 +169,7 @@ public:
         std::memcpy(&out_report, &exec_ring_->reports[idx], sizeof(ShmExecutionReport));
         exec_ring_->reports[idx].is_ready = 0;
 
-        #if defined(_WIN32) || defined(_WIN64)
+        #if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         MemoryBarrier();
         #else
         __sync_synchronize();
@@ -177,10 +179,42 @@ public:
         return true;
     }
 
-    bool is_ready() const { return is_initialized_; }
+    // Linux Real-Time Deterministic Kernel Isolation & CPU Core Pinning
+    static bool configure_linux_realtime_isolation(int core_id = 1, int rt_priority = 80) {
+#if !((defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX))
+        // 1. Prevent kernel paging and memory swapping across critical execution paths
+        if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+            std::cerr << "[ShmChannel/WARN] mlockall failed (requires CAP_SYS_RESOURCE/CAP_IPC_LOCK)\n";
+        }
+
+        // 2. Pin thread to isolated CPU core
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(core_id, &cpuset);
+        pthread_t thread = pthread_self();
+        if (pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpuset) != 0) {
+            std::cerr << "[ShmChannel/WARN] pthread_setaffinity_np failed for core " << core_id << "\n";
+        }
+
+        // 3. Enforce SCHED_FIFO real-time deterministic priority
+        struct sched_param param;
+        std::memset(&param, 0, sizeof(param));
+        param.sched_priority = rt_priority;
+        if (pthread_setschedparam(thread, SCHED_FIFO, &param) != 0) {
+            std::cerr << "[ShmChannel/WARN] pthread_setschedparam SCHED_FIFO failed (requires CAP_SYS_NICE)\n";
+        }
+        return true;
+#else
+        (void)core_id;
+        (void)rt_priority;
+        return true;
+#endif
+    }
+
+        bool is_ready() const { return is_initialized_; }
 
     void close_channel() {
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         if (order_ring_) { UnmapViewOfFile(order_ring_); order_ring_ = nullptr; }
         if (order_handle_) { CloseHandle(order_handle_); order_handle_ = nullptr; }
         if (exec_ring_) { UnmapViewOfFile(exec_ring_); exec_ring_ = nullptr; }
@@ -195,7 +229,7 @@ public:
     }
 
 private:
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
     HANDLE order_handle_ = nullptr;
     HANDLE exec_handle_  = nullptr;
 #else
@@ -208,14 +242,14 @@ private:
     bool is_initialized_ = false;
 
     bool create_or_open_ring(const char* name, size_t size, bool is_server,
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         HANDLE& handle_out,
 #else
         int& fd_out,
 #endif
         void*& ptr_out)
     {
-#if defined(_WIN32) || defined(_WIN64)
+#if (defined(_WIN32) || defined(_WIN64)) && !defined(ENTERPRISE_CORE_LINUX)
         std::string full_name = std::string("Local\\") + name;
         if (is_server) {
             handle_out = CreateFileMappingA(
