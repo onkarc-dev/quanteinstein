@@ -184,6 +184,40 @@ void test_dual_tier_order_router_isolation() {
     assert(ent_live_decision.routing_latency_ns > 0);
 }
 
+void test_zero_alloc_fix_pool_and_direct_wire_encode() {
+    auto& pool = FixMessagePool::instance();
+    FixMessage* msg1 = pool.acquire();
+    assert(msg1 != nullptr);
+    msg1->set_field(tags::MsgType, msg_type::NewOrderSingle);
+    msg1->set_field(tags::ClOrdID, "POOL-101");
+    msg1->set_field(tags::Symbol, "BTCUSDT");
+    msg1->set_field(tags::Side, "1");
+    msg1->set_field(tags::OrderQty, 5.0, 4);
+    msg1->set_field(tags::Price, 68000.5, 2);
+
+    char wire_buf[512];
+    size_t wire_len = msg1->encode_to(wire_buf, sizeof(wire_buf), '|');
+    assert(wire_len > 0);
+    std::string_view sv(wire_buf, wire_len);
+    assert(sv.find("8=FIX.4.4|") == 0);
+    assert(sv.find("35=D|") != std::string_view::npos);
+    assert(sv.find("11=POOL-101|") != std::string_view::npos);
+    assert(sv.find("55=BTCUSDT|") != std::string_view::npos);
+    assert(sv.find("38=5.0000|") != std::string_view::npos);
+    assert(sv.find("44=68000.50|") != std::string_view::npos);
+    assert(sv.find("10=") != std::string_view::npos);
+
+    pool.release(msg1);
+
+    // Verify RAII PooledFixMessage
+    {
+        PooledFixMessage pmsg(msg_type::OrderCancelRequest);
+        assert(pmsg->msg_type_sv() == "F");
+        pmsg->set_field(tags::ClOrdID, "POOL-CXL");
+        assert(pmsg->get_field_sv(tags::ClOrdID) == "POOL-CXL");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +226,8 @@ int main() {
     std::cout << "  ✓ FixMessage encode & checksum verified" << std::endl;
     test_fix_message_parse();
     std::cout << "  ✓ FixMessage parse verified" << std::endl;
+    test_zero_alloc_fix_pool_and_direct_wire_encode();
+    std::cout << "  ✓ Zero-alloc FixMessagePool & direct wire encoder verified" << std::endl;
     test_fix_session_lifecycle();
     std::cout << "  ✓ FixSession logon & heartbeat verified" << std::endl;
     test_fix_broker_order_execution();
@@ -200,6 +236,6 @@ int main() {
     std::cout << "  ✓ FIX 35=G Cancel/Replace & 35=9 Reject verified" << std::endl;
     test_dual_tier_order_router_isolation();
     std::cout << "  ✓ Dual-tier institutional router isolation verified" << std::endl;
-    std::cout << "[FIX Engine Tests] ALL 6 TESTS PASSED SUCCESSFULLY!" << std::endl;
+    std::cout << "[FIX Engine Tests] ALL 7 TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }
