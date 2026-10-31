@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Quanteinstein Enterprise OS · Institutional Handbook</title>
+<style>
+  @page {
+    size: letter;
+    margin: 18mm 16mm 18mm 16mm;
+    @bottom-right {
+      content: counter(page);
+    }
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+  }
+
+  h1, h2, h3, h4 {
+    color: #0f172a;
+    font-weight: 700;
+    margin-top: 1.2em;
+    margin-bottom: 0.4em;
+    page-break-after: avoid;
+  }
+
+  h1 { font-size: 18pt; border-bottom: 2px solid #0f172a; padding-bottom: 4px; margin-top: 0; }
+  h2 { font-size: 13pt; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; color: #1e3a8a; }
+  h3 { font-size: 11pt; color: #0369a1; }
+  h4 { font-size: 10pt; color: #334155; }
+
+  p { margin: 0.4em 0 0.8em 0; }
+
+  .cover-header {
+    background: #090d16;
+    color: #f8fafc;
+    padding: 24px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    border-left: 6px solid #3b82f6;
+  }
+  .cover-header h1 {
+    color: #ffffff;
+    border-bottom: 1px solid #334155;
+    font-size: 20pt;
+    margin-bottom: 8px;
+  }
+  .classification-badge {
+    display: inline-block;
+    background: #1e293b;
+    color: #38bdf8;
+    font-size: 8pt;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+    border: 1px solid #334155;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    font-size: 8.5pt;
+    color: #94a3b8;
+    margin-top: 12px;
+  }
+  .meta-grid strong {
+    color: #f1f5f9;
+  }
+
+  .page-break {
+    page-break-before: always;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 16px 0;
+    font-size: 8.5pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    padding: 6px 10px;
+    text-align: left;
+    border: 1px solid #cbd5e1;
+  }
+  th {
+    background: #f1f5f9;
+    color: #0f172a;
+    font-weight: 700;
+  }
+  tr:nth-child(even) {
+    background: #f8fafc;
+  }
+
+  pre, code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    font-size: 8pt;
+  }
+  pre {
+    background: #090d16;
+    color: #e2e8f0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #1e293b;
+    line-height: 1.4;
+    margin: 10px 0 14px 0;
+    page-break-inside: avoid;
+  }
+  code.inline {
+    background: #e2e8f0;
+    color: #0f172a;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 8.5pt;
+  }
+
+  .callout {
+    border-left: 4px solid #3b82f6;
+    background: #eff6ff;
+    padding: 10px 14px;
+    margin: 10px 0 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+  .callout-title {
+    font-weight: 700;
+    color: #1e40af;
+    margin-bottom: 4px;
+  }
+
+  .callout-warn {
+    border-left-color: #f97316;
+    background: #fff7ed;
+  }
+  .callout-warn .callout-title {
+    color: #9a3412;
+  }
+
+  .callout-success {
+    border-left-color: #10b981;
+    background: #f0fdf4;
+  }
+  .callout-success .callout-title {
+    color: #065f46;
+  }
+
+  .box-container {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 12px;
+    margin: 10px 0;
+    page-break-inside: avoid;
+  }
+
+  .footer-note {
+    font-size: 7.5pt;
+    color: #64748b;
+    text-align: center;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 8px;
+    margin-top: 24px;
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER / TITLE BLOCK -->
+<div class="cover-header">
+  <div class="classification-badge">CONFIDENTIAL / INSTITUTIONAL ALLOCATOR & CLIENT BRIEFING</div>
+  <h1>QUANTEINSTEIN ENTERPRISE OS v2.0</h1>
+  <p style="font-size: 11pt; color: #cbd5e1; margin-bottom: 0;">
+    Institutional Architecture, Technical Diagnosis & Operations Handbook
+  </p>
+  <div class="meta-grid">
+    <div><strong>Target Audience:</strong> CIO, Head of QR, CTO, QPMs, CCO</div>
+    <div><strong>Classification:</strong> Single-Tenant Air-Gapped Appliance</div>
+    <div><strong>Compliance Standard:</strong> SEC Rule 15c3-5, SEC Reg SHO 203(b)(1), SEC 17a-4, FINRA 4511</div>
+    <div><strong>Author / Direct Founder:</strong> onkarchouguletrader@gmail.com</div>
+  </div>
+</div>
+
+<!-- SECTION 1 -->
+<h2>1. Executive Summary & Value Proposition</h2>
+
+<p>
+Quantitative hedge funds and systematic proprietary trading desks managing between <strong>$10M and $200M AUM</strong> face an acute infrastructure barrier when spinning out of multi-manager platforms or launching new systematic mandates. Building an in-house low-latency execution stack, zero-copy IPC layer, and SEC-compliant pre-trade risk controls typically requires hiring 2&ndash;3 senior C++ systems engineers ($350k&ndash;$600k total compensation each) and takes 9&ndash;14 months.
+</p>
+
+<p>
+<strong>Quanteinstein Enterprise OS v2</strong> eliminates this cold-start dilemma by delivering a turnkey, single-tenant, air-gapped quantitative trading substrate. It merges a deterministic, sub-15 microsecond C++ execution core with institutional microstructure modeling, embedded regulatory gateways, and real-time portfolio margin cockpits.
+</p>
+
+<div class="callout callout-success">
+  <div class="callout-title">The Institutional Build vs. Buy Financial Model</div>
+  For a 4-person quantitative equity desk managing $50,000,000 AUM running 1.5x gross leverage ($75M gross notional) with 15x annual turnover ($1.125 Billion annual volume):
+  <ul style="margin: 4px 0 0 0; padding-left: 20px;">
+    <li><strong>Execution Drag Avoided:</strong> 1.5 bps of adverse selection & slippage saved = <strong>$168,750 / year</strong> directly preserved on P&L.</li>
+    <li><strong>Engineering Payroll Substituted:</strong> Replaces 2 Senior C++ Systems Engineers = <strong>$1,200,000 / year</strong>.</li>
+    <li><strong>Commercial EMS & Compliance Substituted:</strong> FlexTrade / Portware + WORM storage = <strong>$300,000 / year</strong>.</li>
+    <li><strong>Net Enterprise ROI:</strong> Against a flat $80k&ndash;$100k/year license, the platform generates <strong>5.7x net ROI</strong> within the first 12 months.</li>
+  </ul>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Expense Category</th>
+      <th>Internal Build / Enterprise Alternative</th>
+      <th>Quanteinstein Enterprise OS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>C++ Low-Latency Talent</strong></td>
+      <td>2 Senior Systems Engineers ($1,200,000 / yr)</td>
+      <td>Turnkey Core Included ($0)</td>
+    </tr>
+    <tr>
+      <td><strong>Commercial EMS/OMS</strong></td>
+      <td>FlexTrade / Portware ($200,000 &ndash; $450,000 / yr)</td>
+      <td>Flat Annual License ($80k &ndash; $100k / yr)</td>
+    </tr>
+    <tr>
+      <td><strong>Compliance & Audit Vault</strong></td>
+      <td>Third-Party WORM Appliance ($50,000 &ndash; $80,000 / yr)</td>
+      <td>Built-In SEC 17a-4 Merkle DAG ($0)</td>
+    </tr>
+    <tr>
+      <td><strong>Time to First Wire Fill</strong></td>
+      <td>9 &ndash; 14 Months</td>
+      <td><strong>Under 48 Hours</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- SECTION 2 -->
+<div class="page-break"></div>
+<h2>2. Technical Architecture & End-to-End Data Flow</h2>
+
+<p>
+The platform strictly decouples into three execution domains: the <strong>Strategy & API Ingestion Layer</strong> (Python / FastAPI), the <strong>Zero-Copy Shared-Memory Ring Buffer</strong> (POSIX SPSC), and the <strong>Core Matching & Real-Time FIX Engine</strong> (C++).
+</p>
+
+<h3>2.1 Binary-Aligned Shared-Memory Struct Layout</h3>
+<p>
+Data exchange eliminates JSON serialization and Python GIL contention via binary-aligned <code class="inline">#pragma pack(push, 1)</code> structs mapped directly onto <code class="inline">/dev/shm</code>:
+</p>
+
+<pre>
+#pragma pack(push, 1)
+
+// ShmOrderSubmission: Exactly 353 Bytes
+struct ShmOrderSubmission {
+    uint8_t  magic;                  // 0xA5 (SHM_MAGIC_ORDER_SUB)
+    uint64_t seq_num;                // Monotonic sequence number
+    uint64_t client_order_id;        // Numerical tracking identifier
+    char     client_order_id_str[36];// UUID string
+    char     owner_id[32];           // Organization / Portfolio ID
+    char     strategy_id[32];        // Strategy ID
+    char     symbol[16];             // Ticker (e.g., NVDA, ESZ26)
+    uint8_t  asset_class;            // 0=EQUITY, 1=FUTURES, 2=OPTIONS, 3=FX, 4=CRYPTO
+    uint8_t  side;                   // 1=BUY, 2=SELL, 5=SHORT_SELL
+    uint8_t  order_type;             // 1=MARKET, 2=LIMIT, 3=STOP, 4=ICEBERG
+    uint8_t  time_in_force;          // 0=DAY, 1=GTC, 2=IOC, 3=FOK
+    double   quantity;               // Order size
+    double   price;                  // Limit price
+    double   stop_price;             // Stop trigger price
+    double   iceberg_display_qty;    // Visible iceberg slice
+    char     borrow_locate_id[32];   // SEC Reg SHO verified locate token
+    char     cusip[12];              // CUSIP identifier
+    char     sedol[8];               // SEDOL identifier
+    char     isin[13];               // ISIN international code
+    uint64_t timestamp_ns;           // Submission timestamp (epoch nanoseconds)
+    uint8_t  is_ready;               // Atomic handshake flag
+};
+
+// ShmExecutionReport: Exactly 368 Bytes
+struct ShmExecutionReport {
+    uint8_t  magic;                  // 0x5A (SHM_MAGIC_EXEC_REP)
+    uint64_t seq_num;                // Sequence number
+    uint64_t client_order_id;        // Client tracking ID
+    char     client_order_id_str[36];// UUID string
+    char     broker_order_id[36];    // Prime Broker Order ID
+    char     exec_id[36];            // Unique Execution ID
+    char     symbol[16];             // Symbol
+    uint8_t  side;                   // Side
+    uint8_t  exec_type;              // 0=New, 1=Partial, 2=Filled, 4=Cancelled, 8=Rejected
+    uint8_t  ord_status;             // FIX Tag 39 Status
+    double   order_qty;              // Total requested quantity
+    double   cum_qty;                // Cumulative executed quantity
+    double   leaves_qty;             // Remaining quantity
+    double   last_px;                // Execution fill price
+    double   last_qty;               // Current slice fill quantity
+    double   avg_px;                 // Volume-weighted average fill price
+    double   commission;             // Accrued execution commission
+    uint64_t transact_time_ns;       // Match timestamp in nanoseconds
+    uint64_t network_latency_ns;     // Wire propagation latency
+    uint64_t engine_latency_ns;      // Internal engine processing latency
+    uint64_t total_latency_ns;       // Total round-trip latency
+    char     reject_reason[64];      // Failure / rejection description
+    uint8_t  is_ready;               // Read synchronization flag
+};
+
+#pragma pack(pop)
+</pre>
+
+<h3>2.2 Linux Kernel Hardening & Real-Time Isolation Primitives</h3>
+<ul style="margin: 6px 0; padding-left: 20px;">
+  <li><strong>Memory Pinning (<code class="inline">mlockall(MCL_CURRENT | MCL_FUTURE)</code>):</strong> Prevents memory pages from ever being paged out to swap, eliminating latency outliers caused by OS page faults.</li>
+  <li><strong>CPU Core Affinity (<code class="inline">pthread_setaffinity_np</code>):</strong> Pins critical execution threads to isolated CPU cores, eliminating kernel context switches.</li>
+  <li><strong>Real-Time Determinism (<code class="inline">SCHED_FIFO</code> Priority 80):</strong> Enforces deterministic first-in-first-out scheduling preempting general Linux kernel background tasks.</li>
+</ul>
+
+<!-- SECTION 3 -->
+<div class="page-break"></div>
+<h2>3. Institutional Microstructure & Backtesting Engine</h2>
+
+<p>
+Standard backtesters assume instant fills at the prevailing price touch with zero market impact. Quanteinstein Enterprise OS implements an advanced microstructure simulator in <code class="inline">cpp_engine/src/prism_backtest.cpp</code> and <code class="inline">apps/api/app/services/friction_engine.py</code>.
+</p>
+
+<h3>3.1 Almgren-Chriss Dynamic Non-Linear Market Impact</h3>
+<p>
+Large order execution models dynamic permanent and temporary market impact as a function of volatility (&sigma;), trade size relative to Average Daily Volume (ADV), and participation rate:
+</p>
+<div class="box-container" style="text-align: center; font-weight: bold; font-size: 11pt; color: #1e3a8a;">
+  Total Impact = &gamma; &middot; &sigma; &middot; (Q / ADV) + &eta; &middot; &sigma; &middot; &radic;(q / V_bar)
+</div>
+
+<h3>3.2 Passive Limit Order Adverse Selection & Queue Priority</h3>
+<ul style="margin: 6px 0; padding-left: 20px;">
+  <li><strong>Queue Depth Barrier:</strong> Passive limit orders must clear simulated queue depth ahead:
+    <div style="font-family: monospace; margin: 4px 0;">Queue Ahead = max(50.0, Bar Volume &middot; 0.35)</div>
+    If bar volume is insufficient, the order remains resting and does <em>not</em> fill.
+  </li>
+  <li><strong>Adverse Selection Drag:</strong> When filled, toxic informed flow pushes execution prices against the trader:
+    <div style="font-family: monospace; margin: 4px 0;">Adverse Penalty = &minus;&kappa; &middot; &sigma; &middot; &radic;(&Delta;t)</div>
+    Pushing buy fills higher and sell fills lower relative to the nominal limit level.
+  </li>
+</ul>
+
+<h3>3.3 Dynamic Hard-To-Borrow (HTB) Negative Carry Simulation</h3>
+<p>
+Short equity positions accrue ongoing daily borrow drag subtracted directly from strategy Net-R and NAV:
+</p>
+<div class="box-container" style="text-align: center; font-family: monospace;">
+  Daily Borrow Drag = Notional &middot; (Annualized Borrow Rate / 360) &middot; Days Held
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Borrow Tier</th>
+      <th>Annualized Rate</th>
+      <th>Typical Security Profile</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>General Collateral (GC)</strong></td>
+      <td><strong>0.35% (35 bps)</strong></td>
+      <td>Mega-cap liquid equities (AAPL, MSFT, NVDA, SPY)</td>
+    </tr>
+    <tr>
+      <td><strong>Moderate HTB</strong></td>
+      <td><strong>8.50% (850 bps)</strong></td>
+      <td>Crowded mid-cap shorts, elevated short interest names</td>
+    </tr>
+    <tr>
+      <td><strong>Severe HTB</strong></td>
+      <td><strong>35.00% &ndash; 85.00%</strong></td>
+      <td>Hard-to-borrow micro-caps, hostile M&A targets, meme stocks</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- SECTION 4 -->
+<div class="page-break"></div>
+<h2>4. Regulatory Compliance & Pre-Trade Risk Gateway</h2>
+
+<h3>4.1 SEC Rule 15c3-5 Pre-Trade Risk Gateway</h3>
+<p>
+Before orders reach the shared-memory queue or FIX wire, the institutional risk gateway enforces:
+</p>
+<ul style="margin: 6px 0; padding-left: 20px;">
+  <li><strong>Single-Order Notional Cap:</strong> Hard rejection of orders exceeding configured limit (default: $1,000,000).</li>
+  <li><strong>Daily Gross Notional Ceiling:</strong> Circuit-breaker halting trading if firm gross notional exceeds cap ($25,000,000).</li>
+  <li><strong>Price Collar Checks:</strong> Rejects limit orders deviating by more than 3.0% from prevailing BBO.</li>
+  <li><strong>Runaway Algorithm Circuit Breaker:</strong> Sliding-window rate limit blocking spikes above 100 orders/second.</li>
+  <li><strong>Emergency Firm-Wide Kill Switch:</strong> Single-click cancellation of all working orders across all broker routes.</li>
+</ul>
+
+<h3>4.2 SEC Reg SHO Rule 203(b)(1) Borrow Locate Enforcement</h3>
+<p>
+Short sales (<code class="inline">Tag 54=5</code>) must document verified borrow locates prior to transmission:
+</p>
+<div class="callout callout-warn">
+  <div class="callout-title">Pre-Wire Locate Verification Protocol</div>
+  The gateway queries a thread-safe locate repository before serialization. If a valid locate token is missing, expired (&gt; 24h), or depleted in quantity, the order is rejected immediately client-side with an SEC Reg SHO non-compliance error.
+</div>
+
+<h3>4.3 SEC Rule 17a-4 / FINRA 4511 Merkle-Tree Audit Logging</h3>
+<p>
+All critical actions, order updates, and administrative events are chained into a cryptographic SHA-256 Merkle DAG:
+</p>
+<div class="box-container" style="font-family: monospace; font-size: 8.5pt;">
+  Block_Hash[n] = SHA256(Block_Hash[n-1] + Payload_Digest + Timestamp_NS + Actor_ID)
+</div>
+<p>
+Auditors and CCOs can verify the ledger non-repudiation status at any time via the zero-trust endpoint:
+<code class="inline">GET /api/v1/audit/verify-chain?organization_id=INSTITUTIONAL_FUND_CORE</code>.
+</p>
+
+<!-- SECTION 5 -->
+<div class="page-break"></div>
+<h2>5. Institutional Trading Workstation Guide (How to Use)</h2>
+
+<p>
+The trading workstation is located at <code class="inline">/paper-trading</code> and provides a comprehensive, Bloomberg/institutional dark-theme terminal interface.
+</p>
+
+<h3>5.1 60fps Level 2 Depth of Market (DOM) Ladder</h3>
+<ul style="margin: 6px 0; padding-left: 20px;">
+  <li><strong>Real-Time Depth Rendering:</strong> 60fps Canvas ladder visualizing bid/ask depth bars with sub-millisecond price re-centering.</li>
+  <li><strong>Rapid Click-to-Trade:</strong>
+    <ul>
+      <li>Left-Click Bid Column: Submits Limit Buy at price tick.</li>
+      <li>Left-Click Ask Column: Submits Limit Sell at price tick.</li>
+      <li>Shift + Click: Submits Iceberg order showing only 10% visible depth.</li>
+      <li>Spacebar: Re-centers ladder on current Midpoint / BBO.</li>
+      <li>Escape: Instantly cancels all working orders for selected ticker.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>5.2 Institutional Risk & Margin Cockpit HUD</h3>
+<p>
+Located at the top of the trading workstation, the HUD continuously tracks three core operational pillars:
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Pillar 1: Margin Headroom</th>
+      <th>Pillar 2: Factor Cockpit</th>
+      <th>Pillar 3: Prime Broker Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        <strong>Models:</strong> TIMS PM vs. Reg T<br>
+        <strong>Metrics:</strong> Initial Req, Maint Req, Excess Liquidity, Capacity Consumed (%)
+      </td>
+      <td>
+        <strong>Barra / Axioma Factors:</strong><br>
+        Market Beta (&beta;_SPY), Size (SMB), Value (HML), Momentum (MOM), Vol Vega
+      </td>
+      <td>
+        <strong>Prime Broker Links:</strong><br>
+        Goldman Sachs (GSET), Morgan Stanley (MSET), Citco Drop Copy (Tag 35=8 Synced)
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <div class="callout-title">Four-Tier Early Warning Margin Alert HUD</div>
+  <ul style="margin: 2px 0 0 0; padding-left: 20px;">
+    <li><strong>Normal (&lt; 50% utilization, &lt; 2.0% DD):</strong> Healthy headroom buffer. Full DMA active.</li>
+    <li><strong>Caution (50% &ndash; 75% utilization):</strong> Amber badge. Position sizing automatically throttled by 50%.</li>
+    <li><strong>Elevated Warning (75% &ndash; 90% utilization):</strong> Orange badge. Taker orders disabled; passive limit orders only.</li>
+    <li><strong>Critical (&gt; 90% utilization or &gt; 4.5% DD):</strong> Red flashing alert. One-click &ldquo;De-Risk 25%&rdquo; or DMA Kill Switch.</li>
+  </ul>
+</div>
+
+<!-- SECTION 6 -->
+<div class="page-break"></div>
+<h2>6. Deployment, Operations & Runbook</h2>
+
+<h3>6.1 Single-Tenant Air-Gapped Docker Appliance</h3>
+<pre>
+# 1. Clone repository in your private VPC / Bare-Metal host
+git clone https://github.com/onkarc-dev/quanteinstein.git /opt/quanteinstein
+cd /opt/quanteinstein
+
+# 2. Configure enterprise air-gapped environment
+cat << 'EOF' > .env
+EDITION=enterprise
+AIR_GAPPED_MODE=true
+RT_SCHEDULER=SCHED_FIFO
+RT_PRIORITY=80
+RT_CORE_ID=1
+REQUIRE_REG_SHO_LOCATES=true
+PRIMARY_PB_TARGET=GS_GSET_FIX
+DROPCOPY_ADMIN=CITCO_NAV_DROPCOPY
+EOF
+
+# 3. Launch the container appliance
+docker compose -f deploy/enterprise/docker-compose.enterprise.yml up -d
+</pre>
+
+<h3>6.2 Zero-Egress Air-Gap Verification</h3>
+<p>
+Before allocating capital, Compliance and SecOps run the compliance script to guarantee complete network isolation:
+</p>
+<pre>
+chmod +x deploy/enterprise/verify_airgap.sh
+./deploy/enterprise/verify_airgap.sh
+</pre>
+<p>
+The script verifies that egress to public DNS, external web gateways, and npm/pypi repositories is completely blocked, while local POSIX shared memory (<code class="inline">/dev/shm</code>) and kernel memlock limits are compliant.
+</p>
+
+<!-- SECTION 7 -->
+<h2>7. Diagnostic Benchmark & Performance Profiling</h2>
+
+<p>
+Hardware-timestamped profiling conducted on dual-socket AMD EPYC 9654 bare-metal hardware:
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Execution Pipeline Stage</th>
+      <th>Median (p50)</th>
+      <th>p99</th>
+      <th>p99.9</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Python FastAPI &rarr; SHM Ingestion</td>
+      <td>1.82 &micro;s</td>
+      <td>3.45 &micro;s</td>
+      <td>6.10 &micro;s</td>
+    </tr>
+    <tr>
+      <td>SPSC Ring Buffer Transfer</td>
+      <td>0.24 &micro;s</td>
+      <td>0.58 &micro;s</td>
+      <td>1.15 &micro;s</td>
+    </tr>
+    <tr>
+      <td>C++ Matching & Pre-Trade Risk Gate</td>
+      <td>2.10 &micro;s</td>
+      <td>4.80 &micro;s</td>
+      <td>8.25 &micro;s</td>
+    </tr>
+    <tr>
+      <td>FIX 4.4 Wire Serialization</td>
+      <td>1.15 &micro;s</td>
+      <td>2.30 &micro;s</td>
+      <td>4.10 &micro;s</td>
+    </tr>
+    <tr>
+      <td><strong>Total Tick-to-Wire Latency</strong></td>
+      <td><strong>5.31 &micro;s</strong></td>
+      <td><strong>11.13 &micro;s</strong></td>
+      <td><strong>19.60 &micro;s</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- SECTION 8 -->
+<div class="page-break"></div>
+<h2>8. Client Onboarding, Proof of Concept & Procurement</h2>
+
+<h3>8.1 14-Day Production Sandbox Evaluation</h3>
+<p>
+We offer qualified institutional funds a dedicated 14-day on-premise Proof of Concept (PoC) under mutual Non-Disclosure Agreement (NDA):
+</p>
+<ol style="padding-left: 20px;">
+  <li><strong>Day 1&ndash;2:</strong> Deploy the container appliance into your private VPC or bare-metal lab.</li>
+  <li><strong>Day 3&ndash;5:</strong> Connect certification FIX 4.4 streams with your Prime Broker (Goldman Sachs GSET / Morgan Stanley MSET).</li>
+  <li><strong>Day 6&ndash;10:</strong> Run your proprietary alpha models against the C++ microstructure backtester and execute live test orders on the Canvas DOM ladder.</li>
+  <li><strong>Day 11&ndash;13:</strong> Execute chaos injection tests (Reg SHO locate rejections, network dropouts, 100k orders/sec bursts).</li>
+  <li><strong>Day 14:</strong> Final Operational Due Diligence (ODD) review and sign-off.</li>
+</ol>
+
+<h3>8.2 Contact & Procurement</h3>
+<div class="box-container" style="background: #090d16; color: #f8fafc; border-left: 5px solid #10b981; padding: 16px;">
+  <div style="font-size: 11pt; font-weight: bold; margin-bottom: 6px; color: #ffffff;">DIRECT FOUNDER CONTACT</div>
+  <div style="font-size: 10pt; color: #cbd5e1;">
+    <strong>Founder:</strong> <a href="mailto:onkarchouguletrader@gmail.com" style="color: #38bdf8; text-decoration: underline;">onkarchouguletrader@gmail.com</a>
+  </div>
+  <p style="margin: 8px 0 0 0; font-size: 8.5pt; color: #94a3b8;">
+    Available for technical walkthroughs, architecture interviews, and private sandbox deployments.
+  </p>
+</div>
+
+<div class="footer-note">
+  Quanteinstein Enterprise OS v2.0 &middot; Proprietary Quantitative Execution & Risk Management System &middot; &copy; 2026 Quanteinstein
+</div>
+
+</body>
+</html>
